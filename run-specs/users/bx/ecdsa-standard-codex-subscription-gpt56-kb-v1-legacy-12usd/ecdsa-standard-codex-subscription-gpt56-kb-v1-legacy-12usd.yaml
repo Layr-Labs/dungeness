@@ -1,0 +1,53 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-standard-codex-subscription-gpt56-kb-v1-legacy-12usd
+
+task: task:users/bx/ecdsa-fail-performance-reconstruction
+agent: agent:projects/dungeness/codex-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: xhigh
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: checkpoint
+  knowledge_base:
+    ref: knowledge-base:users/bx/contaminated/ecdsa-paper-kb-v1
+    access: sidecar
+    prompt_profile: knowledge-base-prompt-profile:system/dungeness/ecdsa-paper-v1
+    behavior_feedback:
+      enabled: false
+      mode: "off"
+    layers:
+      - paper_knowledge_base
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  standard: ecdsa-codex-subscription-gpt56-kb-v1-legacy-12usd
+  purpose: performance-framing-regression-run
+  treatment: legacy-checkpoint-with-kb-v1
+  initialization: legacy-checkpoint
+  task_framing: neutral-performance-reconstruction
+  checkpoint_commit: 62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+  kb: ecdsa-paper-kb-v1
+  model: gpt-5.6-sol
+  provider: openai-chatgpt
+  route: chatgpt-subscription
+  reasoning_effort: xhigh
+  codex_package: "0.148.0"
+
+runtime:
+  env_file: .env
+  keep_render: true
+  agent_timeout_sec: 14400

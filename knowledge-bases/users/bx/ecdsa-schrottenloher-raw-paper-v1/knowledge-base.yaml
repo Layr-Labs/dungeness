@@ -1,0 +1,46 @@
+schema_version: 1
+type: knowledge-base
+namespace: users/bx
+id: ecdsa-schrottenloher-raw-paper-v1
+title: Optimized Point Addition Circuits for Elliptic Curve Discrete Logarithms
+entrypoint: 2606.02235v1.pdf
+
+source:
+  kind: raw-paper
+  title: Optimized Point Addition Circuits for Elliptic Curve Discrete Logarithms
+  author: André Schrottenloher
+  affiliation: Univ Rennes, Inria, CNRS, IRISA
+  arxiv_id: '2606.02235'
+  arxiv_version: v1
+  artifact: 2606.02235v1.pdf
+  media_type: application/pdf
+  pages: 19
+  artifact_sha256: 8744ef6db6c60b62d952a1dd24e5bd433242af970f4755c8b49b020a731584af
+  license: CC-BY-4.0
+  acquired_at: '2026-09-08T00:00:00Z'
+
+interface:
+  mode: raw-document-read-only-v1
+  operations:
+    - read
+
+behavior_feedback:
+  enabled: false
+  mode: 'off'
+
+maintenance:
+  mutable_during_run: false
+  preserve_source_facts: true
+
+preload:
+  status: ready
+  intended_destination: knowledge-base/
+  copy_contents: true
+  core_files: []
+
+content_layers:
+  raw_paper:
+    - 2606.02235v1.pdf
+
+created_at: '2026-09-08T00:00:00Z'
+updated_at: '2026-09-08T00:00:00Z'

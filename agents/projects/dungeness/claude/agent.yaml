@@ -1,0 +1,50 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: claude
+execution_mode: installed
+
+# Pin the Claude Code release; Harbor sees the preinstalled binary and performs
+# no network install after the sandbox starts. (Claude Code ships a native
+# binary the npm package fetches in a postinstall, so the image is arch-specific
+# -- build it for the runtime platform.)
+package:
+  name: "@anthropic-ai/claude-code"
+  version: "2.1.259"
+
+model:
+  provider: anthropic
+  upstream_id: anthropic/claude-opus-5
+  request_model: claude-opus-5
+  api: anthropic-messages
+  name_format: request
+
+harbor:
+  agent: claude-code
+  kwargs:
+    # Disable only Claude Code's built-in network research tools. External
+    # research must use the gateway-controlled `web` command so cutoffs and
+    # usage limits remain enforceable. All other Claude Code capabilities stay
+    # available to the research agent.
+    disallowed_tools: "WebSearch WebFetch"
+    permission_mode: bypassPermissions
+
+# Agent-side client values only; NO real credential. Claude Code routes model
+# calls through the gateway's Anthropic route; it holds only the placeholder key
+# and the gateway injects the real one.
+#
+# IMPORTANT: Harbor's claude_code agent reads ANTHROPIC_BASE_URL from the CONTROL
+# PLANE (the env `harbor run` sees) to decide model-name handling, so
+# `dungeness run` exports the value below before starting Harbor. Do not set
+# ANTHROPIC_BASE_URL in .env (Harbor loads .env with override, which would pin
+# every Claude profile to one route). ANTHROPIC_API_KEY (the placeholder) is
+# read from this agent environment.
+environment:
+  ANTHROPIC_BASE_URL: http://gateway:8080/model/anthropic
+  ANTHROPIC_API_KEY: testbed
+  # Cap per-turn extended thinking (Claude Code reads this env var). opus's
+  # default adaptive thinking ran away to a 57k-token, 14-min single turn (96% of
+  # wall-clock was server-side token generation) instead of editing+evaluating.
+  # Passed as an env var, NOT a kwarg -- Harbor renders unknown kwargs as CLI
+  # flags and `--max-thinking-tokens` is rejected by the CLI. NON-DEFAULT config.
+  MAX_THINKING_TOKENS: "8000"

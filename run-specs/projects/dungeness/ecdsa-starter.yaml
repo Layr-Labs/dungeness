@@ -1,0 +1,28 @@
+schema_version: 1
+type: run-spec
+id: ecdsa-starter
+
+# Copy to your own namespace before editing; run ownership comes from `init`.
+task: task:projects/dungeness/ecdsa-starter
+agent: agent:projects/dungeness/codex-astra-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: high
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 1
+  max_model_tokens: 100000
+
+initialization:
+  mode: checkpoint
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+runtime:
+  env_file: .env
+  agent_timeout_sec: 900
+  keep_render: false
+  keep_images: false

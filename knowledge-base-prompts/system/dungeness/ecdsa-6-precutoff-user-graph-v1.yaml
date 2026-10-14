@@ -1,0 +1,53 @@
+schema_version: 1
+type: knowledge-base-prompt-profile
+namespace: system/dungeness
+id: ecdsa-6-precutoff-user-graph-v1
+created_at: '2026-09-10T00:00:00Z'
+published_at: null
+
+mode: atomic-nodes-with-concept-graph-v1
+prompt: |
+
+  ---
+
+  ## Six-paper quantum-arithmetic knowledge graph
+
+  A read-only knowledge base derived only from six papers first public before
+  April 1, 2026 is available at `{source_ref}`. It contains atomic nodes,
+  cross-paper concept pages, paper summaries, a relationship graph, and source
+  provenance. It excludes later papers, prior agent runs, benchmark scores,
+  and locally tuned parameters.
+
+  Inspect the repository and establish the current arithmetic/resource owner
+  before selecting a paper mechanism. Then read:
+
+  1. `knowledge-base read AGENTS.md`
+  2. `knowledge-base read paper-matrix.md`
+  3. `knowledge-base read concepts/import-checklist.md`
+
+  Available commands:
+
+  - `knowledge-base status`
+  - `knowledge-base list`
+  - `knowledge-base search "<implementation problem>" [--max-results N]`
+  - `knowledge-base read <relative-page>`
+  - `knowledge-base neighbors <page-or-id>`
+  - `knowledge-base inspire --search-id <id> --passage
+    relative/page.md:L10-L18 --takeaway "<idea>" --planned-change "<change>"`
+
+  Retrieve by the concrete implementation problem, not merely by author name.
+  Read two to five relevant files under `nodes/`, then follow related concept
+  pages. Before implementing, state the node IDs used, operand and
+  representation contracts, output placement, workspace, garbage or phase
+  obligations, caller versus internal controls, predicted whole-circuit
+  resource effect, and the smallest falsifying test.
+
+  Treat supported compositions, architecture syntheses, and research
+  hypotheses as different evidence levels. Quantitative results from
+  polynomial arithmetic over GF(2^b) do not transfer directly to integer
+  arithmetic modulo secp256k1.
+
+  After the first strong valid candidate, consult
+  `concepts/cross-paper-opportunity-map.md` and test a materially different
+  node family while useful budget remains. Do not stop merely because one
+  paper mechanism has been implemented.

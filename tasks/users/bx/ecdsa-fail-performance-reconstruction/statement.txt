@@ -1,0 +1,99 @@
+# The secp256k1 Point-Addition Circuit Optimization Challenge
+
+Build and optimize a reversible circuit that overwrites a quantum affine point
+with its sum with a classical affine offset on secp256k1.
+
+Your `src/point_add/` module must export:
+
+```rust
+pub fn build() -> Vec<Op>
+```
+
+The starter declares four 256-element little-endian registers in this order:
+
+1. `target_x`: quantum input/output;
+2. `target_y`: quantum input/output;
+3. `offset_x`: classical input;
+4. `offset_y`: classical input.
+
+For every sampled pair of non-infinity curve points with different
+x-coordinates, transform:
+
+```text
+(target_x, target_y) := (target_x, target_y) + (offset_x, offset_y)
+```
+
+All ancillas must end in zero and the circuit must leave no phase garbage.
+The trusted evaluator derives its test points from the emitted operation
+stream and validates progressively at 1, 64, 512, and 9,024 shots. Only a
+candidate passing all 9,024 shots is valid.
+
+Among valid candidates, minimize:
+
+```text
+average executed Toffoli count * peak qubit count
+```
+
+The Clifford count is diagnostic and is not a direct score term.
+
+## Performance context
+
+The checkpoint's core baseline, after removing its diagnostic identity tail,
+measures approximately:
+
+```text
+average Toffoli = 3,942,753
+peak qubits     = 2,715
+score           = 10,704,574,395
+```
+
+Reference Pareto points for this interface are approximately:
+
+```text
+2,700,000 average Toffoli * 1,175 qubits = 3.17e9
+2,100,000 average Toffoli * 1,425 qubits = 2.99e9
+```
+
+A valid result of `1,480,849,785` is known to be achievable. These numbers are
+orientation targets, not substitutes for measurement by the trusted evaluator.
+A result that only removes a handful of qubits from the checkpoint remains far
+from the demonstrated performance range.
+
+## Optimization priority
+
+The checkpoint already contains substantial Kaliski, Solinas, and
+measurement-based arithmetic. Before spending most of the run on constant
+tuning or one-qubit-at-a-time peak reductions, investigate a
+representation-level improvement.
+
+In particular, inspect the knowledge base and existing source for a
+dialog/history-based in-place multiplication or inversion design:
+
+- record compact branch symbols during fixed-step binary Euclid;
+- replay that history on coefficient registers instead of keeping full
+  coefficient state live throughout Euclid;
+- shrink or share `u`, `v`, and history storage when their high wires are known
+  unused;
+- select arithmetic implementations according to phase-local workspace;
+- retain the existing affine schedule and secp256k1 pseudo-Mersenne arithmetic
+  where they are already effective.
+
+Prefer an end-to-end measured architectural candidate early. Integrate and
+validate one pathway at a time if a complete replacement is too risky. Use
+small local optimizations as a fallback or as follow-up work after the
+architectural direction has been measured.
+
+## Evaluation and finalization discipline
+
+Run the authoritative `evaluate` command before editing and after each
+meaningful candidate. Preserve every measured improvement with
+`candidate-state save best`.
+
+Use `run-status` before beginning a large experiment. Once roughly 15% of the
+model budget remains, stop starting new architecture work, restore the saved
+best candidate, rebuild it, and leave that measured valid candidate in
+`src/point_add`.
+
+The local `POINT_ADD_SDK.md` documents neutral construction infrastructure.
+You may replace the starter, add arbitrary files under `src/point_add/`, or
+emit raw operations directly. Only `src/point_add/` is submitted.

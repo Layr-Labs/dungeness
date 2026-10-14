@@ -1,0 +1,36 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: codex-kimi-openrouter
+execution_mode: installed
+
+image:
+  from: agent:projects/dungeness/codex-openrouter
+
+package:
+  name: "@openai/codex"
+  version: "0.148.0"
+
+model:
+  provider: openrouter
+  upstream_id: moonshotai/kimi-k3
+  request_model: moonshotai/kimi-k3
+  api: openai-responses
+  name_format: request
+  supported_reasoning_efforts: [low, high, max]
+  defaults:
+    reasoning_effort: high
+    # Kimi exposes provider-visible reasoning directly; do not ask for an
+    # OpenAI-style summary in place of that trace.
+    reasoning_summary: none
+
+harbor:
+  agent: codex
+  import_path: codex_gateway:CodexGateway
+  kwargs:
+    gateway_base_url: http://gateway:8080/model/openrouter/v1
+    web_search: disabled
+
+environment:
+  OPENAI_BASE_URL: http://gateway:8080/model/openrouter/v1
+  OPENAI_API_KEY: testbed

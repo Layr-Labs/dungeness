@@ -1,0 +1,34 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-fail-v2-kimi-k3-openrouter-62ae3d0-high-12usd-continuation
+
+task: task:users/bx/ecdsa-fail-v2
+agent: agent:projects/dungeness/codex-kimi-openrouter
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: high
+  reasoning_summary: none
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: checkpoint
+
+labels:
+  purpose: known-achievable-continuation
+  task_version: ecdsa-fail-v2
+  checkpoint: 62ae3d0
+  reasoning_effort: high
+  reasoning_trace: provider-visible
+
+runtime:
+  env_file: .env
+  keep_render: false
+  agent_timeout_sec: 3600
+  continuation:
+    max_resumes: 2
+    min_remaining_sec: 600

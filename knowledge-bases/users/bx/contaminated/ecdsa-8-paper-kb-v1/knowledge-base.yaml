@@ -1,0 +1,97 @@
+schema_version: 1
+type: knowledge-base
+namespace: users/bx/contaminated
+id: ecdsa-8-paper-kb-v1
+title: ECDSA.fail unified eight-paper knowledge base
+entrypoint: index.md
+
+source:
+  kind: curated-paper-corpus
+  import_name: ecdsa-fail-8-paper-kb
+  import_tree_sha256: 48afe1de4487a90435a4f9f79a1931da56b269284925c67706243cd638c07205
+  paper_count: 8
+
+maintenance:
+  mutable_during_run: false
+  mutable_overlay: knowledge-base-notes/
+  preserve_source_facts: true
+  append_only_log: log.md
+  inference_marker: '[INFERENCE]'
+
+scope_manifest:
+  name: ECDSA.fail unified eight-paper knowledge base
+  authority: authoritative_for_domain
+  topics:
+    - ECDSA
+    - secp256k1
+    - point addition
+    - modular inversion
+    - modular multiplication
+    - reversible arithmetic
+    - measurement-based uncomputation
+    - quantum pebbling
+    - quantum resource estimation
+    - Toffoli cost
+    - ancilla cleanup
+  common_entities:
+    - ecdsa.fail
+    - Schrottenloher
+    - Litinski
+    - Luongo
+    - Gidney
+    - Kornerup
+    - Luo
+    - Khattar
+    - Häner
+    - Kaliski inversion
+  exclusions:
+    - generic syntax
+    - Git operations
+    - repository navigation
+  initial_search_seed: point addition replay tape modular inversion controlled arithmetic measurement cleanup peak qubits
+  citation_format: '[KB: relative/path.md#L10-L18]'
+
+behavior_feedback:
+  enabled: true
+  mode: shadow
+  minimum_improvement: 0
+  kb_attribution_window_evaluations: 1
+  no_progress_evaluations: 3
+  expose_pre_stick_counter: true
+  qualifying_sources:
+    prefixes:
+      - nodes/
+    pages:
+      - experiment-map.md
+      - sources/companion-code-map.md
+      - sources/2607.13816-code-map.md
+      - sources/benchmark-live-pingpong.md
+  retrieval:
+    max_results_per_search: 8
+    context_lines: 3
+    max_passage_characters: 1600
+    max_total_result_characters: 8000
+
+preload:
+  status: ready
+  intended_destination: knowledge-base/
+  copy_contents: true
+  core_files: []
+
+content_layers:
+  eight_paper_knowledge_base:
+    - README.md
+    - AGENTS.md
+    - agent-pack.md
+    - experiment-map.md
+    - graph.md
+    - log.md
+    - manifest.md
+    - paper-matrix.md
+    - sections/
+    - nodes/
+    - concepts/
+    - sources/
+
+created_at: '2026-09-08T00:00:00Z'
+updated_at: '2026-09-08T00:00:00Z'

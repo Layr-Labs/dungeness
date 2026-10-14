@@ -1,0 +1,46 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-reconstruction-pilot-knowledge-base
+
+task: task:users/bx/ecdsa-fail-reconstruction
+agent: agent:projects/dungeness/codex-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: xhigh
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: scaffold
+  knowledge_base:
+    ref: knowledge-base:users/bx/contaminated/ecdsa-paper-kb-v1
+    access: sidecar
+    prompt_profile: knowledge-base-prompt-profile:system/dungeness/ecdsa-paper-v1
+    behavior_feedback:
+      enabled: false
+      mode: "off"
+    layers:
+      - paper_knowledge_base
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  experiment: ecdsa-reconstruction-pilot
+  purpose: blank-scaffold-kb-reconstruction
+  treatment: knowledge-base
+  model: gpt-5.6-sol
+  route: chatgpt-subscription
+
+runtime:
+  env_file: .env
+  keep_render: false
+  agent_timeout_sec: 14400

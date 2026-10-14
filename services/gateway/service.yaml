@@ -1,0 +1,16 @@
+schema_version: 1
+type: service
+namespace: system/dungeness
+id: gateway
+
+relations:
+  pricing: policy:system/dungeness/model-pricing
+
+data:
+  runtime: python
+  entrypoint: gateway.py
+  container: Dockerfile
+  persistence:
+    events: events.jsonl
+    summary: summary.json
+    collector_endpoint: /internal/events

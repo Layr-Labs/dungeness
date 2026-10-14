@@ -1,0 +1,35 @@
+# Local provider credentials. Keep the key names documented in the example,
+# but never allow a populated dotenv file into Git.
+.env
+.env.*
+!.env.example
+
+# Generated execution records, traces and caches stay local or in artifact storage.
+# Commit reproducible inputs under run-specs/, not execution output under runs/.
+/runs/
+/dist/
+# Reports and experiment results belong in local or service artifact storage.
+/report/
+/reports/
+/artifacts/
+/experiments/users/**/*.png
+/experiments/users/**/*.jpg
+/experiments/users/**/*.jpeg
+/experiments/users/**/*.svg
+/experiments/users/**/*.csv
+/script/*.png
+/script/*.csv
+__pycache__/
+*.pyc
+
+# Root-level run specs are editable local configurations created from README examples.
+# Specs organized in subdirectories remain trackable for deliberate sharing.
+/run-specs/*.yaml
+
+# Local materializations and verifier output.
+/workspace/
+/verifier-output/
+/tmp/
+
+# OS/editor noise.
+.DS_Store

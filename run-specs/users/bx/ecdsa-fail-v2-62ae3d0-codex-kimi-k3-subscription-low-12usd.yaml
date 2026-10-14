@@ -1,0 +1,43 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-fail-v2-62ae3d0-codex-kimi-k3-subscription-low-12usd
+
+task: task:users/bx/ecdsa-fail-v2
+agent: agent:projects/dungeness/codex-kimi-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: low
+  reasoning_summary: none
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: checkpoint
+
+web_search:
+  profile: web-search-profile:system/dungeness/optional-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  purpose: kimi-membership-vs-openrouter
+  task_version: ecdsa-fail-v2
+  checkpoint: 62ae3d0
+  model: k3
+  route: kimi-code-membership
+  reasoning_effort: low
+  reasoning_trace: provider-visible
+  web_search_profile: optional-v1
+
+runtime:
+  env_file: .env
+  keep_render: false
+  agent_timeout_sec: 3600
+  continuation:
+    max_resumes: 2
+    min_remaining_sec: 600

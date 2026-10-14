@@ -1,0 +1,35 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: codex-kimi
+execution_mode: installed
+
+image:
+  from: agent:projects/dungeness/codex-openrouter
+
+package:
+  name: "@openai/codex"
+  version: "0.148.0"
+
+model:
+  provider: moonshot
+  upstream_id: moonshot/kimi-k3
+  request_model: kimi-k3
+  api: openai-responses
+  name_format: request
+  supported_reasoning_efforts: [low, high, max]
+  defaults:
+    reasoning_effort: max
+
+adapter: adapter:system/dungeness/responses-to-chat
+
+harbor:
+  agent: codex
+  import_path: codex_gateway:CodexGateway
+  kwargs:
+    gateway_base_url: http://gateway:8080/model/moonshot/v1
+    web_search: disabled
+
+environment:
+  OPENAI_BASE_URL: http://gateway:8080/model/moonshot/v1
+  OPENAI_API_KEY: testbed

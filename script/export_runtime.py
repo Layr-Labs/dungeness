@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Export a committed runtime without research data, run output or local secrets."""
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path, PurePosixPath
+import subprocess
+import tarfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FILES = {
+    "dungeness", "README.md", "DESIGN.md", ".env.example", ".gitignore",
+    ".gitattributes", "LICENSE", "LICENSE.md",
+    "docs/command-harness.md", "docs/runtime-distribution.md", "docs/cli-reference.md",
+    "script/export_runtime.py",
+    "watcher/render_gateway_transcript.py", "watcher/serve_gateway_transcripts.py",
+}
+PREFIXES = (
+    "src/", "adapters/", "agents/common/", "agents/projects/dungeness/",
+    "services/", "policies/", "checkpoints/", "problems/", "verifiers/",
+    "evaluation/", "web-search/", "research-state/", "scaffolds/",
+    "knowledge-base-prompts/", "tasks/projects/dungeness/",
+    "run-specs/projects/dungeness/", "assets/",
+)
+
+
+def runtime_path(path: str) -> bool:
+    parts = PurePosixPath(path).parts
+    if any(part in {"tests", "__pycache__", ".git"} for part in parts):
+        return False
+    if path.endswith(".pyc") or any(part.startswith(".env") for part in parts):
+        return path == ".env.example"
+    return path in FILES or path.startswith(PREFIXES)
+
+
+def export_runtime(repository: Path, revision: str, output: Path) -> dict:
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(repository), *args])
+
+    commit = git("rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}").decode().strip()
+    paths = [
+        path for path in git("ls-tree", "-r", "--name-only", "-z", commit).decode().split("\0")
+        if path and runtime_path(path)
+    ]
+    required = {
+        "dungeness", "src/dungeness/compiler.py",
+        "adapters/harbor/command_agent.py", "services/gateway/gateway.py",
+        "tasks/projects/dungeness/ecdsa-starter/task.yaml",
+        "run-specs/projects/dungeness/ecdsa-starter.yaml",
+    }
+    if not required <= set(paths):
+        raise ValueError(f"Revision lacks runtime files: {', '.join(sorted(required - set(paths)))}")
+    archived = git("archive", "--format=tar", commit, "--", *paths)
+    entries = []
+    with tarfile.open(fileobj=io.BytesIO(archived)) as archive:
+        for member in archive.getmembers():
+            if member.isdir():
+                continue
+            if not member.isfile() or member.name not in paths:
+                raise ValueError(f"Unexpected runtime archive entry: {member.name}")
+            content = archive.extractfile(member).read()
+            if content.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
+                raise ValueError(f"Runtime requires materialized content, not an LFS pointer: {member.name}")
+            # git archive's mode is affected by tar.umask; distribute predictable
+            # executable/data modes without group/world-write permissions.
+            entries.append((member.name, 0o755 if member.mode & 0o111 else 0o644, content))
+    metadata = {
+        "schema_version": 1,
+        "source_commit": commit,
+        "files": {name: hashlib.sha256(content).hexdigest() for name, _, content in entries},
+    }
+    # Exclusive creation avoids replacing a previous release. gzip/tar times are
+    # fixed so the same source commit produces the same archive bytes.
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("xb") as destination:
+        with gzip.GzipFile(fileobj=destination, mode="wb", filename="", mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w") as bundle:
+                for name, mode, content in entries + [
+                    ("RUNTIME_SOURCE.json", 0o644, (json.dumps(metadata, sort_keys=True, indent=2) + "\n").encode())
+                ]:
+                    member = tarfile.TarInfo(f"dungeness-runtime/{name}")
+                    member.size = len(content)
+                    member.mode = mode
+                    bundle.addfile(member, io.BytesIO(content))
+    return {
+        "source_commit": commit, "files": len(entries), "archive": str(output),
+        "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "bytes": output.stat().st_size,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--revision", default="HEAD", help="Committed source to export; working-tree edits are excluded.")
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    print(json.dumps(export_runtime(ROOT, args.revision, args.output), indent=2))
+
+
+if __name__ == "__main__":
+    main()

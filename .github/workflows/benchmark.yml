@@ -1,0 +1,46 @@
+# PLACEHOLDER -- benchmark runner workflow referenced by benchmark.json
+# (runner.provider = "github-actions", runner.workflow = "benchmark.yml").
+#
+# Not wired up yet. Fill in before enabling:
+#   - a runner with Docker available and enough memory for the problem
+#     (ecdsa-fail needs a ~39 GB+ Docker VM: ~20 GB verifier + ~16 GB agent);
+#   - repository secrets for the gateway (EXA_API_KEY, TESTBED_OPENROUTER_API_KEY,
+#     and any other provider keys) materialized into .env;
+#   - whatever triggers you want (currently manual dispatch only).
+#
+# Intended flow: checkout -> ./dungeness setup -> benchmark -> read score.json.
+
+name: benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      problem:
+        description: "Task id under tasks/ (default: ecdsa-fail)"
+        required: false
+        default: "ecdsa-fail"
+
+jobs:
+  benchmark:
+    # TODO: choose a Docker-capable runner with adequate memory.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO: install uv (astral-sh/setup-uv) and ensure Docker is available.
+
+      # TODO: materialize .env from repository secrets, e.g.:
+      #   printf 'EXA_API_KEY=%s\nTESTBED_OPENROUTER_API_KEY=%s\n' \
+      #     "${{ secrets.EXA_API_KEY }}" "${{ secrets.TESTBED_OPENROUTER_API_KEY }}" > .env
+
+      - name: setup
+        run: ./dungeness setup
+
+      - name: benchmark
+        run: ./benchmark.sh "${{ github.event.inputs.problem }}"
+
+      - name: upload score
+        uses: actions/upload-artifact@v4
+        with:
+          name: score
+          path: score.json

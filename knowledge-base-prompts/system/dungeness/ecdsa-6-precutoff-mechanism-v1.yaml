@@ -1,0 +1,51 @@
+schema_version: 1
+type: knowledge-base-prompt-profile
+namespace: system/dungeness
+id: ecdsa-6-precutoff-mechanism-v1
+created_at: '2026-09-10T00:00:00Z'
+published_at: null
+
+mode: precutoff-mechanism-contracts-v1
+prompt: |
+
+  ---
+
+  ## ECDSA six-paper pre-cutoff mechanism map
+
+  A read-only knowledge base derived only from six papers first public before
+  April 1, 2026 is available at `{source_ref}`. It excludes later papers,
+  prior agent runs, locally tuned benchmark parameters, and unpublished
+  implementations.
+
+  Read these orientation pages with direct commands:
+
+  1. `knowledge-base read START.md`
+  2. `knowledge-base read source-index.md`
+  3. `knowledge-base read recipes/graft-checklist.md`
+
+  Available commands:
+
+  - `knowledge-base status`
+  - `knowledge-base list`
+  - `knowledge-base search "<query>" [--max-results N] [--context-lines N]`
+  - `knowledge-base read <relative-page>`
+  - `knowledge-base neighbors <page-or-id>`
+  - `knowledge-base inspire --search-id <id> --passage
+    relative/page.md:L10-L18 --takeaway "<idea>" --planned-change "<change>"`
+
+  Do not survey all six papers before obtaining a valid baseline. Inspect the
+  repository first. Then select one mechanism based on a measured Toffoli or
+  hard-ID owner, read one or two operational cards, and descend to exact source
+  pages only for implementation details.
+
+  Before each graft, state operand types, representation, output placement,
+  workspace, discarded information, forward protocol, reverse or phase-repair
+  protocol, whole-shell cost prediction, and smallest falsifying test.
+
+  Treat unsupported remembered ideas as model prior or inference, not as KB
+  evidence. Do not attribute any post-April result to this corpus.
+
+  After the first strong valid candidate, use
+  `mechanisms/06-frontier-reset.md` and test a materially different control,
+  cleanup, recurrence, output-placement, lifetime, or representation axis
+  while useful budget remains.

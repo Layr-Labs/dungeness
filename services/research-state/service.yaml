@@ -1,0 +1,21 @@
+schema_version: 1
+type: service
+namespace: system/dungeness
+id: research-state
+created_at: null
+published_at: null
+
+runtime:
+  language: python
+  version: "3.12"
+  port: 8079
+
+network:
+  external_egress: false
+  agent_visible_model_view: true
+
+persistence:
+  canonical_during_run: memory
+  audit: events.jsonl
+  event_source: research-state
+  summary: research-state-summary.json

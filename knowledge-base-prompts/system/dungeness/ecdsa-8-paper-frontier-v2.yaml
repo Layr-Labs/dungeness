@@ -1,0 +1,90 @@
+schema_version: 1
+type: knowledge-base-prompt-profile
+namespace: system/dungeness
+id: ecdsa-8-paper-frontier-v2
+created_at: '2026-09-10T00:00:00Z'
+published_at: null
+
+mode: evidence-preserving-cross-paper-frontier-v2
+prompt: |
+
+  ---
+
+  ## ECDSA eight-paper evidence-preserving research frontier
+
+  A read-only knowledge base derived from `{source_ref}` is available. It
+  contains four layers: orientation, cross-paper decision dossiers, detailed
+  operational paper cards, and a searchable page-by-page extraction of all
+  eight source PDFs. The raw PDFs are also present for equations and circuit
+  layouts that do not survive text extraction.
+
+  Read these orientation pages with direct commands:
+
+  1. `knowledge-base read START.md`
+  2. `knowledge-base read evidence/benchmark-contract.md`
+  3. `knowledge-base read frontier-map.md`
+  4. `knowledge-base read RESEARCH_PROTOCOL.md`
+
+  Run every knowledge-base invocation as one direct shell command. Do not pipe,
+  redirect, combine, wrap, or suppress it. Available commands:
+
+  - `knowledge-base status`
+  - `knowledge-base list`
+  - `knowledge-base search "<query>" [--max-results N] [--context-lines N]`
+  - `knowledge-base read <relative-page>`
+  - `knowledge-base neighbors <dossier-id-or-page>`
+  - `knowledge-base inspire --search-id <id> --passage
+    relative/page.md:L10-L18 --takeaway "<idea>" --planned-change "<change>"`
+
+  Use an evidence ladder:
+
+  1. select one decision dossier from measured owners;
+  2. read one or two linked operational paper cards;
+  3. search exact source-page terms for algorithms, formulas, edge cases, and
+     inverse behavior needed by the implementation;
+  4. inspect the raw PDF only when figure or equation layout matters.
+
+  Do not survey all eight papers before obtaining a baseline. If the repository
+  already has a valid candidate, preserve and profile it. If it does not, use
+  the bootstrap route in `START.md` and obtain a valid candidate early.
+
+  After a valid baseline exists:
+
+  1. identify the average executed-Toffoli owner and hard
+     maximum-referenced-qubit-ID owner;
+  2. choose one matching decision dossier;
+  3. state the base architecture, grafted mechanism, input/output placement,
+     field representation, discarded information, recovery method, explicit
+     reverse or phase-repair path, predicted complete-shell deltas, and
+     smallest falsifying test;
+  4. test the bridge before importing a complete foreign architecture;
+  5. re-profile and select a materially different frontier while useful budget
+     remains.
+
+  Shared words such as “adder,” “history,” “measurement,” and “inversion” do
+  not establish compatibility. Compose contracts, not headlines. Include
+  representation conversion, output placement, global corrections, cleanup,
+  phase repair, measurement branches, and allocation timing in every cost
+  comparison.
+
+  Evidence labels:
+
+  - `[EVIDENCE]`: supported by a linked source paper.
+  - `[CODE]`: recovered from the benchmark repository or pinned implementation.
+  - `[BENCHMARK]`: established by the task or evaluator contract.
+  - `[INFERENCE]`: an unverified bridge, composition, or proposed experiment.
+
+  The trusted benchmark is authoritative. Preserve value correctness,
+  reversibility, clean ancillas and classical obligations, relative phase, and
+  explicit forward/reverse behavior.
+
+  Implementing one paper successfully is a milestone, not task completion.
+  After the first strong paper-derived candidate, use
+  `dossiers/10-after-the-baseline.md` and test at least one materially different
+  representation, recurrence, output placement, measurement scale, or
+  lifetime schedule unless the remaining budget cannot support its smallest
+  decisive experiment.
+
+  When a substantial technique is found, record its preconditions, forward and
+  reverse contracts, resource effect, failure boundaries, and possible future
+  callers so that it can generalize beyond this run.

@@ -1,0 +1,713 @@
+"""Model-provider configuration and protocol parsing helpers."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+import gzip
+import json
+import os
+from pathlib import Path
+from typing import Any
+import zlib
+
+
+OPENAI_ROUTES = {"responses", "chat/completions", "embeddings", "models"}
+ANTHROPIC_ROUTES = {"messages", "messages/count_tokens"}
+OPENROUTER_ROUTES = {
+    "responses",
+    "chat/completions",
+    "completions",
+    "messages",
+    "models",
+}
+CHATGPT_ROUTES = {"responses", "responses/compact"}
+MOONSHOT_ROUTES = {"responses", "chat/completions"}
+KIMI_CODE_ROUTES = {"responses", "chat/completions"}
+RESEARCH_STATE_CONTEXT_MARKER = (
+    "## Current Dungeness research-effort state (per-request)"
+)
+
+def validate_declared_request(payload, pricing):
+    """Keep measured inference on the exact declared model and priced units."""
+    if any(key in payload for key in ("models", "route", "plugins", "web_search_options")):
+        raise ValueError("model fallbacks and provider-hosted paid tools need separate accounting")
+    if payload.get("background"):
+        raise ValueError("background inference cannot settle within this request")
+    if payload.get("service_tier") not in (None, "auto", "default"):
+        raise ValueError("service tiers require a separate reference pricing policy")
+
+    def tools(items):
+        if not isinstance(items, list):
+            raise ValueError("tools must be a list")
+        for tool in items:
+            if not isinstance(tool, dict) or tool.get("type", "function") not in ("function", "custom", "namespace"):
+                raise ValueError("only harness-executed tools are metered by this contract")
+            if tool.get("type") == "namespace":
+                tools(tool.get("tools", []))
+    tools(payload.get("tools", []))
+    if not pricing.get("text_only"):
+        return
+    media_types = {"image", "image_url", "input_image", "audio", "input_audio",
+                   "file", "input_file", "video", "video_url"}
+
+    def content(value):
+        if isinstance(value, list):
+            for item in value:
+                content(item)
+        elif isinstance(value, dict):
+            if value.get("type") in media_types or set(value) & {"image_url", "input_audio", "video_url"}:
+                raise ValueError("this reference pricing snapshot supports text input only")
+            for item in value.values():
+                content(item)
+    if payload.get("modalities", ["text"]) != ["text"] or "audio" in payload:
+        raise ValueError("this reference pricing snapshot supports text output only")
+    content(payload.get("input", []))
+    content(payload.get("messages", []))
+
+
+def decode_body(body: bytes) -> bytes:
+    """Decompress a response body if the provider compressed it.
+
+    The gateway forwards `accept-encoding: identity` upstream so responses are
+    normally uncompressed, but decompress defensively (gzip/deflate) so usage
+    accounting never silently fails on a compressed body -- the exact bug where
+    a gzipped SSE stream parsed to zero tokens.
+    """
+    if body[:2] == b"\x1f\x8b":  # gzip magic
+        try:
+            return gzip.decompress(body)
+        except (OSError, zlib.error):
+            return body
+    return body
+
+
+def is_sse_body(body: bytes, content_type: str) -> bool:
+    """Recognize SSE even when an upstream labels the stream as JSON."""
+
+    if "text/event-stream" in content_type.lower():
+        return True
+    stripped = decode_body(body).lstrip()
+    return stripped.startswith((b"event:", b"data:"))
+
+
+def _prompt_text_len(value: Any) -> int:
+    """Approximate character length of a prompt fragment across provider shapes
+    (strings, content-block lists, message dicts). Structural keys are skipped."""
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, list):
+        return sum(_prompt_text_len(item) for item in value)
+    if isinstance(value, dict):
+        return sum(
+            _prompt_text_len(v)
+            for k, v in value.items()
+            if k not in ("type", "role", "name", "id", "tool_call_id", "cache_control")
+        )
+    return 0
+
+
+def prompt_profile(payload: Any, body: bytes) -> dict[str, Any]:
+    """At-a-glance breakdown of one model request -- how the agent composed the
+    prompt (system / per-role / tools sizes, counts, approx tokens) -- so agents
+    can be compared without diffing raw megabytes. Sizes only, never content."""
+    if not isinstance(payload, dict):
+        return {"total_bytes": len(body), "approx_tokens": len(body) // 4}
+    system_chars = _prompt_text_len(payload.get("system")) + _prompt_text_len(
+        payload.get("instructions")
+    )
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        messages = payload.get("input") if isinstance(payload.get("input"), list) else []
+    by_role: dict[str, int] = {}
+    if system_chars:
+        by_role["system"] = system_chars
+    for m in messages:
+        role = m.get("role", "user") if isinstance(m, dict) else "user"
+        by_role[role] = by_role.get(role, 0) + _prompt_text_len(
+            m.get("content", m) if isinstance(m, dict) else m
+        )
+    tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
+    return {
+        "total_bytes": len(body),
+        "approx_tokens": len(body) // 4,
+        "messages": len(messages),
+        "by_role_chars": by_role,
+        "tools": {"count": len(tools), "chars": _prompt_text_len(tools)},
+    }
+
+
+def research_state_context(view: dict[str, Any]) -> str:
+    """Render the compact authoritative state delivered on every model call."""
+
+    web_search = view.get("web_search")
+    web_cadence = (
+        web_search.get("cadence")
+        if isinstance(web_search, dict)
+        else None
+    )
+    evaluation = view.get("evaluation")
+    evaluation_cadence = (
+        evaluation.get("cadence")
+        if isinstance(evaluation, dict)
+        else None
+    )
+    kb_behavior_feedback = view.get("kb_behavior_feedback")
+    instruction = (
+        "This is the latest authoritative Dungeness state. It replaces earlier "
+        "research-state snapshots. Use it when choosing the next action."
+    )
+    if isinstance(web_cadence, dict) and web_cadence.get("debt", 0) > 0:
+        instruction += (
+            " Web research is currently behind its assigned cadence. Use the "
+            "configured web search tool for enough distinct, useful queries to "
+            "clear the debt before continuing extended local investigation."
+        )
+    if (
+        isinstance(evaluation_cadence, dict)
+        and evaluation_cadence.get("debt", 0) > 0
+    ):
+        instruction += (
+            " Authoritative evaluation is currently behind its assigned cadence. "
+            "Evaluate enough distinct candidate states to clear the debt before "
+            "continuing extended local optimization."
+        )
+    behavior_message = None
+    if isinstance(kb_behavior_feedback, dict):
+        latest = kb_behavior_feedback.get("latest_feedback")
+        if (
+            isinstance(latest, dict)
+            and latest.get("visible_to_agent") is True
+            and isinstance(latest.get("message"), str)
+        ):
+            behavior_message = latest["message"]
+    feedback_block = (
+        ""
+        if behavior_message is None
+        else f"\n\n<behavior_feedback>\n{behavior_message}\n</behavior_feedback>"
+    )
+    return (
+        f"{RESEARCH_STATE_CONTEXT_MARKER}\n\n"
+        f"{instruction}{feedback_block}\n\n"
+        "```json\n"
+        + json.dumps(view, indent=2, sort_keys=True)
+        + "\n```"
+    )
+
+
+def inject_research_state(
+    payload: dict[str, Any],
+    view: dict[str, Any],
+) -> dict[str, Any]:
+    """Add one fresh developer item without retaining older injected views."""
+
+    raw_input = payload.get("input")
+    if isinstance(raw_input, list):
+        items = list(raw_input)
+    elif isinstance(raw_input, str):
+        items = [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": raw_input,
+                    }
+                ],
+            }
+        ]
+    else:
+        return payload
+
+    filtered: list[Any] = []
+    for item in items:
+        if isinstance(item, dict) and item.get("role") == "developer":
+            encoded = json.dumps(item, sort_keys=True)
+            if RESEARCH_STATE_CONTEXT_MARKER in encoded:
+                continue
+        filtered.append(item)
+    filtered.append(
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": research_state_context(view),
+                }
+            ],
+        }
+    )
+    return {**payload, "input": filtered}
+
+
+def capture_prompt(
+    request_id: str, provider: str, operation: str, model: str, body: bytes, payload: Any
+) -> None:
+    """Optionally retain the full effective request body for debugging.
+
+    The always-on prompt profile is embedded in the canonical model.request
+    event, so writing a second prompt-profiles stream would be redundant.
+    """
+    try:
+        usage_dir = Path(os.environ.get("TESTBED_USAGE_DIR", "/var/lib/testbed/usage"))
+        usage_dir.mkdir(parents=True, exist_ok=True)
+        if os.environ.get("TESTBED_CAPTURE_PROMPTS", "").lower() in ("1", "true", "yes"):
+            prompts = usage_dir / "prompts"
+            prompts.mkdir(parents=True, exist_ok=True)
+            (prompts / f"{request_id}.json").write_bytes(body)
+    except OSError:
+        pass
+
+
+def decode_response_documents(body: bytes, content_type: str) -> list[Any]:
+    """Decode a JSON response or ordered SSE data documents for trace storage."""
+
+    body = decode_body(body)
+    if is_sse_body(body, content_type):
+        documents: list[Any] = []
+        for line in body.splitlines():
+            if not line.startswith(b"data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == b"[DONE]":
+                continue
+            try:
+                documents.append(json.loads(data))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                documents.append(
+                    {
+                        "type": "unparsed_sse_data",
+                        "text": data.decode("utf-8", errors="replace"),
+                    }
+                )
+        return documents
+    if not body:
+        return []
+    try:
+        return [json.loads(body)]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return [{"type": "unparsed_response", "text": body.decode("utf-8", errors="replace")}]
+
+
+def extract_usage(body: bytes, content_type: str) -> dict[str, int]:
+    """Normalize usage from JSON responses or buffered OpenAI SSE events."""
+
+    body = decode_body(body)
+    candidates: list[dict[str, Any]] = []
+    if is_sse_body(body, content_type):
+        for line in body.splitlines():
+            if line.startswith(b"data: ") and line[6:] != b"[DONE]":
+                try:
+                    value = json.loads(line[6:])
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue  # skip a malformed line, don't drop the whole stream
+                if isinstance(value, dict):
+                    candidates.append(value)
+    else:
+        try:
+            value = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+        if isinstance(value, dict):
+            candidates.append(value)
+
+    for value in reversed(candidates):
+        raw = value.get("usage")
+        if not isinstance(raw, dict):
+            response = value.get("response")
+            raw = response.get("usage") if isinstance(response, dict) else None
+        if not isinstance(raw, dict):
+            continue
+        input_tokens = int(raw.get("input_tokens", raw.get("prompt_tokens", 0)) or 0)
+        output_tokens = int(
+            raw.get("output_tokens", raw.get("completion_tokens", 0)) or 0
+        )
+        input_details = raw.get(
+            "input_tokens_details", raw.get("prompt_tokens_details", {})
+        ) or {}
+        output_details = raw.get(
+            "output_tokens_details", raw.get("completion_tokens_details", {})
+        ) or {}
+        cached = int(
+            input_details.get("cached_tokens", 0)
+            if isinstance(input_details, dict)
+            else 0
+        )
+        cache_write = int(
+            input_details.get("cache_write_tokens", 0)
+            if isinstance(input_details, dict)
+            else 0
+        )
+        reasoning = int(
+            output_details.get("reasoning_tokens", 0)
+            if isinstance(output_details, dict)
+            else 0
+        )
+        total = int(raw.get("total_tokens", input_tokens + output_tokens) or 0)
+        return {
+            "input_tokens": input_tokens,
+            "cached_input_tokens": cached,
+            "cache_write_input_tokens": cache_write,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning,
+            "total_tokens": total,
+        }
+    return {}
+
+
+def extract_reasoning_summaries(body: bytes, content_type: str) -> list[str]:
+    """Extract readable OpenAI reasoning summaries, never hidden reasoning tokens."""
+
+    body = decode_body(body)
+    events: list[dict[str, Any]] = []
+    if is_sse_body(body, content_type):
+        for line in body.splitlines():
+            if not line.startswith(b"data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == b"[DONE]":
+                continue
+            try:
+                value = json.loads(data)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(value, dict):
+                events.append(value)
+    else:
+        try:
+            value = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return []
+        if isinstance(value, dict):
+            events.append(value)
+
+    summaries: list[str] = []
+    deltas: dict[int, list[str]] = defaultdict(list)
+
+    def add(text: Any) -> None:
+        if isinstance(text, str) and text and text not in summaries:
+            summaries.append(text)
+
+    for event in events:
+        kind = event.get("type")
+        if kind == "response.reasoning_summary_text.delta":
+            index = int(event.get("summary_index", 0) or 0)
+            delta = event.get("delta")
+            if isinstance(delta, str):
+                deltas[index].append(delta)
+        elif kind == "response.reasoning_summary_text.done":
+            add(event.get("text"))
+        elif kind == "response.reasoning_summary_part.done":
+            part = event.get("part")
+            if isinstance(part, dict) and part.get("type") == "summary_text":
+                add(part.get("text"))
+
+        response = event.get("response")
+        document = response if isinstance(response, dict) else event
+        output = document.get("output")
+        if not isinstance(output, list):
+            continue
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "reasoning":
+                continue
+            summary = item.get("summary")
+            if not isinstance(summary, list):
+                continue
+            for part in summary:
+                if isinstance(part, dict) and part.get("type") == "summary_text":
+                    add(part.get("text"))
+
+    if not summaries:
+        for index in sorted(deltas):
+            add("".join(deltas[index]))
+    return summaries
+
+
+def extract_visible_reasoning_events(value: Any) -> list[dict[str, str]]:
+    """Collect every provider-visible reasoning representation in response order."""
+
+    found: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    reasoning_deltas: list[str] = []
+
+    def add(source: str, text: Any) -> None:
+        if not isinstance(text, str) or not text:
+            return
+        key = (source, text)
+        if key in seen:
+            return
+        seen.add(key)
+        found.append({"source": source, "text": text})
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            kind = item.get("type")
+            if kind == "response.reasoning.delta":
+                delta = item.get("delta")
+                if isinstance(delta, str):
+                    reasoning_deltas.append(delta)
+            elif isinstance(kind, str) and kind in {
+                "response.reasoning.done",
+                "reasoning.text",
+            }:
+                add(str(kind), item.get("text"))
+
+            add("reasoning_content", item.get("reasoning_content"))
+            add("reasoning", item.get("reasoning"))
+
+            details = item.get("reasoning_details")
+            if isinstance(details, list):
+                for detail in details:
+                    if not isinstance(detail, dict):
+                        continue
+                    detail_type = detail.get("type")
+                    source = (
+                        str(detail_type)
+                        if isinstance(detail_type, str)
+                        else "reasoning_details"
+                    )
+                    add(source, detail.get("text"))
+
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    if reasoning_deltas:
+        add("response.reasoning.delta", "".join(reasoning_deltas))
+    return found
+
+
+def extract_visible_reasoning(value: Any) -> list[str]:
+    """Compatibility wrapper returning only provider-visible reasoning text."""
+
+    return [
+        event["text"]
+        for event in extract_visible_reasoning_events(value)
+    ]
+
+
+def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
+    """Normalize usage from an Anthropic Messages response (SSE or JSON).
+
+    Input usage arrives once in `message_start.message.usage`; the running
+    output count arrives in successive `message_delta.usage`. Merge them, and
+    fold Anthropic's cache buckets into the same schema the OpenAI path uses
+    (our `input_tokens` counts ALL input incl. cache; `cached_input_tokens` is
+    the discounted cache-read portion).
+    """
+
+    body = decode_body(body)
+    events: list[dict[str, Any]] = []
+    if "text/event-stream" in content_type:
+        for line in body.splitlines():
+            if line.startswith(b"data:"):
+                data = line[5:].strip()
+                if data and data != b"[DONE]":
+                    try:
+                        value = json.loads(data)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue  # skip a malformed line, keep the rest
+                    if isinstance(value, dict):
+                        events.append(value)
+    else:
+        try:
+            value = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+        if isinstance(value, dict):
+            events.append(value)
+
+    inp = cache_read = cache_create = out = 0
+    found = False
+    for value in events:
+        kind = value.get("type")
+        if kind == "message_start":
+            message = value.get("message")
+            raw = message.get("usage") if isinstance(message, dict) else None
+        else:  # message_delta, a non-stream "message", or a bare usage object
+            raw = value.get("usage")
+        if not isinstance(raw, dict):
+            continue
+        found = True
+        if raw.get("input_tokens") is not None:
+            inp = int(raw.get("input_tokens") or 0)
+        if raw.get("cache_read_input_tokens") is not None:
+            cache_read = int(raw.get("cache_read_input_tokens") or 0)
+        if raw.get("cache_creation_input_tokens") is not None:
+            cache_create = int(raw.get("cache_creation_input_tokens") or 0)
+        if raw.get("output_tokens") is not None:
+            out = int(raw.get("output_tokens") or 0)
+    if not found:
+        return {}
+    total_input = inp + cache_read + cache_create
+    return {
+        "input_tokens": total_input,
+        "cached_input_tokens": cache_read,
+        "cache_write_input_tokens": cache_create,
+        "output_tokens": out,
+        "reasoning_tokens": 0,
+        "total_tokens": total_input + out,
+    }
+
+
+# Per-provider proxy configuration. Model calls for every provider share the
+# same streaming, accounting, and budget machinery (proxy_model); only the
+# route allowlist, upstream origin, auth header, pass-through headers, and usage
+# parser differ.
+MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
+    "openai": {
+        "routes": OPENAI_ROUTES,
+        "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
+        "upstream_default": "https://api.openai.com/v1",
+        "auth": "gateway_secret",
+        "billed": True,
+        "passthrough": (
+            "openai-beta",
+            "openai-organization",
+            "openai-project",
+            "idempotency-key",
+        ),
+        "extract_usage": extract_usage,
+    },
+    "anthropic": {
+        "routes": ANTHROPIC_ROUTES,
+        "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
+        "upstream_default": "https://api.anthropic.com/v1",
+        "auth": "gateway_secret",
+        "billed": True,
+        "passthrough": ("anthropic-beta", "anthropic-version"),
+        "extract_usage": extract_anthropic_usage,
+    },
+    "openrouter": {
+        "routes": OPENROUTER_ROUTES,
+        "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
+        "upstream_default": "https://openrouter.ai/api/v1",
+        "auth": "gateway_secret",
+        "billed": True,
+        # OpenRouter accepts (and echoes) optional attribution headers. The
+        # Anthropic headers matter only for the `messages` operation, where
+        # Claude Code declares beta features (prompt caching, thinking, 1M
+        # context) and the API version it speaks.
+        "passthrough": (
+            "http-referer",
+            "x-title",
+            "openai-beta",
+            "anthropic-beta",
+            "anthropic-version",
+        ),
+        "extract_usage": extract_usage,
+    },
+    "openai-chatgpt": {
+        "routes": CHATGPT_ROUTES,
+        "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
+        "upstream_default": "https://chatgpt.com/backend-api/codex",
+        "auth": "forward_openai_auth",
+        "billed": False,
+        # ChatGPT's Codex backend uses these client/account headers in addition
+        # to the bearer credential. Keep this a fixed allowlist; never forward
+        # arbitrary agent-controlled headers.
+        "passthrough": (
+            "chatgpt-account-id",
+            "originator",
+            "version",
+            "session_id",
+            "session-id",
+            "thread-id",
+            "conversation_id",
+            "x-openai-subagent",
+            "x-client-request-id",
+            "x-codex-turn-metadata",
+            "x-codex-turn-state",
+            "x-codex-installation-id",
+            "x-codex-routing-hint",
+            "x-oai-attestation",
+            "x-responsesapi-include-timing",
+            "traceparent",
+            "user-agent",
+            "openai-beta",
+        ),
+        "extract_usage": extract_usage,
+    },
+    "moonshot": {
+        "routes": MOONSHOT_ROUTES,
+        "upstream_env": "MOONSHOT_UPSTREAM_BASE_URL",
+        "upstream_default": "https://api.moonshot.ai/v1",
+        "auth": "gateway_secret",
+        "billed": True,
+        "adapter": "responses-to-chat",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "passthrough": (),
+        "extract_usage": extract_usage,
+    },
+    "kimi-code": {
+        "routes": KIMI_CODE_ROUTES,
+        "upstream_env": "KIMI_CODE_UPSTREAM_BASE_URL",
+        "upstream_default": "https://api.kimi.com/coding/v1",
+        "auth": "gateway_secret",
+        "billed": False,
+        "adapter": "responses-to-chat",
+        "api_key_env": "KIMI_CODE_API_KEY",
+        "passthrough": (),
+        "extract_usage": extract_usage,
+    },
+}
+
+
+def provider_auth_headers(
+    provider: str,
+    request_headers: Any | None = None,
+) -> dict[str, str]:
+    """Resolve upstream authentication without ever logging credential values."""
+
+    if provider == "openai-chatgpt":
+        auth_file = os.environ.get("DUNGENESS_CHATGPT_AUTH_FILE")
+        if auth_file:
+            document = json.loads(Path(auth_file).read_text())
+            tokens = document.get("tokens", {})
+            access = tokens.get("access_token")
+            account = tokens.get("account_id")
+            if not isinstance(access, str) or not access or not isinstance(account, str) or not account:
+                raise ValueError("gateway ChatGPT access is unavailable")
+            return {"authorization": f"Bearer {access}", "chatgpt-account-id": account}
+        authorization = (
+            request_headers.get("authorization") if request_headers is not None else None
+        )
+        if (
+            not isinstance(authorization, str)
+            or not authorization.startswith("Bearer ")
+            or len(authorization) <= len("Bearer ")
+        ):
+            raise ValueError("ChatGPT subscription request is missing bearer authentication")
+        return {"authorization": authorization}
+    if provider == "anthropic":
+        return {
+            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "anthropic-version": os.environ.get(
+                "ANTHROPIC_VERSION", "2023-06-01"
+            ),
+        }
+    if provider == "openrouter":
+        return {"authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"}
+    if provider == "moonshot":
+        return {"authorization": f"Bearer {os.environ['MOONSHOT_API_KEY']}"}
+    if provider == "kimi-code":
+        return {"authorization": f"Bearer {os.environ['KIMI_CODE_API_KEY']}"}
+    return {"authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"}
+
+
+def usage_extractor(cfg: dict[str, Any], operation: str):
+    """Pick the usage parser for one operation.
+
+    Providers default to one response format, but OpenRouter serves both
+    OpenAI-compatible operations and the Anthropic Messages API. The Messages
+    operation reports Anthropic-shaped usage (split across `message_start` and
+    `message_delta` when streaming) regardless of which provider fronts it.
+    """
+
+    if operation.startswith("messages"):
+        return extract_anthropic_usage
+    return cfg["extract_usage"]

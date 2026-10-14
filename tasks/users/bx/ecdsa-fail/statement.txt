@@ -1,0 +1,68 @@
+# The secp256k1 Point-Addition Challenge
+
+**Goal.** Build the cheapest reversible quantum circuit that performs one
+elliptic-curve point addition on **secp256k1**, scored by the product of
+**Toffoli count × peak qubit width**. Lower is better.
+
+## Why this matters
+
+Shor's algorithm breaks elliptic-curve cryptography by computing discrete
+logarithms in time polynomial in the curve's bit-width. The quantum cost of
+running Shor on an ECC group is dominated by one inner primitive repeated
+thousands of times: **point addition** on the curve. Faster point addition ⇒
+fewer Toffoli gates ⇒ fewer magic states ⇒ less physical hardware and wall-clock
+time on a fault-tolerant machine. Every factor of two saved here is a factor of
+two in the resource estimate for breaking secp256k1 — the curve securing Bitcoin
+and Ethereum.
+
+## The task, precisely
+
+Implement `point_add`: a reversible circuit that consumes four 256-element
+registers — `target_x` (qubits), `target_y` (qubits), `offset_x` (classical
+bits), `offset_y` (classical bits) — and overwrites `(target_x, target_y)` with
+the affine sum `(target_x, target_y) + (offset_x, offset_y)` on the secp256k1
+curve.
+
+Your circuit is graded by a trusted harness that:
+
+1. **Builds** the circuit from your implementation.
+2. **Validates** it by simulating on 9024 random test points. The inputs are
+   derived from a Fiat-Shamir hash of *your own op stream*, so you cannot tune
+   the circuit against the test set — there is nothing to overfit.
+3. **Counts** every Toffoli and Clifford gate and the peak number of live qubits.
+4. **Scores** the run as `score = avg_Toffoli × peak_qubits`, where `avg_Toffoli`
+   is the average executed Toffoli count per shot. **Lower is better.**
+
+## What "valid" means
+
+A run is rejected — not merely scored worse — if any of these fails:
+
+- **Classical correctness.** All 9024 shots must produce the correct
+  `(R_x, R_y)`.
+- **Reversibility.** Every ancilla qubit must be uncomputed to |0⟩ before it is
+  freed, and after the forward pass every non-output qubit must again be |0⟩
+  (no end-state garbage).
+- **Phase cleanliness.** The global phase across all live shots must be zero — no
+  leftover phase kickback from a sloppy uncomputation.
+- **Forward∘reverse identity.** Running the circuit and then its gate-reversed
+  inverse must restore the original state on every qubit.
+
+There are no loopholes: a "Toffoli win" that comes from skipping uncomputation,
+leaking phase, or writing garbage to an ancilla makes the run **fail**, not run
+faster.
+
+## Reference numbers
+
+| | avg Toffoli/shot | peak qubits | score |
+|---|---|---|---|
+| Challenge initial circuit | 3,942,753 | 2,715 | 1.07 × 10¹⁰ |
+| Published low-qubit Pareto point | 2,700,000 | 1,175 | 3.2 × 10⁹ |
+| Published low-gate Pareto point | 2,100,000 | 1,425 | 3.0 × 10⁹ |
+
+Points on — and strictly below — that published frontier are believed beatable.
+
+## Credits
+
+Adapted from code Google published with "Securing Elliptic Curve
+Cryptocurrencies against Quantum Vulnerabilities: Resource Estimates and
+Mitigations" and its companion Zenodo dataset.

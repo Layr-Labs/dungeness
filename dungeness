@@ -1,0 +1,3656 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["PyYAML==6.0.3"]
+# ///
+"""Repository-local command line interface for Dungeness runs."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+import uuid
+
+import yaml
+from collections.abc import Mapping
+
+
+REPO_ROOT = Path(__file__).resolve().parent
+BUILD_SCRIPT = REPO_ROOT / "src/dungeness/compiler.py"
+HARBOR_VERSION = "0.18.0"
+LITELLM_VERSION = "1.86.2"
+NAMESPACE_RE = re.compile(
+    r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*"
+)
+RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+RUN_SPEC_FIELDS = {
+    "schema_version",
+    "type",
+    "id",
+    "task",
+    "agent",
+    "checkpoint",
+    "namespace",
+    "run_id",
+    "labels",
+    "budget",
+    "model_access",
+    "agent_options",
+    "initialization",
+    "web_search",
+    "evaluation",
+    "research_state",
+    "runtime",
+}
+LOCAL_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+CODEX_REASONING_EFFORTS = {
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "max",
+    "xhigh",
+}
+CODEX_REASONING_SUMMARIES = {
+    "auto",
+    "concise",
+    "detailed",
+    "none",
+}
+WEB_SEARCH_PROFILES_ROOT = REPO_ROOT / "web-search"
+EVALUATION_PROFILES_ROOT = REPO_ROOT / "evaluation"
+RESEARCH_STATE_PROFILES_ROOT = REPO_ROOT / "research-state"
+KNOWLEDGE_BASES_ROOT = REPO_ROOT / "knowledge-bases"
+KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT = REPO_ROOT / "knowledge-base-prompts"
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def require_namespace(value: object, field: str = "namespace") -> str:
+    if not isinstance(value, str) or not NAMESPACE_RE.fullmatch(value):
+        raise SystemExit(
+            f"{field} must be slash-separated lowercase namespace segments: {value!r}"
+        )
+    return value
+
+
+def user_config_path(environment: dict[str, str] | None = None) -> Path:
+    environment = os.environ if environment is None else environment
+    override = environment.get("DUNGENESS_CONFIG")
+    if override:
+        return Path(override).expanduser()
+    xdg_root = environment.get("XDG_CONFIG_HOME")
+    config_root = Path(xdg_root).expanduser() if xdg_root else Path.home() / ".config"
+    return config_root / "dungeness/config.toml"
+
+
+def codex_auth_path(environment: dict[str, str] | None = None) -> Path:
+    environment = os.environ if environment is None else environment
+    override = environment.get("DUNGENESS_CODEX_AUTH_FILE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".codex/auth.json"
+
+
+def load_chatgpt_auth(path: Path) -> dict[str, object]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise SystemExit(
+            f"Codex subscription credential not found: {path}\n"
+            "Run: ./dungeness auth login codex"
+        ) from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid Codex subscription credential: {path}") from error
+    tokens = document.get("tokens")
+    if document.get("auth_mode") != "chatgpt" or not isinstance(tokens, dict):
+        raise SystemExit(
+            f"Codex credential is not a ChatGPT subscription login: {path}"
+        )
+    for key in ("access_token", "refresh_token"):
+        if not isinstance(tokens.get(key), str) or not tokens[key]:
+            raise SystemExit(f"Codex credential is missing {key}: {path}")
+    return document
+
+
+def codex_auth_command(args: argparse.Namespace) -> int:
+    path = codex_auth_path()
+    if args.auth_command == "status":
+        document = load_chatgpt_auth(path)
+        print("Codex subscription authentication: ready")
+        print(f"Credential: {path}")
+        if document.get("last_refresh"):
+            print(f"Last refresh: {document['last_refresh']}")
+        return 0
+
+    if shutil.which("codex") is None:
+        raise SystemExit("codex is not installed on the host")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment["CODEX_HOME"] = str(path.parent)
+    command = ["codex", "login"]
+    if args.device_auth:
+        command.append("--device-auth")
+    subprocess.run(command, env=environment, check=True)
+    load_chatgpt_auth(path)
+    print(f">> Codex subscription credential ready: {path}")
+    return 0
+
+
+def selected_agent_manifest(args: argparse.Namespace) -> dict[str, object]:
+    path = find_local_record_path(
+        "agent",
+        args.agent_namespace,
+        args.agent,
+    )
+    if path is None:
+        raise SystemExit(
+            f"agent is not installed locally: "
+            f"agent:{args.agent_namespace}/{args.agent}"
+        )
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise SystemExit(f"invalid agent manifest: {path}")
+    return document
+
+
+@contextmanager
+def prepared_subscription_auth(
+    args: argparse.Namespace,
+):
+    agent = selected_agent_manifest(args)
+    if agent.get("execution", {}).get("interface") == "dungeness-command-v1":
+        # Generic harnesses never receive native provider credentials. The
+        # caller supplies a tmpfs access file mounted only into the gateway.
+        yield {}
+        return
+    authentication = agent.get("authentication")
+    if not (
+        isinstance(authentication, dict)
+        and authentication.get("mode") == "chatgpt-subscription"
+    ):
+        yield {}
+        return
+
+    source = codex_auth_path()
+    load_chatgpt_auth(source)
+    temporary_root = Path(
+        tempfile.mkdtemp(prefix="dungeness-codex-auth-", dir=os.environ.get("DUNGENESS_AUTH_TMPDIR", "/tmp"))
+    )
+    temporary_root.chmod(0o700)
+    temporary_auth = temporary_root / "auth.json"
+    shutil.copy2(source, temporary_auth)
+    temporary_auth.chmod(0o600)
+    try:
+        yield {"DUNGENESS_CODEX_AUTH_DIR": str(temporary_root)}
+    finally:
+        shutil.rmtree(temporary_root, ignore_errors=True)
+
+
+def load_user_config(path: Path) -> dict[str, object]:
+    with path.open("rb") as handle:
+        config = tomllib.load(handle)
+    if config.get("schema_version") != 1 or not isinstance(
+        config.get("namespace"), str
+    ):
+        raise SystemExit(f"invalid Dungeness user config: {path}")
+    return config
+
+
+def resolve_namespace(
+    explicit: str | None,
+    *,
+    environment: dict[str, str] | None = None,
+    config_path: Path | None = None,
+) -> str:
+    environment = os.environ if environment is None else environment
+    if explicit is not None:
+        return require_namespace(explicit, "--namespace")
+    from_environment = environment.get("DUNGENESS_NAMESPACE")
+    if from_environment:
+        return require_namespace(from_environment, "DUNGENESS_NAMESPACE")
+    path = config_path or user_config_path(environment)
+    if path.is_file():
+        return require_namespace(
+            load_user_config(path)["namespace"],
+            f"namespace in {path}",
+        )
+    raise SystemExit(
+        "no Dungeness namespace configured\n"
+        "Run: ./dungeness init --namespace users/<name>\n"
+        "Or set DUNGENESS_NAMESPACE for this command."
+    )
+
+
+def write_user_config(path: Path, namespace: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        f"schema_version = 1\nnamespace = {json.dumps(namespace)}\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def ensure_namespace_directories(namespace: str) -> None:
+    relative = Path(*require_namespace(namespace).split("/"))
+    for collection in (
+        "agents",
+        "tasks",
+        "experiments",
+        "knowledge-bases",
+        "run-specs",
+        "runs",
+    ):
+        (REPO_ROOT / collection / relative).mkdir(parents=True, exist_ok=True)
+
+
+def initialize(args: argparse.Namespace) -> int:
+    namespace = require_namespace(args.namespace, "--namespace")
+    path = user_config_path()
+    if path.is_file():
+        existing = load_user_config(path)
+        if existing.get("namespace") == namespace:
+            ensure_namespace_directories(namespace)
+            print(f">> namespace already configured: {namespace}")
+            print(path)
+            return 0
+        if not args.force:
+            raise SystemExit(
+                f"Dungeness user config already exists: {path}\n"
+                "Pass --force to replace its namespace."
+            )
+    write_user_config(path, namespace)
+    ensure_namespace_directories(namespace)
+    print(f">> configured namespace {namespace}")
+    print(path)
+    return 0
+
+
+def setup_environment(_args: argparse.Namespace) -> int:
+    missing = [tool for tool in ("uv", "uvx", "docker") if shutil.which(tool) is None]
+    if missing:
+        raise SystemExit(
+            "required tools not found on PATH: " + ", ".join(missing)
+        )
+
+    docker_info = subprocess.run(
+        ["docker", "info"],
+        cwd=REPO_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if docker_info.returncode != 0:
+        raise SystemExit(
+            "Docker daemon is not running; start Docker Desktop or the Docker engine."
+        )
+
+    env_path = REPO_ROOT / ".env"
+    if not env_path.is_file():
+        example_path = REPO_ROOT / ".env.example"
+        if not example_path.is_file():
+            raise SystemExit(f"environment template not found: {example_path}")
+        shutil.copyfile(example_path, env_path)
+        print(">> created .env from .env.example")
+        print(">> fill in the provider keys before starting a run")
+
+    print(">> setup ok")
+    if not user_config_path().is_file():
+        print("Configure your record namespace once with:")
+        print("  ./dungeness init --namespace users/<name>")
+    return 0
+
+
+def require_config_mapping(
+    document: dict[str, object],
+    field: str,
+    allowed_fields: set[str],
+) -> dict[str, object]:
+    value = document.get(field, {})
+    if not isinstance(value, dict):
+        raise SystemExit(f"run spec {field} must be a mapping")
+    unknown = sorted(set(value) - allowed_fields)
+    if unknown:
+        raise SystemExit(
+            f"unknown run spec {field} fields: {', '.join(unknown)}"
+        )
+    return value
+
+
+def validate_run_spec_web_search(document: dict[str, object]) -> None:
+    if "web_search" not in document:
+        return
+    web_search = document["web_search"]
+    if not isinstance(web_search, dict):
+        raise SystemExit("run spec web_search must be a mapping")
+    unknown = sorted(set(web_search) - {"profile"})
+    if unknown:
+        raise SystemExit(
+            "unknown run spec web_search fields: " + ", ".join(unknown)
+        )
+    profile_ref = web_search.get("profile")
+    if not isinstance(profile_ref, str) or not profile_ref.startswith(
+        "web-search-profile:"
+    ):
+        raise SystemExit(
+            "run spec web_search.profile must be a fully qualified "
+            "web-search-profile reference"
+        )
+    raw_ref = profile_ref.removeprefix("web-search-profile:")
+    namespace_value, separator, local_id = raw_ref.rpartition("/")
+    if (
+        not separator
+        or not NAMESPACE_RE.fullmatch(namespace_value)
+        or not LOCAL_ID_RE.fullmatch(local_id)
+    ):
+        raise SystemExit(
+            "web-search-profile reference must be "
+            "web-search-profile:<namespace>/<id>"
+        )
+    profile_path = (
+        WEB_SEARCH_PROFILES_ROOT
+        / Path(*namespace_value.split("/"))
+        / f"{local_id}.yaml"
+    )
+    if not profile_path.is_file():
+        raise SystemExit(f"web-search profile does not exist: {profile_ref}")
+    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(profile, dict)
+        or profile.get("schema_version") != 1
+        or profile.get("type") != "web-search-profile"
+        or profile.get("namespace") != namespace_value
+        or profile.get("id") != local_id
+        or not isinstance(profile.get("mode"), str)
+        or not isinstance(profile.get("prompt"), str)
+    ):
+        raise SystemExit(f"invalid web-search profile: {profile_ref}")
+
+
+def validate_run_spec_evaluation(document: dict[str, object]) -> None:
+    if "evaluation" not in document:
+        return
+    evaluation = document["evaluation"]
+    if not isinstance(evaluation, dict):
+        raise SystemExit("run spec evaluation must be a mapping")
+    unknown = sorted(set(evaluation) - {"profile"})
+    if unknown:
+        raise SystemExit(
+            "unknown run spec evaluation fields: " + ", ".join(unknown)
+        )
+    profile_ref = evaluation.get("profile")
+    if not isinstance(profile_ref, str) or not profile_ref.startswith(
+        "evaluation-profile:"
+    ):
+        raise SystemExit(
+            "run spec evaluation.profile must be a fully qualified "
+            "evaluation-profile reference"
+        )
+    raw_ref = profile_ref.removeprefix("evaluation-profile:")
+    namespace_value, separator, local_id = raw_ref.rpartition("/")
+    if (
+        not separator
+        or not NAMESPACE_RE.fullmatch(namespace_value)
+        or not LOCAL_ID_RE.fullmatch(local_id)
+    ):
+        raise SystemExit(
+            "evaluation-profile reference must be "
+            "evaluation-profile:<namespace>/<id>"
+        )
+    profile_path = (
+        EVALUATION_PROFILES_ROOT
+        / Path(*namespace_value.split("/"))
+        / f"{local_id}.yaml"
+    )
+    if not profile_path.is_file():
+        raise SystemExit(f"evaluation profile does not exist: {profile_ref}")
+    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(profile, dict)
+        or profile.get("schema_version") != 1
+        or profile.get("type") != "evaluation-profile"
+        or profile.get("namespace") != namespace_value
+        or profile.get("id") != local_id
+        or not isinstance(profile.get("mode"), str)
+        or not isinstance(profile.get("prompt"), str)
+    ):
+        raise SystemExit(f"invalid evaluation profile: {profile_ref}")
+
+
+def validate_run_spec_research_state(document: dict[str, object]) -> None:
+    if "research_state" not in document:
+        return
+    research_state = document["research_state"]
+    if not isinstance(research_state, dict):
+        raise SystemExit("run spec research_state must be a mapping")
+    unknown = sorted(set(research_state) - {"profile", "controls"})
+    if unknown:
+        raise SystemExit(
+            "unknown run spec research_state fields: " + ", ".join(unknown)
+        )
+    profile_ref = research_state.get("profile")
+    if not isinstance(profile_ref, str) or not profile_ref.startswith(
+        "research-state-profile:"
+    ):
+        raise SystemExit(
+            "run spec research_state.profile must be a fully qualified "
+            "research-state-profile reference"
+        )
+    raw_ref = profile_ref.removeprefix("research-state-profile:")
+    namespace_value, separator, local_id = raw_ref.rpartition("/")
+    if (
+        not separator
+        or not NAMESPACE_RE.fullmatch(namespace_value)
+        or not LOCAL_ID_RE.fullmatch(local_id)
+    ):
+        raise SystemExit(
+            "research-state-profile reference must be "
+            "research-state-profile:<namespace>/<id>"
+        )
+    profile_path = (
+        RESEARCH_STATE_PROFILES_ROOT
+        / Path(*namespace_value.split("/"))
+        / f"{local_id}.yaml"
+    )
+    if not profile_path.is_file():
+        raise SystemExit(f"research-state profile does not exist: {profile_ref}")
+    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(profile, dict)
+        or profile.get("schema_version") != 1
+        or profile.get("type") != "research-state-profile"
+        or profile.get("namespace") != namespace_value
+        or profile.get("id") != local_id
+        or not isinstance(profile.get("controls"), dict)
+        or not isinstance(profile.get("safeguards"), dict)
+    ):
+        raise SystemExit(f"invalid research-state profile: {profile_ref}")
+    controls = research_state.get("controls")
+    required_controls = {"web_search", "evaluation"}
+    allowed_controls = required_controls
+    if not isinstance(controls, dict):
+        raise SystemExit(
+            "run spec research_state.controls must be a mapping"
+        )
+    missing_controls = sorted(required_controls - set(controls))
+    unknown_controls = sorted(set(controls) - allowed_controls)
+    if missing_controls:
+        raise SystemExit(
+            "run spec research_state.controls must define "
+            + ", ".join(missing_controls)
+        )
+    if unknown_controls:
+        raise SystemExit(
+            "unknown run spec research_state controls: "
+            + ", ".join(unknown_controls)
+        )
+    for name, assignment in controls.items():
+        if not isinstance(assignment, dict):
+            raise SystemExit(
+                f"run spec research_state.controls.{name} must be a mapping"
+            )
+        unknown_assignment = sorted(set(assignment) - {"mode", "level"})
+        if unknown_assignment:
+            raise SystemExit(
+                f"unknown research_state.controls.{name} fields: "
+                + ", ".join(unknown_assignment)
+            )
+        if assignment.get("mode") not in {
+            "observe",
+            "prompt_only",
+            "enforce_minimum",
+        }:
+            raise SystemExit(
+                f"invalid research_state.controls.{name}.mode"
+            )
+        if assignment.get("level") not in {"low", "medium", "high"}:
+            raise SystemExit(
+                f"invalid research_state.controls.{name}.level"
+            )
+
+
+def validate_run_spec_knowledge_base(document: dict[str, object]) -> None:
+    initialization = document.get("initialization", {})
+    if not isinstance(initialization, dict):
+        raise SystemExit("run spec initialization must be a mapping")
+    value = initialization.get("knowledge_base")
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SystemExit(
+            "run spec initialization.knowledge_base must be a mapping"
+        )
+    unknown = sorted(
+        set(value)
+        - {"ref", "layers", "prompt_profile", "access", "behavior_feedback"}
+    )
+    if unknown:
+        raise SystemExit(
+            "unknown run spec initialization.knowledge_base fields: "
+            + ", ".join(unknown)
+        )
+    access = value.get("access", "sidecar")
+    if access != "sidecar":
+        raise SystemExit(
+            "run spec initialization.knowledge_base.access must be 'sidecar'"
+        )
+    reference = value.get("ref")
+    if not isinstance(reference, str):
+        raise SystemExit(
+            "run spec initialization.knowledge_base.ref must be a fully "
+            "qualified knowledge-base reference"
+        )
+    namespace, local_id = resolve_record_reference(
+        reference,
+        "knowledge-base",
+        qualified=True,
+    )
+    assert namespace is not None
+    validate_local_record_reference("knowledge-base", namespace, local_id)
+    path, manifest = load_qualified_record(reference, "knowledge-base")
+    interface = manifest.get("interface", {})
+    if not isinstance(interface, dict):
+        raise SystemExit(
+            f"knowledge-base interface must be a mapping: {path}"
+        )
+    unknown_interface = sorted(set(interface) - {"mode", "operations"})
+    if unknown_interface:
+        raise SystemExit(
+            f"unknown knowledge-base interface fields in {path}: "
+            + ", ".join(unknown_interface)
+        )
+    interface_mode = interface.get("mode", "curated-corpus")
+    if not isinstance(interface_mode, str) or not interface_mode:
+        raise SystemExit(
+            f"knowledge-base interface.mode must be text: {path}"
+        )
+    interface_operations = interface.get(
+        "operations",
+        ["status", "list", "search", "read", "neighbors", "inspire"],
+    )
+    allowed_operations = {
+        "status",
+        "list",
+        "search",
+        "read",
+        "neighbors",
+        "inspire",
+    }
+    if (
+        not isinstance(interface_operations, list)
+        or not interface_operations
+        or not all(
+            isinstance(operation, str)
+            for operation in interface_operations
+        )
+        or len(set(interface_operations)) != len(interface_operations)
+    ):
+        raise SystemExit(
+            "knowledge-base interface.operations must be a non-empty list of "
+            f"unique names: {path}"
+        )
+    unsupported_operations = sorted(
+        set(interface_operations) - allowed_operations
+    )
+    if unsupported_operations:
+        raise SystemExit(
+            f"unsupported knowledge-base operations in {path}: "
+            + ", ".join(unsupported_operations)
+        )
+    feedback = value.get("behavior_feedback")
+    if feedback is not None:
+        if not isinstance(feedback, dict):
+            raise SystemExit(
+                "run spec initialization.knowledge_base.behavior_feedback must "
+                "be a mapping"
+            )
+        unknown_feedback = sorted(
+            set(feedback)
+            - {
+                "enabled",
+                "mode",
+                "minimum_improvement",
+                "kb_attribution_window_evaluations",
+                "no_progress_evaluations",
+                "expose_pre_stick_counter",
+            }
+        )
+        if unknown_feedback:
+            raise SystemExit(
+                "unknown knowledge-base behavior_feedback fields: "
+                + ", ".join(unknown_feedback)
+            )
+        if feedback.get("mode", "shadow") not in {
+            "off",
+            "shadow",
+            "visible",
+        }:
+            raise SystemExit(
+                "knowledge-base behavior feedback mode must be off, shadow, or visible"
+            )
+        minimum_improvement = feedback.get("minimum_improvement", 0)
+        if (
+            not isinstance(minimum_improvement, (int, float))
+            or isinstance(minimum_improvement, bool)
+            or minimum_improvement < 0
+        ):
+            raise SystemExit(
+                "knowledge-base behavior_feedback minimum_improvement must be >= 0"
+            )
+        for field in (
+            "kb_attribution_window_evaluations",
+            "no_progress_evaluations",
+        ):
+            count = feedback.get(field, 1 if field.startswith("kb_") else 3)
+            if (
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 1
+            ):
+                raise SystemExit(
+                    f"knowledge-base behavior_feedback {field} must be >= 1"
+                )
+    prompt_profile_ref = value.get("prompt_profile")
+    if prompt_profile_ref is not None:
+        prefix = "knowledge-base-prompt-profile:"
+        if (
+            not isinstance(prompt_profile_ref, str)
+            or not prompt_profile_ref.startswith(prefix)
+        ):
+            raise SystemExit(
+                "run spec initialization.knowledge_base.prompt_profile must "
+                "be a fully qualified knowledge-base-prompt-profile reference"
+            )
+        raw_profile_ref = prompt_profile_ref.removeprefix(prefix)
+        profile_namespace, separator, profile_id = raw_profile_ref.rpartition(
+            "/"
+        )
+        if (
+            not separator
+            or not NAMESPACE_RE.fullmatch(profile_namespace)
+            or not LOCAL_ID_RE.fullmatch(profile_id)
+        ):
+            raise SystemExit(
+                "knowledge-base prompt profile reference must be "
+                "knowledge-base-prompt-profile:<namespace>/<id>"
+            )
+        profile_path = (
+            KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT
+            / Path(*profile_namespace.split("/"))
+            / f"{profile_id}.yaml"
+        )
+        if not profile_path.is_file():
+            raise SystemExit(
+                "knowledge-base prompt profile does not exist: "
+                f"{prompt_profile_ref}"
+            )
+        profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(profile, dict)
+            or profile.get("schema_version") != 1
+            or profile.get("type") != "knowledge-base-prompt-profile"
+            or profile.get("namespace") != profile_namespace
+            or profile.get("id") != profile_id
+            or not isinstance(profile.get("mode"), str)
+            or not isinstance(profile.get("prompt"), str)
+        ):
+            raise SystemExit(
+                f"invalid knowledge-base prompt profile: {prompt_profile_ref}"
+            )
+    layers = value.get("layers")
+    if layers is None:
+        return
+    if (
+        not isinstance(layers, list)
+        or not layers
+        or not all(isinstance(layer, str) and layer for layer in layers)
+        or len(set(layers)) != len(layers)
+    ):
+        raise SystemExit(
+            "run spec initialization.knowledge_base.layers must be a "
+            "non-empty list of unique names"
+        )
+    available = manifest.get("content_layers")
+    if not isinstance(available, dict):
+        raise SystemExit(
+            f"knowledge-base content_layers must be a mapping: {path}"
+        )
+    missing = sorted(set(layers) - set(available))
+    if missing:
+        raise SystemExit(
+            "unknown knowledge-base layers for "
+            f"{reference}: {', '.join(missing)}"
+        )
+
+
+def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
+    authored_target = Path(target).expanduser()
+    candidate = authored_target
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    looks_like_yaml = candidate.suffix.lower() in {".yaml", ".yml"}
+    if (
+        looks_like_yaml
+        and not candidate.exists()
+        and not authored_target.is_absolute()
+        and authored_target.parts[:1] != ("run-specs",)
+    ):
+        namespace = resolve_namespace(None)
+        candidate = (
+            REPO_ROOT
+            / "run-specs"
+            / Path(*namespace.split("/"))
+            / authored_target
+        )
+    if not looks_like_yaml and not candidate.is_file():
+        return None, {}
+    if not candidate.is_file():
+        raise SystemExit(f"run spec not found: {candidate}")
+    try:
+        document = yaml.safe_load(candidate.read_text(encoding="utf-8"))
+    except yaml.YAMLError as error:
+        raise SystemExit(f"invalid run-spec YAML in {candidate}: {error}") from error
+    if not isinstance(document, dict):
+        raise SystemExit(f"run spec must be a mapping: {candidate}")
+    unknown = sorted(set(document) - RUN_SPEC_FIELDS)
+    if unknown:
+        raise SystemExit(f"unknown run-spec fields: {', '.join(unknown)}")
+    if document.get("schema_version") != 1:
+        raise SystemExit("run-spec schema_version must be 1")
+    if document.get("type") != "run-spec":
+        raise SystemExit("run-spec type must be 'run-spec'")
+    validate_run_spec_web_search(document)
+    validate_run_spec_evaluation(document)
+    validate_run_spec_research_state(document)
+    validate_run_spec_knowledge_base(document)
+    return candidate.resolve(), document
+
+
+def load_experiment(
+    target: str,
+    *,
+    require_run_specs: bool = True,
+    infer_namespace: bool = False,
+) -> tuple[Path, dict[str, object]]:
+    path = Path(target).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    if (
+        not path.exists()
+        and LOCAL_ID_RE.fullmatch(target)
+    ):
+        namespace = resolve_namespace(None)
+        path = (
+            REPO_ROOT
+            / "experiments"
+            / Path(*namespace.split("/"))
+            / target
+        )
+    if path.is_dir():
+        path = path / "experiment.yaml"
+    if not path.is_file():
+        raise SystemExit(f"experiment not found: {path}")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as error:
+        raise SystemExit(f"invalid experiment YAML in {path}: {error}") from error
+    if not isinstance(document, dict):
+        raise SystemExit(f"experiment must be a mapping: {path}")
+    if document.get("schema_version") != 1 or document.get("type") != "experiment":
+        raise SystemExit(f"invalid experiment identity in {path}")
+    namespace = document.get("namespace")
+    if namespace is None and infer_namespace:
+        document["namespace"] = resolve_namespace(None)
+    else:
+        require_namespace(namespace, "experiment namespace")
+    local_id = document.get("id")
+    if not isinstance(local_id, str) or not LOCAL_ID_RE.fullmatch(local_id):
+        raise SystemExit(f"invalid experiment id in {path}")
+    relations = document.get("relations")
+    if not isinstance(relations, dict):
+        raise SystemExit(f"experiment relations must be a mapping in {path}")
+    run_specs = relations.get("run_specs", [])
+    if not isinstance(run_specs, list):
+        raise SystemExit(f"experiment run-spec references must be a list in {path}")
+    if require_run_specs and not run_specs:
+        raise SystemExit(f"experiment must reference at least one run spec in {path}")
+    if not all(isinstance(reference, str) for reference in run_specs):
+        raise SystemExit(f"experiment run-spec references must be strings in {path}")
+    return path.resolve(), document
+
+
+def write_yaml(path: Path, document: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        yaml.safe_dump(document, sort_keys=False, width=100),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def resolve_record_reference(
+    value: str,
+    record_type: str,
+    *,
+    qualified: bool,
+) -> tuple[str | None, str]:
+    prefix = f"{record_type}:"
+    if value.startswith(prefix):
+        raw = value.removeprefix(prefix)
+        namespace_value, separator, local_id = raw.rpartition("/")
+        if not separator:
+            raise SystemExit(
+                f"{record_type} reference must include a namespace: {value!r}"
+            )
+        namespace = require_namespace(
+            namespace_value,
+            f"{record_type} reference namespace",
+        )
+    else:
+        if qualified:
+            raise SystemExit(
+                f"run spec {record_type} must be fully qualified as "
+                f"{record_type}:<namespace>/<id>"
+            )
+        namespace = None
+        local_id = value
+    if record_type == "checkpoint" and qualified:
+        if not re.fullmatch(r"[0-9a-f]{40}", local_id):
+            raise SystemExit(
+                "run-spec checkpoint must use a full 40-character commit id"
+            )
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id):
+        raise SystemExit(f"invalid {record_type} reference id: {local_id!r}")
+    return namespace, local_id
+
+
+def find_local_record_path(
+    record_type: str,
+    namespace: str,
+    local_id: str,
+) -> Path | None:
+    collection_roots = {
+        "checkpoint": REPO_ROOT / "checkpoints",
+        "run-spec": REPO_ROOT / "run-specs",
+        "task": REPO_ROOT / "tasks",
+        "agent": REPO_ROOT / "agents",
+        "knowledge-base": KNOWLEDGE_BASES_ROOT,
+    }
+    if record_type in collection_roots:
+        matches: list[Path] = []
+        for path in collection_roots[record_type].rglob("*.yaml"):
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(document, dict)
+                and document.get("schema_version") == 1
+                and document.get("type") == record_type
+                and document.get("namespace") == namespace
+                and document.get("id") == local_id
+            ):
+                matches.append(path)
+        if len(matches) > 1:
+            raise SystemExit(
+                f"duplicate local identity: {record_type}:{namespace}/{local_id}"
+            )
+        return matches[0] if matches else None
+    return None
+
+
+def local_record_matches(record_type: str, local_id: str) -> list[tuple[str, Path]]:
+    roots = {
+        "task": REPO_ROOT / "tasks",
+        "agent": REPO_ROOT / "agents",
+    }
+    root = roots.get(record_type)
+    if root is None:
+        return []
+    matches: list[tuple[str, Path]] = []
+    for path in root.rglob("*.yaml"):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        namespace = document.get("namespace") if isinstance(document, dict) else None
+        if (
+            isinstance(document, dict)
+            and document.get("schema_version") == 1
+            and document.get("type") == record_type
+            and document.get("id") == local_id
+            and isinstance(namespace, str)
+            and NAMESPACE_RE.fullmatch(namespace)
+        ):
+            matches.append((namespace, path))
+    return matches
+
+
+def resolve_installed_record(
+    value: str,
+    record_type: str,
+) -> tuple[str, str]:
+    namespace, local_id = resolve_record_reference(
+        value,
+        record_type,
+        qualified=False,
+    )
+    if namespace is not None:
+        validate_local_record_reference(record_type, namespace, local_id)
+        return namespace, local_id
+
+    default_namespace = resolve_namespace(None)
+    if find_local_record_path(record_type, default_namespace, local_id) is not None:
+        return default_namespace, local_id
+
+    matches = local_record_matches(record_type, local_id)
+    if len(matches) == 1:
+        return matches[0][0], local_id
+    if not matches:
+        raise SystemExit(f"{record_type} is not installed locally: {local_id}")
+    identities = ", ".join(
+        qualified_reference(record_type, match_namespace, local_id)
+        for match_namespace, _ in matches
+    )
+    raise SystemExit(
+        f"{record_type} name is ambiguous; use a qualified reference: {identities}"
+    )
+
+
+def validate_local_record_reference(
+    record_type: str,
+    namespace: str,
+    local_id: str,
+) -> None:
+    path = find_local_record_path(record_type, namespace, local_id)
+    if path is None:
+        raise SystemExit(
+            f"{record_type} is not installed locally or its manifest identity "
+            f"does not match: {record_type}:{namespace}/{local_id}"
+        )
+
+
+def experiment_run_spec_directory(experiment_path: Path) -> Path:
+    try:
+        relative_parent = experiment_path.resolve().parent.relative_to(
+            (REPO_ROOT / "experiments").resolve()
+        )
+    except ValueError as error:
+        raise SystemExit(
+            "experiment templates must live under the repository's experiments/ "
+            "directory"
+        ) from error
+    return REPO_ROOT / "run-specs" / relative_parent
+
+
+def qualified_reference(record_type: str, namespace: str, local_id: str) -> str:
+    return f"{record_type}:{namespace}/{local_id}"
+
+
+def load_qualified_record(
+    reference: str,
+    record_type: str,
+) -> tuple[Path, dict[str, object]]:
+    namespace, local_id = resolve_record_reference(
+        reference,
+        record_type,
+        qualified=True,
+    )
+    assert namespace is not None
+    path = find_local_record_path(record_type, namespace, local_id)
+    if path is None:
+        raise SystemExit(
+            f"{record_type} is not installed locally or its manifest identity "
+            f"does not match: {reference}"
+        )
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise SystemExit(f"{record_type} manifest must be a mapping: {path}")
+    return path, document
+
+
+def run_spec_reference(target: str) -> tuple[str, Path]:
+    """Resolve any accepted run-spec target to its canonical identity and path."""
+
+    if target.startswith("run-spec:"):
+        path, document = load_qualified_record(target, "run-spec")
+    else:
+        path, document = load_run_spec(target)
+        if path is None:
+            namespace, local_id = resolve_record_reference(target, "run-spec")
+            assert namespace is not None
+            reference = qualified_reference("run-spec", namespace, local_id)
+            path, document = load_qualified_record(reference, "run-spec")
+
+    namespace = document.get("namespace")
+    if namespace is None:
+        namespace = resolve_namespace(None)
+    namespace = require_namespace(namespace, "run-spec namespace")
+    local_id = document.get("id")
+    if not isinstance(local_id, str) or not LOCAL_ID_RE.fullmatch(local_id):
+        raise SystemExit(f"invalid run-spec id in {path}: {local_id!r}")
+    return qualified_reference("run-spec", namespace, local_id), path
+
+
+def run_score(record: dict[str, object]) -> int | float | None:
+    data = record.get("data")
+    if not isinstance(data, dict):
+        return None
+    metric = data.get("metric")
+    metrics = data.get("metrics")
+    if isinstance(metric, dict) and isinstance(metrics, dict):
+        metric_name = metric.get("name")
+        value = metrics.get(metric_name) if isinstance(metric_name, str) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+    evaluation = data.get("evaluation")
+    if isinstance(evaluation, dict):
+        value = evaluation.get("best_score")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def runs_for_run_spec(
+    reference: str,
+    runs_root: Path | None = None,
+) -> list[dict[str, object]]:
+    """Return canonical run summaries linked to one run-spec identity."""
+
+    root = runs_root or (REPO_ROOT / "runs")
+    matches: list[dict[str, object]] = []
+    for record_path in root.rglob("record.json"):
+        try:
+            record = read_json(record_path)
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+            continue
+        if record is None:
+            continue
+        relations = record.get("relations")
+        if not isinstance(relations, dict) or relations.get("run_spec") != reference:
+            continue
+        data = record.get("data")
+        labels = record.get("labels")
+        data = data if isinstance(data, dict) else {}
+        labels = labels if isinstance(labels, dict) else {}
+        run_id = data.get("run_id", record.get("id"))
+        if not isinstance(run_id, str):
+            continue
+        matches.append(
+            {
+                "run_id": run_id,
+                "namespace": record.get("namespace"),
+                "status": data.get("status", "unknown"),
+                "reasoning_effort": labels.get("reasoning_effort"),
+                "score": run_score(record),
+                "started_at": data.get("started_at", record.get("created_at")),
+                "finished_at": data.get("finished_at"),
+                "record_path": str(record_path.relative_to(REPO_ROOT)),
+            }
+        )
+    return sorted(
+        matches,
+        key=lambda item: str(item.get("started_at") or ""),
+        reverse=True,
+    )
+
+
+def list_runs(args: argparse.Namespace) -> int:
+    reference, path = run_spec_reference(args.target)
+    matches = runs_for_run_spec(reference)
+    if args.latest:
+        matches = matches[:1]
+    if args.json:
+        print(json.dumps(matches, indent=2, sort_keys=True))
+        return 0
+
+    print(f">> {reference}")
+    try:
+        source = path.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        source = path
+    print(f">> source: {source}")
+    if not matches:
+        print("No matching runs.")
+        return 0
+
+    print(f"{'STATUS':<11} {'EFFORT':<8} {'SCORE':>16}  RUN ID")
+    for match in matches:
+        status = str(match.get("status") or "unknown")
+        effort = str(match.get("reasoning_effort") or "-")
+        score = match.get("score")
+        score_text = f"{score:,.0f}" if isinstance(score, (int, float)) else "-"
+        print(
+            f"{status:<11} {effort:<8} {score_text:>16}  {match['run_id']}"
+        )
+    return 0
+
+
+def shortest_unique_prefixes(values: list[str], minimum: int = 7) -> dict[str, str]:
+    prefixes: dict[str, str] = {}
+    for value in values:
+        width = min(minimum, len(value))
+        while (
+            width < len(value)
+            and any(
+                other != value and other.startswith(value[:width])
+                for other in values
+            )
+        ):
+            width += 1
+        prefixes[value] = value[:width]
+    return prefixes
+
+
+def experiment_axis_references(
+    axes: dict[str, object],
+    field: str,
+    record_type: str,
+) -> list[str]:
+    values = axes.get(field)
+    if not isinstance(values, list) or not values:
+        raise SystemExit(f"experiment design.axes.{field} must be a non-empty list")
+    references: list[str] = []
+    for value in values:
+        reference = value.get("ref") if isinstance(value, dict) else value
+        if not isinstance(reference, str):
+            raise SystemExit(
+                f"experiment design.axes.{field} entries must contain a ref"
+            )
+        load_qualified_record(reference, record_type)
+        references.append(reference)
+    return list(dict.fromkeys(references))
+
+
+def validate_agent_model_control(
+    agent_reference: str,
+    expected: dict[str, object],
+) -> None:
+    _, agent = load_qualified_record(agent_reference, "agent")
+    model = agent.get("model")
+    if not isinstance(model, dict):
+        raise SystemExit(f"agent has no model configuration: {agent_reference}")
+    for field, value in expected.items():
+        if field not in {"provider", "upstream_id", "request_model", "api"}:
+            raise SystemExit(f"unsupported controlled model field: {field}")
+        if not isinstance(value, str) or not value:
+            raise SystemExit(
+                f"experiment controlled model field {field} must be a string"
+            )
+        if model.get(field) != value:
+            raise SystemExit(
+                f"agent does not match controlled model field {field}: "
+                f"{agent_reference}"
+            )
+
+
+def create_experiment(args: argparse.Namespace) -> int:
+    experiment_path, experiment = load_experiment(
+        args.target,
+        require_run_specs=False,
+        infer_namespace=True,
+    )
+    namespace = experiment["namespace"]
+    experiment_id = experiment["id"]
+    assert isinstance(namespace, str)
+    assert isinstance(experiment_id, str)
+
+    relations = experiment["relations"]
+    assert isinstance(relations, dict)
+    existing_run_specs = relations.get("run_specs", [])
+    if existing_run_specs:
+        raise SystemExit(
+            f"experiment already references materialized run specs: {experiment_path}"
+        )
+
+    design = experiment.get("design")
+    if not isinstance(design, dict):
+        raise SystemExit("experiment design must be a mapping")
+    if design.get("kind", "full-factorial") != "full-factorial":
+        raise SystemExit("experiment create currently supports kind: full-factorial")
+    controls = design.get("controls")
+    axes = design.get("axes")
+    if not isinstance(controls, dict) or not isinstance(axes, dict):
+        raise SystemExit("experiment design requires controls and axes mappings")
+
+    task_reference = relations.get("task", controls.get("task"))
+    if not isinstance(task_reference, str):
+        raise SystemExit("experiment must declare a qualified task relation")
+    if controls.get("task") not in {None, task_reference}:
+        raise SystemExit("experiment relation and controlled task do not match")
+    _, task = load_qualified_record(task_reference, "task")
+    task_relations = task.get("relations")
+    if (
+        "problem" not in relations
+        and isinstance(task_relations, dict)
+        and isinstance(task_relations.get("problem"), str)
+    ):
+        relations["problem"] = task_relations["problem"]
+
+    agent_references = experiment_axis_references(axes, "agents", "agent")
+    checkpoint_references = experiment_axis_references(
+        axes,
+        "checkpoints",
+        "checkpoint",
+    )
+    model_control = controls.get("model")
+    if model_control is not None:
+        if not isinstance(model_control, dict) or not model_control:
+            raise SystemExit(
+                "experiment design.controls.model must be a non-empty mapping"
+            )
+        for agent_reference in agent_references:
+            validate_agent_model_control(agent_reference, model_control)
+
+    repetitions = design.get("repetitions", 1)
+    if (
+        not isinstance(repetitions, int)
+        or isinstance(repetitions, bool)
+        or repetitions < 1
+    ):
+        raise SystemExit("experiment design.repetitions must be a positive integer")
+
+    budget = controls.get("budget")
+    if not isinstance(budget, dict):
+        raise SystemExit("experiment design.controls.budget must be a mapping")
+    max_usd = budget.get("max_usd")
+    if (
+        not isinstance(max_usd, (int, float))
+        or isinstance(max_usd, bool)
+        or max_usd <= 0
+    ):
+        raise SystemExit(
+            "experiment design.controls.budget.max_usd must be a positive number"
+        )
+    max_model_tokens = budget.get("max_model_tokens")
+    if max_model_tokens is not None and (
+        not isinstance(max_model_tokens, int)
+        or isinstance(max_model_tokens, bool)
+        or max_model_tokens < 1
+    ):
+        raise SystemExit(
+            "experiment design.controls.budget.max_model_tokens must be a "
+            "positive integer"
+        )
+    initialization = controls.get("initialization", {"mode": "checkpoint"})
+    if not isinstance(initialization, dict):
+        raise SystemExit(
+            "experiment design.controls.initialization must be a mapping"
+        )
+    initialization_mode = initialization.get("mode", "checkpoint")
+    if initialization_mode not in {"checkpoint", "blank", "scaffold"}:
+        raise SystemExit(
+            "experiment initialization mode must be checkpoint, blank, or scaffold"
+        )
+
+    runtime = controls.get("runtime", {})
+    if not isinstance(runtime, dict):
+        raise SystemExit("experiment design.controls.runtime must be a mapping")
+    env_file = runtime.get("env_file", ".env")
+    keep_render = runtime.get("keep_render", False)
+    keep_images = runtime.get("keep_images", False)
+    agent_timeout_sec = runtime.get("agent_timeout_sec")
+    if not isinstance(env_file, str) or not env_file:
+        raise SystemExit("experiment runtime.env_file must be a non-empty string")
+    if not isinstance(keep_render, bool):
+        raise SystemExit("experiment runtime.keep_render must be a boolean")
+    if not isinstance(keep_images, bool):
+        raise SystemExit("experiment runtime.keep_images must be a boolean")
+    if agent_timeout_sec is not None and (
+        not isinstance(agent_timeout_sec, int)
+        or isinstance(agent_timeout_sec, bool)
+        or agent_timeout_sec < 1
+    ):
+        raise SystemExit(
+            "experiment runtime.agent_timeout_sec must be a positive integer"
+        )
+
+    controlled_agent_options = controls.get("agent_options", {})
+    if not isinstance(controlled_agent_options, dict):
+        raise SystemExit(
+            "experiment design.controls.agent_options must be a mapping"
+        )
+    unknown_agent_options = sorted(
+        set(controlled_agent_options)
+        - {"reasoning_effort", "reasoning_summary"}
+    )
+    if unknown_agent_options:
+        raise SystemExit(
+            "unsupported controlled agent options: "
+            + ", ".join(unknown_agent_options)
+        )
+    controlled_effort = controlled_agent_options.get("reasoning_effort")
+    if controlled_effort is not None and controlled_effort not in CODEX_REASONING_EFFORTS:
+        raise SystemExit("invalid controlled reasoning_effort")
+    controlled_summary = controlled_agent_options.get("reasoning_summary")
+    if (
+        controlled_summary is not None
+        and controlled_summary not in CODEX_REASONING_SUMMARIES
+    ):
+        raise SystemExit("invalid controlled reasoning_summary")
+
+    reasoning_efforts = axes.get("reasoning_efforts")
+    if reasoning_efforts is None:
+        effort_axis: list[str | None] = [None]
+    else:
+        if (
+            not isinstance(reasoning_efforts, list)
+            or not reasoning_efforts
+            or not all(
+                isinstance(value, str) and value in CODEX_REASONING_EFFORTS
+                for value in reasoning_efforts
+            )
+        ):
+            raise SystemExit(
+                "experiment design.axes.reasoning_efforts must be a non-empty "
+                "list of Codex effort levels"
+            )
+        if len(set(reasoning_efforts)) != len(reasoning_efforts):
+            raise SystemExit(
+                "experiment design.axes.reasoning_efforts must not contain duplicates"
+            )
+        if controlled_effort is not None:
+            raise SystemExit(
+                "reasoning_effort cannot be both controlled and an experiment axis"
+            )
+        effort_axis = reasoning_efforts
+    if controlled_agent_options or reasoning_efforts is not None:
+        for agent_reference in agent_references:
+            _, agent_document = load_qualified_record(agent_reference, "agent")
+            harbor = agent_document.get("harbor")
+            if not isinstance(harbor, dict) or harbor.get("agent") != "codex":
+                raise SystemExit(
+                    "reasoning agent options require a Codex agent: "
+                    f"{agent_reference}"
+                )
+
+    run_labels = experiment.get("run_labels", {})
+    if not isinstance(run_labels, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in run_labels.items()
+    ):
+        raise SystemExit("experiment run_labels must contain string keys and values")
+
+    run_spec_dir = experiment_run_spec_directory(experiment_path)
+    if run_spec_dir.exists() and any(run_spec_dir.iterdir()):
+        raise SystemExit(f"experiment run-spec directory is not empty: {run_spec_dir}")
+
+    checkpoint_ids = [
+        reference.rsplit("/", 1)[-1] for reference in checkpoint_references
+    ]
+    checkpoint_prefixes = shortest_unique_prefixes(checkpoint_ids)
+    run_specs: list[tuple[Path, dict[str, object]]] = []
+    run_spec_refs: list[str] = []
+    default_run_labels = {
+        **run_labels,
+        "experiment": experiment_id,
+        "purpose": "experiment-cell",
+    }
+
+    for agent_reference in agent_references:
+        agent_id = agent_reference.rsplit("/", 1)[-1]
+        for checkpoint_reference in checkpoint_references:
+            checkpoint_id = checkpoint_reference.rsplit("/", 1)[-1]
+            checkpoint_label = checkpoint_prefixes[checkpoint_id]
+            for repetition in range(1, repetitions + 1):
+                for reasoning_effort in effort_axis:
+                    cell_id = f"{experiment_id}-{agent_id}-{checkpoint_label}"
+                    if reasoning_effort is not None:
+                        cell_id += f"-{reasoning_effort}"
+                    if repetitions > 1:
+                        cell_id += f"-r{repetition}"
+                    cell_labels = {
+                        **default_run_labels,
+                        "agent": agent_id,
+                        "checkpoint": checkpoint_label,
+                    }
+                    if repetitions > 1:
+                        cell_labels["repetition"] = str(repetition)
+                    if reasoning_effort is not None:
+                        cell_labels["reasoning_effort"] = reasoning_effort
+                    run_spec: dict[str, object] = {
+                        "schema_version": 1,
+                        "type": "run-spec",
+                        "namespace": namespace,
+                        "id": cell_id,
+                        "task": task_reference,
+                        "agent": agent_reference,
+                        "checkpoint": checkpoint_reference,
+                        "budget": {
+                            "max_usd": max_usd,
+                        },
+                        "initialization": {"mode": initialization_mode},
+                        "labels": cell_labels,
+                        "runtime": {
+                            "env_file": env_file,
+                            "keep_render": keep_render,
+                            "keep_images": keep_images,
+                        },
+                    }
+                    resolved_agent_options = dict(controlled_agent_options)
+                    if reasoning_effort is not None:
+                        resolved_agent_options["reasoning_effort"] = reasoning_effort
+                    if resolved_agent_options:
+                        run_spec["agent_options"] = resolved_agent_options
+                    if max_model_tokens is not None:
+                        run_spec["budget"]["max_model_tokens"] = max_model_tokens
+                    if agent_timeout_sec is not None:
+                        run_spec["runtime"]["agent_timeout_sec"] = agent_timeout_sec
+                    path = run_spec_dir / f"{cell_id}.yaml"
+                    run_specs.append((path, run_spec))
+                    run_spec_refs.append(
+                        qualified_reference("run-spec", namespace, cell_id)
+                    )
+
+    planned_runs = len(run_specs)
+    relations["task"] = task_reference
+    relations["run_specs"] = run_spec_refs
+    design["planned_runs"] = planned_runs
+    design["nominal_budget_usd"] = round(planned_runs * float(max_usd), 6)
+    experiment.setdefault("created_at", utc_now())
+    experiment.setdefault("published_at", None)
+    experiment.setdefault("run_refs", [])
+    experiment.setdefault("artifact_refs", [])
+
+    for path, run_spec in run_specs:
+        write_yaml(path, run_spec)
+    write_yaml(experiment_path, experiment)
+
+    display_path = experiment_path.resolve().relative_to(REPO_ROOT.resolve())
+    short_target = experiment_path.parent.name
+    print(f">> created experiment with {planned_runs} run specs")
+    print(display_path)
+    print(f">> nominal model budget: ${planned_runs * float(max_usd):.2f}")
+    print("Review without spending:")
+    print(f"  ./dungeness experiment run {short_target} --dry-run")
+    return 0
+
+
+def run_arguments_for_spec(
+    path: Path,
+    *,
+    namespace: str | None,
+    env_file: str | None,
+    labels: list[str],
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        target=str(path),
+        agent=None,
+        checkpoint=None,
+        fresh_start=None,
+        scaffold_start=None,
+        run_id=None,
+        namespace=namespace,
+        label=list(labels),
+        resume_from=None,
+        max_model_tokens=None,
+        max_usd=None,
+        reasoning_effort=None,
+        reasoning_summary=None,
+        env_file=env_file,
+        keep_render=None,
+        keep_images=None,
+    )
+
+
+def run_experiment(args: argparse.Namespace) -> int:
+    experiment_path, experiment = load_experiment(args.target)
+    references = experiment["relations"]["run_specs"]
+    assert isinstance(references, list)
+    if len(set(references)) != len(references):
+        raise SystemExit(
+            f"experiment contains duplicate run-spec references: {experiment_path}"
+        )
+
+    cells: list[tuple[str, Path, float | None]] = []
+    nominal_budget = 0.0
+    budget_known = True
+    for reference in references:
+        assert isinstance(reference, str)
+        path, _run_spec = load_qualified_record(reference, "run-spec")
+        resolved = resolve_run_spec_arguments(
+            run_arguments_for_spec(
+                path,
+                namespace=args.namespace,
+                env_file=args.env_file,
+                labels=args.label,
+            )
+        )
+        max_usd = resolved.max_usd
+        if isinstance(max_usd, (int, float)) and not isinstance(max_usd, bool):
+            nominal_budget += float(max_usd)
+        else:
+            budget_known = False
+            max_usd = None
+        cells.append((reference, path, max_usd))
+
+    design = experiment.get("design")
+    if isinstance(design, dict):
+        planned_runs = design.get("planned_runs")
+        if planned_runs is not None and planned_runs != len(cells):
+            raise SystemExit(
+                f"experiment declares {planned_runs} planned runs but references "
+                f"{len(cells)} run specs"
+            )
+        declared_budget = design.get("nominal_budget_usd")
+        if (
+            budget_known
+            and declared_budget is not None
+            and (
+                not isinstance(declared_budget, (int, float))
+                or isinstance(declared_budget, bool)
+                or abs(float(declared_budget) - nominal_budget) > 1e-6
+            )
+        ):
+            raise SystemExit(
+                f"experiment declares ${declared_budget} nominal budget but its "
+                f"run specs total ${nominal_budget:.2f}"
+            )
+
+    identity = qualified_reference(
+        "experiment",
+        experiment["namespace"],
+        experiment["id"],
+    )
+    print(f">> experiment {identity}")
+    budget_text = (
+        f"${nominal_budget:.2f}" if budget_known else "unknown"
+    )
+    print(f">> {len(cells)} planned runs; nominal model budget: {budget_text}")
+    for index, (reference, _, max_usd) in enumerate(cells, start=1):
+        suffix = f" (${float(max_usd):.2f})" if max_usd is not None else ""
+        print(f"  {index}. {reference}{suffix}")
+
+    if args.dry_run:
+        return 0
+    if not args.yes:
+        try:
+            confirmation = input(f"Run {len(cells)} experiment cells? [y/N] ")
+        except EOFError as error:
+            raise SystemExit(
+                "confirmation requires an interactive terminal; pass --yes to run"
+            ) from error
+        if confirmation.strip().lower() not in {"y", "yes"}:
+            print(">> experiment cancelled")
+            return 0
+
+    failures = 0
+    for index, (reference, path, _) in enumerate(cells, start=1):
+        print(f">> [{index}/{len(cells)}] running {reference}", flush=True)
+        run_args = run_arguments_for_spec(
+            path,
+            namespace=args.namespace,
+            env_file=args.env_file,
+            labels=args.label,
+        )
+        try:
+            result = execute_run(run_args)
+            if result != 0:
+                raise subprocess.CalledProcessError(
+                    result,
+                    ["dungeness", "run", str(path)],
+                )
+        except (subprocess.CalledProcessError, SystemExit) as error:
+            failures += 1
+            print(f">> experiment cell failed: {reference}: {error}", file=sys.stderr)
+            if not args.continue_on_error:
+                return (
+                    error.returncode
+                    if isinstance(error, subprocess.CalledProcessError)
+                    else 1
+                )
+    if failures:
+        print(f">> experiment finished with {failures} failed cells", file=sys.stderr)
+        return 1
+    print(f">> experiment finished: {len(cells)} runs completed")
+    return 0
+
+
+def resolve_run_spec_arguments(args: argparse.Namespace) -> argparse.Namespace:
+    config_path, config = load_run_spec(args.target)
+    if config_path is None:
+        args.task = args.target
+        args.task_namespace = None
+        run_spec_namespace = None
+        run_spec_id = None
+        configured_task = None
+    else:
+        run_spec_namespace_value = config.get("namespace")
+        run_spec_namespace = (
+            resolve_namespace(None)
+            if run_spec_namespace_value is None
+            else require_namespace(
+                run_spec_namespace_value,
+                "run-spec namespace",
+            )
+        )
+        run_spec_id_value = config.get("id")
+        if not isinstance(run_spec_id_value, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9._-]*",
+            run_spec_id_value,
+        ):
+            raise SystemExit("run-spec id must be a lowercase record id")
+        run_spec_id = run_spec_id_value
+        configured_task = config.get("task")
+        if not isinstance(configured_task, str) or not configured_task:
+            raise SystemExit("run-spec task must be a non-empty string")
+        task_namespace, args.task = resolve_record_reference(
+            configured_task,
+            "task",
+            qualified=True,
+        )
+        assert task_namespace is not None
+        validate_local_record_reference("task", task_namespace, args.task)
+        args.task_namespace = task_namespace
+
+    budget = require_config_mapping(
+        config,
+        "budget",
+        {"max_usd", "max_model_tokens"},
+    )
+    initialization = require_config_mapping(
+        config,
+        "initialization",
+        {"mode", "resume_from", "knowledge_base"},
+    )
+    runtime = require_config_mapping(
+        config,
+        "runtime",
+        {
+            "env_file",
+            "keep_render",
+            "keep_images",
+            "agent_timeout_sec",
+            "continuation",
+        },
+    )
+    continuation = require_config_mapping(
+        runtime,
+        "continuation",
+        {"max_resumes", "min_remaining_sec"},
+    )
+    agent_options = require_config_mapping(
+        config,
+        "agent_options",
+        {"reasoning_effort", "reasoning_summary"},
+    )
+
+    def config_string(field: str) -> str | None:
+        value = config.get(field)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise SystemExit(f"run-spec {field} must be a non-empty string")
+        return value
+
+    configured_agent = config_string("agent")
+    configured_agent_namespace = None
+    configured_checkpoint = config_string("checkpoint")
+    configured_run_id = config_string("run_id")
+    if config_path is not None:
+        if configured_agent is None:
+            raise SystemExit("run-spec agent is required")
+        configured_agent_namespace, configured_agent = resolve_record_reference(
+            configured_agent,
+            "agent",
+            qualified=True,
+        )
+        assert configured_agent_namespace is not None
+        validate_local_record_reference(
+            "agent",
+            configured_agent_namespace,
+            configured_agent,
+        )
+        if configured_checkpoint is None:
+            raise SystemExit("run-spec checkpoint is required")
+        checkpoint_namespace, checkpoint_id = resolve_record_reference(
+            configured_checkpoint,
+            "checkpoint",
+            qualified=True,
+        )
+        assert checkpoint_namespace is not None
+        validate_local_record_reference(
+            "checkpoint",
+            checkpoint_namespace,
+            checkpoint_id,
+        )
+    if args.agent is not None:
+        args.agent_namespace, args.agent = resolve_installed_record(
+            args.agent,
+            "agent",
+        )
+    else:
+        args.agent = configured_agent
+        args.agent_namespace = configured_agent_namespace
+    args.checkpoint = args.checkpoint or configured_checkpoint
+    args.run_id = args.run_id or configured_run_id
+    if config_path is None:
+        args.task_namespace, args.task = resolve_installed_record(
+            args.task,
+            "task",
+        )
+        if args.agent is None:
+            raise SystemExit("--agent is required when running a task directly")
+
+    configured_max_usd = budget.get("max_usd")
+    if configured_max_usd is not None and (
+        not isinstance(configured_max_usd, (int, float))
+        or isinstance(configured_max_usd, bool)
+        or configured_max_usd <= 0
+    ):
+        raise SystemExit("run-spec budget.max_usd must be a positive number")
+    configured_max_model_tokens = budget.get("max_model_tokens")
+    if configured_max_model_tokens is not None and (
+        not isinstance(configured_max_model_tokens, int)
+        or isinstance(configured_max_model_tokens, bool)
+        or configured_max_model_tokens < 1
+    ):
+        raise SystemExit(
+            "run-spec budget.max_model_tokens must be a positive integer"
+        )
+    if args.max_usd is None:
+        args.max_usd = configured_max_usd
+    if args.max_model_tokens is None:
+        args.max_model_tokens = configured_max_model_tokens
+
+    reasoning_effort = agent_options.get("reasoning_effort")
+    if reasoning_effort is not None and reasoning_effort not in CODEX_REASONING_EFFORTS:
+        raise SystemExit(
+            "run-spec agent_options.reasoning_effort must be one of: "
+            + ", ".join(sorted(CODEX_REASONING_EFFORTS))
+        )
+    reasoning_summary = agent_options.get("reasoning_summary")
+    if (
+        reasoning_summary is not None
+        and reasoning_summary not in CODEX_REASONING_SUMMARIES
+    ):
+        raise SystemExit(
+            "run-spec agent_options.reasoning_summary must be one of: "
+            + ", ".join(sorted(CODEX_REASONING_SUMMARIES))
+        )
+    args.reasoning_effort = reasoning_effort
+    args.reasoning_summary = reasoning_summary
+
+    mode = initialization.get("mode", "checkpoint")
+    if mode not in {"checkpoint", "blank", "scaffold"}:
+        raise SystemExit(
+            "run-spec initialization.mode must be checkpoint, blank, or scaffold"
+        )
+    configured_resume = initialization.get("resume_from")
+    if configured_resume is not None and (
+        not isinstance(configured_resume, str) or not configured_resume
+    ):
+        raise SystemExit(
+            "run-spec initialization.resume_from must be a non-empty string"
+        )
+    if args.fresh_start is None:
+        args.fresh_start = mode == "blank"
+    if getattr(args, "scaffold_start", None) is None:
+        args.scaffold_start = mode == "scaffold"
+    if args.resume_from is None:
+        args.resume_from = configured_resume
+    if args.fresh_start and args.scaffold_start:
+        raise SystemExit("blank and scaffold initialization are mutually exclusive")
+    if (args.fresh_start or args.scaffold_start) and args.resume_from:
+        raise SystemExit(
+            "blank or scaffold initialization cannot resume from another run"
+        )
+
+    configured_env_file = runtime.get("env_file", ".env")
+    if not isinstance(configured_env_file, str) or not configured_env_file:
+        raise SystemExit("run-spec runtime.env_file must be a non-empty string")
+    configured_keep_render = runtime.get("keep_render", False)
+    if not isinstance(configured_keep_render, bool):
+        raise SystemExit("run-spec runtime.keep_render must be a boolean")
+    configured_keep_images = runtime.get("keep_images", False)
+    if not isinstance(configured_keep_images, bool):
+        raise SystemExit("run-spec runtime.keep_images must be a boolean")
+    configured_agent_timeout = runtime.get("agent_timeout_sec")
+    if configured_agent_timeout is not None and (
+        not isinstance(configured_agent_timeout, int)
+        or isinstance(configured_agent_timeout, bool)
+        or configured_agent_timeout < 1
+    ):
+        raise SystemExit(
+            "run-spec runtime.agent_timeout_sec must be a positive integer"
+        )
+    if args.env_file is None:
+        args.env_file = configured_env_file
+    if args.keep_render is None:
+        args.keep_render = configured_keep_render
+    if getattr(args, "keep_images", None) is None:
+        args.keep_images = configured_keep_images
+    if getattr(args, "agent_timeout_sec", None) is None:
+        args.agent_timeout_sec = configured_agent_timeout
+
+    continuation_max_resumes = continuation.get("max_resumes", 0)
+    if (
+        not isinstance(continuation_max_resumes, int)
+        or isinstance(continuation_max_resumes, bool)
+        or continuation_max_resumes < 0
+    ):
+        raise SystemExit(
+            "run-spec runtime.continuation.max_resumes must be a "
+            "non-negative integer"
+        )
+    continuation_min_remaining = continuation.get("min_remaining_sec", 600)
+    if (
+        not isinstance(continuation_min_remaining, int)
+        or isinstance(continuation_min_remaining, bool)
+        or continuation_min_remaining < 1
+    ):
+        raise SystemExit(
+            "run-spec runtime.continuation.min_remaining_sec must be a "
+            "positive integer"
+        )
+
+    labels = config.get("labels", {})
+    if not isinstance(labels, dict):
+        raise SystemExit("run-spec labels must be a mapping")
+    config_labels: list[str] = []
+    for key, value in labels.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise SystemExit("run-spec labels must contain string keys and values")
+        config_labels.append(f"{key}={value}")
+    args.label = config_labels + args.label
+    args.run_spec_path = config_path
+    args.run_spec_ref = (
+        f"run-spec:{run_spec_namespace}/{run_spec_id}"
+        if run_spec_namespace is not None and run_spec_id is not None
+        else None
+    )
+
+    missing = [
+        flag
+        for flag, value in (
+            ("task", args.task),
+            ("agent", args.agent),
+            ("checkpoint", args.checkpoint),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(
+            "run spec is missing required values: " + ", ".join(missing)
+        )
+    return args
+
+
+def default_run_id(args: argparse.Namespace) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    suffix = uuid.uuid4().hex[:8]
+    if getattr(args, "run_spec_ref", None) is not None:
+        base = args.run_spec_ref.rsplit("/", 1)[-1]
+    else:
+        checkpoint = (
+            args.checkpoint.removeprefix("checkpoint:").rsplit("/", 1)[-1][:12]
+        )
+        base = "-".join((args.task, checkpoint, args.agent))
+
+    # A generated run ID must fit RUN_ID_RE's 128-character limit. Preserve the
+    # recognizable experiment/spec prefix and the cell-specific suffix (for
+    # example `-low` or `-xhigh`) while making rare oversized IDs deterministic.
+    reserved = len(timestamp) + len(suffix) + 2
+    maximum_base = 128 - reserved
+    if len(base) > maximum_base:
+        digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:8]
+        tail_length = min(32, maximum_base // 3)
+        head_length = maximum_base - len(digest) - tail_length - 2
+        base = f"{base[:head_length]}-{digest}-{base[-tail_length:]}"
+
+    return f"{base}-{timestamp}-{suffix}"
+
+
+def read_json(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError(f"expected a JSON object in {path}")
+    return value
+
+
+def write_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def require_run_id(value: object, field: str = "run id") -> str:
+    if not isinstance(value, str) or not RUN_ID_RE.fullmatch(value):
+        raise SystemExit(
+            f"{field} must be 1-128 letters, numbers, dots, underscores, or hyphens"
+        )
+    return value
+
+
+def value_references_any(value: object, identities: set[str]) -> bool:
+    if isinstance(value, str):
+        return value in identities
+    if isinstance(value, list):
+        return any(value_references_any(item, identities) for item in value)
+    if isinstance(value, dict):
+        return any(value_references_any(item, identities) for item in value.values())
+    return False
+
+
+def canonical_record_reference(record: dict[str, object]) -> str | None:
+    record_id = record.get("id")
+    record_type = record.get("type")
+    namespace = record.get("namespace")
+    if not isinstance(record_id, str):
+        return None
+    if isinstance(record_type, str) and record_id.startswith(f"{record_type}:"):
+        return record_id
+    if (
+        isinstance(record_type, str)
+        and isinstance(namespace, str)
+        and NAMESPACE_RE.fullmatch(namespace)
+    ):
+        return f"{record_type}:{namespace}/{record_id}"
+    return None
+
+
+def run_directory(namespace: str, run_id: str, runs_root: Path | None = None) -> Path:
+    root = runs_root or (REPO_ROOT / "runs")
+    return root.joinpath(
+        *require_namespace(namespace, "run namespace").split("/"),
+        run_id,
+    )
+
+
+def transcript_server_command(run_dir: Path) -> str:
+    """Return the copy-paste command for watching exactly one run."""
+
+    try:
+        target = run_dir.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        target = run_dir.resolve()
+    return shlex.join(
+        [
+            "python3",
+            "watcher/serve_gateway_transcripts.py",
+            str(target),
+        ]
+    )
+
+
+def evaluation_events_command(run_dir: Path) -> str:
+    """Return the copy-paste command for reading one run's evaluations."""
+
+    try:
+        target = run_dir.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        target = run_dir.resolve()
+    return shlex.join(["./dungeness", "evals", str(target)])
+
+
+def find_run_directory(run_id: str, runs_root: Path | None = None) -> Path | None:
+    root = runs_root or (REPO_ROOT / "runs")
+    matches: list[Path] = []
+    legacy = root / run_id
+    if legacy.is_dir():
+        matches.append(legacy)
+    for record_path in root.rglob("record.json"):
+        try:
+            record = read_json(record_path)
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+            continue
+        if record is None:
+            continue
+        data = record.get("data")
+        recorded_id = (
+            data.get("run_id")
+            if isinstance(data, dict) and isinstance(data.get("run_id"), str)
+            else record.get("id")
+        )
+        if recorded_id == run_id and record_path.parent not in matches:
+            matches.append(record_path.parent)
+    if len(matches) > 1:
+        raise SystemExit(f"run id is ambiguous across namespaces: {run_id}")
+    return matches[0] if matches else None
+
+
+def resolve_evaluation_events_path(target: str) -> Path:
+    """Resolve a run identity or filesystem target to usage/events.jsonl."""
+
+    supplied = Path(target).expanduser()
+    candidates = (
+        [supplied]
+        if supplied.is_absolute()
+        else [Path.cwd() / supplied, REPO_ROOT / supplied]
+    )
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.is_file():
+            return candidate
+        if not candidate.is_dir():
+            continue
+        for relative in (Path("usage/events.jsonl"), Path("events.jsonl")):
+            events_path = candidate / relative
+            if events_path.is_file():
+                return events_path
+        raise SystemExit(
+            f"evaluation events file not found under directory: {candidate}"
+        )
+
+    run_dir = find_run_directory(target)
+    if run_dir is not None:
+        events_path = run_dir / "usage" / "events.jsonl"
+        if events_path.is_file():
+            return events_path
+        raise SystemExit(f"evaluation events file not found: {events_path}")
+
+    raise SystemExit(
+        f"evaluation events target not found: {target}\n"
+        "Pass a run ID, run directory, usage directory, or events.jsonl path."
+    )
+
+
+def read_evaluation_event_lines(
+    path: Path,
+) -> list[tuple[dict[str, object], str]]:
+    """Read canonical evaluation events while retaining their original lines."""
+
+    matches: list[tuple[dict[str, object], str]] = []
+    try:
+        handle = path.open(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"could not read evaluation events: {path}: {error}") from error
+    with handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            if "evaluation.completed" not in raw_line:
+                continue
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError as error:
+                raise SystemExit(
+                    f"invalid JSON in {path}:{line_number}: {error.msg}"
+                ) from error
+            if (
+                not isinstance(event, dict)
+                or event.get("source") != "evaluator"
+                or event.get("kind") != "evaluation.completed"
+            ):
+                continue
+            matches.append((event, raw_line.rstrip("\r\n")))
+    return matches
+
+
+def format_evaluation_number(value: object) -> str:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "-"
+    if float(value).is_integer():
+        return f"{value:,.0f}"
+    return f"{value:,.6f}".rstrip("0").rstrip(".")
+
+
+def show_evaluations(args: argparse.Namespace) -> int:
+    events_path = resolve_evaluation_events_path(args.target)
+    events = read_evaluation_event_lines(events_path)
+    if args.jsonl:
+        for _event, raw_line in events:
+            print(raw_line)
+        return 0
+
+    try:
+        display_path = events_path.relative_to(REPO_ROOT)
+    except ValueError:
+        display_path = events_path
+    print(f">> evaluation events from {display_path}")
+    if not events:
+        print("No evaluation events recorded yet.")
+        return 0
+
+    for ordinal, (event, _raw_line) in enumerate(events, start=1):
+        data = event.get("data")
+        usage = event.get("usage")
+        data = data if isinstance(data, dict) else {}
+        usage = usage if isinstance(usage, dict) else {}
+        submissions_used = data.get("submissions_used")
+        submissions_limit = data.get("submissions_limit")
+        submission = (
+            str(submissions_used)
+            if isinstance(submissions_used, int)
+            and not isinstance(submissions_used, bool)
+            else str(ordinal)
+        )
+        if (
+            isinstance(submissions_limit, int)
+            and not isinstance(submissions_limit, bool)
+        ):
+            submission += f"/{submissions_limit}"
+        normalized_usd = usage.get("normalized_usd")
+        usd = (
+            "$" + format_evaluation_number(normalized_usd)
+            if isinstance(normalized_usd, (int, float))
+            and not isinstance(normalized_usd, bool)
+            else "-"
+        )
+        candidate = data.get("candidate_sha256")
+        candidate_text = (
+            candidate[:12] if isinstance(candidate, str) and candidate else "-"
+        )
+        print(
+            f"eval {submission}  {event.get('observed_at', '-')}  "
+            f"{data.get('status', '-')}  "
+            f"score={format_evaluation_number(data.get('score'))}  "
+            f"best={format_evaluation_number(data.get('best_score'))}  "
+            f"usd={usd}  "
+            f"toffoli={format_evaluation_number(data.get('avg_toffoli'))}  "
+            f"qubits={format_evaluation_number(data.get('peak_qubits'))}  "
+            f"candidate={candidate_text}"
+        )
+    return 0
+
+
+def run_references(run_dir: Path, runs_root: Path) -> list[str]:
+    """Return canonical runs that reference the run being pruned."""
+
+    run_id = run_dir.name
+    target_record_path = run_dir / "record.json"
+    identities = {f"run:{run_id}"}
+    if target_record_path.is_file():
+        try:
+            target_record = read_json(target_record_path)
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+            raise SystemExit(
+                f"cannot validate run record before pruning: {target_record_path}: {error}"
+            ) from error
+        target_identity = (
+            canonical_record_reference(target_record)
+            if target_record is not None
+            else None
+        )
+        if target_identity is not None:
+            identities.add(target_identity)
+
+    references: list[str] = []
+    for record_path in sorted(runs_root.rglob("record.json")):
+        if record_path == target_record_path:
+            continue
+        try:
+            record = read_json(record_path)
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+            raise SystemExit(
+                f"cannot verify run references because {record_path} is invalid: {error}"
+            ) from error
+        if record is None:
+            continue
+        if value_references_any(record.get("relations"), identities):
+            data = record.get("data")
+            referenced_by = (
+                data.get("run_id")
+                if isinstance(data, dict) and isinstance(data.get("run_id"), str)
+                else record_path.parent.name
+            )
+            references.append(referenced_by)
+    return references
+
+
+def live_harbor_runs() -> list[str]:
+    """Harbor processes executing on this machine right now."""
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-fl", "harbor run"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def clean_environments(args: argparse.Namespace) -> int:
+    """Release Docker environments left behind by runs that are no longer live.
+
+    Recovers the state that already leaked before runs learned to tear
+    themselves down, and any environment orphaned by a killed terminal.
+    """
+
+    # An in-flight run owns a live environment that looks exactly like a leaked
+    # one, so refuse rather than pull the floor out from under it.
+    live = live_harbor_runs()
+    if live and not args.force:
+        formatted = "\n".join(f"  - {line}" for line in live)
+        raise SystemExit(
+            f"a run is still executing; cleaning now would destroy it:\n"
+            f"{formatted}\n"
+            "Wait for it to finish, or pass --force if you know it is dead."
+        )
+
+    listing = docker_query(
+        [
+            "ps",
+            "--all",
+            "--format",
+            "{{.Label \"com.docker.compose.project\"}}\t{{.Names}}\t{{.Status}}",
+        ]
+    )
+    if listing is None:
+        raise SystemExit("could not reach the Docker daemon")
+    projects: dict[str, list[str]] = {}
+    for line in listing.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 3 or not fields[0].startswith("task__"):
+            continue
+        projects.setdefault(fields[0], []).append(f"{fields[1]} ({fields[2]})")
+    networks = docker_task_networks()
+    images = docker_task_images()
+    if not projects and not networks and not images:
+        print(">> no leftover run environments")
+        return 0
+
+    for project, containers in sorted(projects.items()):
+        print(f"{project}")
+        for container in sorted(containers):
+            print(f"  - {container}")
+    orphaned_networks = sorted(
+        name
+        for name in networks
+        if not any(name.startswith(project) for project in projects)
+    )
+    for name in orphaned_networks:
+        print(f"{name} (network only)")
+    for image in images:
+        print(f"{image} (image only)")
+
+    if not args.yes:
+        try:
+            answer = input(
+                f"Remove {len(projects)} run environment(s) and "
+                f"{len(networks)} network(s) and {len(images)} image(s)? [y/N] "
+            )
+        except EOFError as error:
+            raise SystemExit(
+                "confirmation requires an interactive terminal; "
+                "pass --yes to clean"
+            ) from error
+        if answer.strip().lower() not in {"y", "yes"}:
+            print(">> clean cancelled")
+            return 0
+
+    for project in sorted(projects):
+        if compose_down(project):
+            print(f">> released docker environment {project}")
+    # A network can outlive every container that used it, so sweep whatever the
+    # per-project teardown could not reach.
+    for name in docker_task_networks():
+        if docker_query(["network", "rm", name]) is not None:
+            print(f">> removed network {name}")
+    removed_images = remove_docker_images(images)
+    if removed_images:
+        print(f">> removed {removed_images} run docker image(s)")
+    return 0
+
+
+def prune_run(args: argparse.Namespace) -> int:
+    run_id = require_run_id(args.run_id, "run id")
+    runs_root = REPO_ROOT / "runs"
+    run_dir = find_run_directory(run_id, runs_root)
+    if run_dir is None or run_dir.is_symlink():
+        raise SystemExit(f"run not found: runs/{run_id}")
+
+    references = run_references(run_dir, runs_root)
+    display_path = run_dir.relative_to(REPO_ROOT).as_posix()
+    if references:
+        formatted = "\n".join(f"  - {value}" for value in references)
+        raise SystemExit(
+            f"cannot prune {display_path}; referenced by:\n{formatted}\n"
+            "Prune dependent runs first."
+        )
+
+    if not args.yes:
+        try:
+            answer = input(f"Permanently remove {display_path}? [y/N] ")
+        except EOFError as error:
+            raise SystemExit(
+                "confirmation requires an interactive terminal; pass --yes to prune"
+            ) from error
+        if answer.strip().lower() not in {"y", "yes"}:
+            print(">> prune cancelled")
+            return 0
+
+    shutil.rmtree(run_dir)
+    print(f">> pruned {display_path}")
+    return 0
+
+
+def repository_provenance(repository_root: Path) -> dict[str, object]:
+    """Describe the exact Dungeness Git state used to launch a run."""
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
+        environment = os.environ.copy()
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        return subprocess.run(
+            ["git", "-C", str(repository_root), *arguments],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=environment,
+        )
+
+    head = git("rev-parse", "--verify", "HEAD")
+    if head.returncode != 0:
+        error = head.stderr.decode("utf-8", errors="replace").strip()
+        return {
+            "vcs": "git",
+            "root": ".",
+            "available": False,
+            "reproducible_from_commit": False,
+            "error": error[:1000] or "could not resolve Git HEAD",
+        }
+
+    commit = head.stdout.decode("ascii", errors="replace").strip()
+    branch_result = git("symbolic-ref", "--quiet", "--short", "HEAD")
+    branch = (
+        branch_result.stdout.decode("utf-8", errors="replace").strip()
+        if branch_result.returncode == 0
+        else None
+    )
+
+    status = git("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    tracked_diff = git("diff", "--binary", "--no-ext-diff", "HEAD", "--")
+    tracked_names = git("diff", "--name-only", "-z", "HEAD", "--")
+    untracked_names = git("ls-files", "--others", "--exclude-standard", "-z")
+    capture_results = {
+        "status": status,
+        "tracked_diff": tracked_diff,
+        "tracked_names": tracked_names,
+        "untracked_names": untracked_names,
+    }
+    errors = {
+        name: result.stderr.decode("utf-8", errors="replace").strip()[:1000]
+        for name, result in capture_results.items()
+        if result.returncode != 0
+    }
+    capture_complete = not errors
+    dirty = bool(status.stdout) if status.returncode == 0 else None
+
+    tracked_files = (
+        sorted(
+            os.fsdecode(value)
+            for value in tracked_names.stdout.split(b"\0")
+            if value
+        )
+        if tracked_names.returncode == 0
+        else []
+    )
+    untracked_files: list[dict[str, object]] = []
+    if untracked_names.returncode == 0:
+        for raw_path in untracked_names.stdout.split(b"\0"):
+            if not raw_path:
+                continue
+            relative = os.fsdecode(raw_path)
+            path = repository_root / relative
+            entry: dict[str, object] = {"path": relative}
+            try:
+                if path.is_symlink():
+                    target = os.readlink(path)
+                    encoded_target = os.fsencode(target)
+                    entry.update(
+                        {
+                            "kind": "symlink",
+                            "size_bytes": len(encoded_target),
+                            "sha256": hashlib.sha256(encoded_target).hexdigest(),
+                        }
+                    )
+                elif path.is_file():
+                    digest = hashlib.sha256()
+                    with path.open("rb") as source:
+                        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    entry.update(
+                        {
+                            "kind": "file",
+                            "size_bytes": path.stat().st_size,
+                            "sha256": digest.hexdigest(),
+                        }
+                    )
+                else:
+                    entry["kind"] = "other"
+            except OSError as error:
+                entry.update({"kind": "unreadable", "error": str(error)[:1000]})
+            untracked_files.append(entry)
+
+    result: dict[str, object] = {
+        "vcs": "git",
+        "root": ".",
+        "available": True,
+        "commit": commit,
+        "branch": branch,
+        "capture_complete": capture_complete,
+        "dirty": dirty,
+        "reproducible_from_commit": capture_complete and dirty is False,
+        "status_sha256": (
+            hashlib.sha256(status.stdout).hexdigest()
+            if status.returncode == 0
+            else None
+        ),
+        "tracked_diff_sha256": (
+            hashlib.sha256(tracked_diff.stdout).hexdigest()
+            if tracked_diff.returncode == 0 and tracked_diff.stdout
+            else None
+        ),
+        "tracked_diff_bytes": (
+            len(tracked_diff.stdout) if tracked_diff.returncode == 0 else None
+        ),
+        "tracked_files": tracked_files,
+        "untracked_files": untracked_files,
+    }
+    if errors:
+        result["capture_errors"] = errors
+    return result
+
+
+def start_run_record(
+    rendered_path: Path,
+    run_id: str,
+    *,
+    environment_file: str | None = None,
+    keep_images: bool = False,
+    control_plane_environment: dict[str, str] | None = None,
+    scrubbed_host_environment: list[str] | None = None,
+) -> Path:
+    source = rendered_path / "resolved-run.json"
+    record = read_json(source)
+    if record is None:
+        raise RuntimeError(f"renderer did not produce a resolved run record at {source}")
+    data = record.get("data")
+    if not isinstance(data, dict) or data.get("run_id") != run_id:
+        raise RuntimeError(f"resolved run record identity mismatch in {source}")
+    namespace = record.get("namespace")
+    if not isinstance(namespace, str):
+        raise RuntimeError(f"resolved run record has no namespace in {source}")
+    started_at = utc_now()
+    record["created_at"] = started_at
+    data["status"] = "running"
+    data["started_at"] = started_at
+    configuration = data.get("configuration")
+    if isinstance(configuration, dict):
+        repository = repository_provenance(REPO_ROOT)
+        configuration["repository"] = repository
+        configuration["launcher"] = {
+            "harbor_version": HARBOR_VERSION,
+            "litellm_version": LITELLM_VERSION,
+            "python_version": "3.12",
+            "environment_file": environment_file,
+            "environment_file_contents_recorded": False,
+            "keep_images": keep_images,
+            # Non-secret agent routing exported to Harbor's own process env,
+            # and the NAMES of host variables withheld from it (never values).
+            "control_plane_environment": dict(control_plane_environment or {}),
+            "scrubbed_host_environment": list(scrubbed_host_environment or []),
+        }
+        if repository.get("available") is not True:
+            print(
+                ">> warning: Dungeness Git provenance could not be captured; "
+                "this run is not reproducible from a recorded framework commit",
+                file=sys.stderr,
+            )
+        elif repository.get("dirty") is True:
+            print(
+                ">> warning: Dungeness worktree is dirty; the run records the "
+                "HEAD commit and change fingerprints, but exact reproduction "
+                "requires preserving the uncommitted changes",
+                file=sys.stderr,
+            )
+    record_path = run_directory(namespace, run_id) / "record.json"
+    write_json(record_path, record)
+    return record_path
+
+
+def finalize_run_record(
+    record_path: Path,
+    *,
+    status: str,
+    error: str | None = None,
+) -> None:
+    record = read_json(record_path)
+    if record is None:
+        raise RuntimeError(f"run record disappeared: {record_path}")
+    data = record.get("data")
+    if not isinstance(data, dict):
+        raise RuntimeError(f"run record has no data object: {record_path}")
+    run_id = data.get("run_id")
+    if not isinstance(run_id, str):
+        raise RuntimeError(f"run record has no run id: {record_path}")
+    run_dir = record_path.parent
+
+    finished_at = utc_now()
+    record["published_at"] = finished_at
+    data["finished_at"] = finished_at
+
+    usage_summary = read_json(run_dir / "usage" / "summary.json")
+    if usage_summary is not None and isinstance(usage_summary.get("usage"), dict):
+        data["usage"] = usage_summary["usage"]
+
+    evaluation_summary: dict[str, Any] = {}
+    if usage_summary is not None and isinstance(
+        usage_summary.get("evaluation"),
+        dict,
+    ):
+        evaluation_summary.update(usage_summary["evaluation"])
+    events_path = run_dir / "usage" / "events.jsonl"
+    if events_path.is_file():
+        try:
+            event_file = events_path.open(encoding="utf-8")
+        except OSError:
+            event_file = None
+        if event_file is not None:
+            with event_file:
+                for line in event_file:
+                    if "evaluation.completed" not in line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if (
+                        not isinstance(event, dict)
+                        or event.get("source") != "evaluator"
+                        or event.get("kind") != "evaluation.completed"
+                    ):
+                        continue
+                    event_data = event.get("data")
+                    if not isinstance(event_data, dict):
+                        continue
+                    for key in (
+                        "submissions_used",
+                        "submissions_limit",
+                        "best_score",
+                    ):
+                        if key in event_data:
+                            evaluation_summary[key] = event_data[key]
+    if not evaluation_summary:
+        legacy_evaluation = read_json(run_dir / "usage" / "eval-summary.json")
+        if legacy_evaluation is not None:
+            evaluation_summary.update(
+                {
+                    key: value
+                    for key, value in legacy_evaluation.items()
+                    if key != "run_id"
+                }
+            )
+    if evaluation_summary:
+        data["evaluation"] = evaluation_summary
+        best_score = evaluation_summary.get("best_score")
+        metric = data.get("metric")
+        if (
+            isinstance(best_score, (int, float))
+            and not isinstance(best_score, bool)
+            and isinstance(metric, dict)
+            and isinstance(metric.get("name"), str)
+        ):
+            data["metrics"] = {metric["name"]: best_score}
+
+    research_state_summary = read_json(
+        run_dir / "usage" / "research-state-summary.json"
+    )
+    if research_state_summary is not None:
+        data["research_state"] = {
+            key: value
+            for key, value in research_state_summary.items()
+            if key != "run_id"
+        }
+
+    harbor_result = read_json(run_dir / "harbor" / run_id / "result.json")
+    if harbor_result is not None:
+        data["execution"] = {
+            key: harbor_result[key]
+            for key in (
+                "id",
+                "started_at",
+                "updated_at",
+                "finished_at",
+                "n_total_trials",
+                "stats",
+            )
+            if key in harbor_result
+        }
+        if status == "completed":
+            harbor_status, harbor_error = harbor_result_outcome(harbor_result)
+            if harbor_status is not None:
+                status = harbor_status
+                error = error or harbor_error
+
+    data["status"] = status
+    if error is not None:
+        data["error"] = error
+    write_json(record_path, record)
+
+
+def harbor_result_outcome(
+    harbor_result: dict[str, object],
+) -> tuple[str | None, str | None]:
+    stats = harbor_result.get("stats")
+    if not isinstance(stats, dict):
+        return None, None
+
+    errored = stats.get("n_errored_trials", 0)
+    cancelled = stats.get("n_cancelled_trials", 0)
+    running = stats.get("n_running_trials", 0)
+    pending = stats.get("n_pending_trials", 0)
+
+    if isinstance(errored, int) and not isinstance(errored, bool) and errored > 0:
+        exception_types: set[str] = set()
+        evals = stats.get("evals")
+        if isinstance(evals, dict):
+            for evaluation in evals.values():
+                if not isinstance(evaluation, dict):
+                    continue
+                exception_stats = evaluation.get("exception_stats")
+                if isinstance(exception_stats, dict):
+                    exception_types.update(
+                        key for key in exception_stats if isinstance(key, str)
+                    )
+        detail = (
+            f": {', '.join(sorted(exception_types))}" if exception_types else ""
+        )
+        noun = "trial" if errored == 1 else "trials"
+        return "failed", f"Harbor reported {errored} errored {noun}{detail}"
+
+    if (
+        isinstance(cancelled, int)
+        and not isinstance(cancelled, bool)
+        and cancelled > 0
+    ):
+        return "cancelled", f"Harbor reported {cancelled} cancelled trial(s)"
+
+    unfinished = sum(
+        value
+        for value in (running, pending)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+    )
+    if unfinished:
+        return "failed", f"Harbor exited with {unfinished} unfinished trial(s)"
+
+    return None, None
+
+
+# Harbor's claude_code agent reads these variables from the CONTROL PLANE (the
+# env `harbor run` sees) rather than from the sandbox, and uses them to decide
+# model-name handling. `dungeness run` exports them from the selected agent's
+# manifest so the route is chosen per agent instead of once per .env.
+CONTROL_PLANE_AGENT_ENV = ("ANTHROPIC_BASE_URL",)
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Read KEY=VALUE pairs from a dotenv file (comments and quotes tolerated)."""
+
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
+
+
+def control_plane_agent_environment(
+    job_path: Path,
+    env_file: Path,
+) -> dict[str, str]:
+    """Variables the rendered agent needs Harbor itself (not the sandbox) to see.
+
+    Harbor loads the env file with override, so a conflicting value there would
+    silently pin every profile to one route; refuse to start in that case.
+    """
+
+    job = yaml.safe_load(job_path.read_text(encoding="utf-8"))
+    agents = job.get("agents") if isinstance(job, dict) else None
+    if not isinstance(agents, list) or len(agents) != 1:
+        raise RuntimeError(f"Harbor job must declare exactly one agent: {job_path}")
+    agent_env = agents[0].get("env") or {}
+    if not isinstance(agent_env, dict):
+        raise RuntimeError(f"Harbor job agent env must be a mapping: {job_path}")
+    env_values = parse_env_file(env_file) if env_file.is_file() else {}
+    exported: dict[str, str] = {}
+    for key in CONTROL_PLANE_AGENT_ENV:
+        value = agent_env.get(key)
+        if value is None:
+            continue
+        value = str(value)
+        conflicting = env_values.get(key)
+        if conflicting is not None and conflicting != value:
+            raise SystemExit(
+                f"{env_file.name} sets {key}={conflicting!r}, but the selected "
+                f"agent requires {key}={value!r}. Harbor loads {env_file.name} "
+                f"with override, so remove {key} from it; dungeness exports the "
+                "agent's value automatically."
+            )
+        exported[key] = value
+    return exported
+
+
+# Host variables that Harbor's installed agents (claude_code in particular) copy
+# from the CONTROL PLANE into the sandbox or use to switch provider mode
+# (Bedrock/Vertex/OAuth). A developer shell often carries them -- e.g. a Claude
+# Code session on Bedrock exports CLAUDE_CODE_USE_BEDROCK and AWS_* -- and they
+# would either leak a real credential into the sandbox or reroute the agent
+# away from the gateway. Drop them; the agent manifest is the only route source.
+HOST_ENV_SCRUB_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "CLAUDECODE", "AWS_")
+HOST_ENV_SCRUB_KEYS = frozenset({"MAX_THINKING_TOKENS", "DISABLE_PROMPT_CACHING"})
+
+
+def harbor_launch_environment(
+    base: Mapping[str, str],
+    control_plane_environment: Mapping[str, str],
+) -> tuple[dict[str, str], list[str]]:
+    """Return (env for `harbor run`, names of host variables that were dropped)."""
+
+    scrubbed = sorted(
+        key
+        for key in base
+        if key.startswith(HOST_ENV_SCRUB_PREFIXES) or key in HOST_ENV_SCRUB_KEYS
+    )
+    environment = {key: value for key, value in base.items() if key not in scrubbed}
+    environment.update(control_plane_environment)
+    return environment, scrubbed
+
+
+def stream_command(command: list[str], *, env: dict[str, str] | None = None) -> str:
+    """Run a command visibly and return its last non-empty output line."""
+    process = subprocess.Popen(
+        command,
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    last_line = ""
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        if line.strip():
+            last_line = line.strip()
+    return_code = process.wait()
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command)
+    return last_line
+
+
+def dispose_render(
+    rendered_path: Path,
+    run_id: str,
+    run_dir: Path,
+    *,
+    keep: bool,
+) -> Path | None:
+    resolved_render = rendered_path.resolve()
+    render_root = resolved_render.parent
+    temporary_root = Path(tempfile.gettempdir()).resolve()
+    if (
+        resolved_render.name != "task"
+        or render_root.parent != temporary_root
+        or not render_root.name.startswith(f"dungeness-{run_id}-")
+    ):
+        raise RuntimeError(
+            f"refusing to remove unexpected render path: {resolved_render}"
+        )
+
+    retained_path = None
+    if keep:
+        retained_path = run_dir / "debug" / "harbor-task"
+        retained_path.parent.mkdir(parents=True, exist_ok=True)
+        if retained_path.exists():
+            raise RuntimeError(f"debug render already exists: {retained_path}")
+        shutil.move(resolved_render, retained_path)
+    shutil.rmtree(render_root, ignore_errors=True)
+    return retained_path
+
+
+def docker_query(arguments: list[str]) -> str | None:
+    """Read from the Docker daemon, or None when it cannot be reached."""
+
+    try:
+        result = subprocess.run(
+            ["docker", *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def docker_task_networks() -> list[str]:
+    """Every per-run Harbor network currently held by the daemon."""
+
+    listing = docker_query(["network", "ls", "--format", "{{.Name}}"])
+    if listing is None:
+        return []
+    return [
+        name
+        for name in listing.split()
+        if name.startswith("task__") and "__env" in name
+    ]
+
+
+def docker_network_capacity() -> int | None:
+    """How many networks the daemon's address pools can hold.
+
+    Returns None when the pools have been configured locally: the operator has
+    already taken this into their own hands, so there is nothing to warn about.
+    Docker's built-in defaults are 15 x /16 plus 16 x /20, hence 31.
+    """
+
+    pools = docker_query(
+        ["info", "--format", "{{json .DefaultAddressPools}}"]
+    )
+    if pools is None or pools.strip() not in {"null", ""}:
+        return None
+    return 31
+
+
+def check_docker_network_capacity() -> None:
+    """Fail before rendering when compose could not allocate this run's networks.
+
+    Each run needs two networks. Exhausting the pools produces a hundred-line
+    docker traceback whose one useful line is buried at the end, so say plainly
+    what is wrong and how to clear it.
+    """
+
+    capacity = docker_network_capacity()
+    if capacity is None:
+        return
+    listing = docker_query(["network", "ls", "--format", "{{.Name}}"])
+    if listing is None:
+        return
+    in_use = len(listing.split())
+    if capacity - in_use >= 2:
+        return
+    leaked = len(docker_task_networks())
+    raise SystemExit(
+        f"Docker has {in_use} of {capacity} networks in use and this run "
+        "needs 2.\n"
+        f"{leaked} belong to previous Dungeness runs; remove them with "
+        "./dungeness clean\n"
+        "Raise the ceiling permanently by setting default-address-pools in "
+        "~/.docker/daemon.json."
+    )
+
+
+def harbor_trials_for_run(run_dir: Path) -> list[str]:
+    """The lowercase Harbor trial IDs recorded under one run."""
+
+    harbor_root = run_dir / "harbor"
+    if not harbor_root.is_dir():
+        return []
+    return sorted(
+        {
+            trial.name.lower()
+            for trial in harbor_root.glob("*/task__*")
+            if trial.is_dir()
+        }
+    )
+
+
+def compose_projects_for_run(run_dir: Path) -> list[str]:
+    """The environment projects Harbor created for a run."""
+
+    return [f"{trial}__env" for trial in harbor_trials_for_run(run_dir)]
+
+
+def docker_compose_images() -> list[tuple[str, str]]:
+    """Return (image reference, compose project) for Compose-built images."""
+
+    listing = docker_query(
+        [
+            "image",
+            "ls",
+            "--format",
+            '{{.Repository}}:{{.Tag}}\t{{.Label "com.docker.compose.project"}}',
+        ]
+    )
+    if listing is None:
+        return []
+    images: set[tuple[str, str]] = set()
+    for line in listing.splitlines():
+        fields = line.split("\t", 1)
+        if len(fields) != 2:
+            continue
+        image, project = fields
+        if not project or image.startswith("<none>:"):
+            continue
+        images.add((image, project))
+    return sorted(images)
+
+
+def docker_images_for_run(run_dir: Path) -> list[str]:
+    """Every Compose-built image whose project belongs to this run's trials."""
+
+    trials = harbor_trials_for_run(run_dir)
+    if not trials:
+        return []
+    return sorted(
+        {
+            image
+            for image, project in docker_compose_images()
+            if any(
+                project == trial or project.startswith(f"{trial}__")
+                for trial in trials
+            )
+        }
+    )
+
+
+def docker_task_images() -> list[str]:
+    """Every image built by a Harbor task Compose project."""
+
+    return sorted(
+        {
+            image
+            for image, project in docker_compose_images()
+            if project.startswith("task__")
+        }
+    )
+
+
+def remove_docker_images(images: list[str]) -> int:
+    """Remove exact image tags without pruning shared or unrelated images."""
+
+    removed = 0
+    for image in sorted(set(images)):
+        try:
+            result = subprocess.run(
+                ["docker", "image", "rm", image],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            print(
+                f">> warning: could not remove docker image {image}: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        if result.returncode == 0:
+            removed += 1
+            continue
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        print(
+            f">> warning: could not remove docker image {image}: "
+            f"{detail[-1] if detail else 'unknown docker error'}",
+            file=sys.stderr,
+            flush=True,
+        )
+    return removed
+
+
+def compose_down(project: str) -> bool:
+    """Remove a compose project's containers and networks. True when removed."""
+
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                project,
+                "down",
+                "--volumes",
+                "--remove-orphans",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(
+            f">> warning: could not tear down {project}: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    if result.returncode == 0:
+        return True
+    detail = (result.stderr or result.stdout or "").strip().splitlines()
+    print(
+        f">> warning: could not tear down {project}: "
+        f"{detail[-1] if detail else 'unknown docker error'}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return False
+
+
+def teardown_run_environments(
+    run_dir: Path,
+    *,
+    remove_images: bool = True,
+) -> None:
+    """Release a finished run's Docker containers, networks, and images.
+
+    Harbor removes its own environment when a trial ends normally, but an
+    interrupt aborts that cleanup mid-flight and leaks two networks per run.
+    Docker's built-in address pools hold only 31 networks, so a handful of
+    interrupted runs is enough to make every later run fail at compose time.
+    Compose-built images are run-scoped and can consume several gigabytes each,
+    so they are removed by default as well. Teardown is best-effort: it must
+    never mask the run's own outcome.
+    """
+
+    for project in compose_projects_for_run(run_dir):
+        if compose_down(project):
+            print(f">> released docker environment {project}", flush=True)
+    if remove_images:
+        removed = remove_docker_images(docker_images_for_run(run_dir))
+        if removed:
+            print(f">> removed {removed} run docker image(s)", flush=True)
+
+
+def verifier_candidate_path(dockerfile: Path) -> PurePosixPath:
+    match = re.search(
+        r"(?:^|\s)CANDIDATE_PATH=([^\s\\]+)",
+        dockerfile.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    if match is None:
+        raise SystemExit(f"CANDIDATE_PATH not found in {dockerfile}")
+    container_path = PurePosixPath(match.group(1))
+    workspace_root = PurePosixPath("/workspace/repo")
+    try:
+        return container_path.relative_to(workspace_root)
+    except ValueError as error:
+        raise SystemExit(
+            f"CANDIDATE_PATH must be under {workspace_root}: {container_path}"
+        ) from error
+
+
+def resolve_verification_candidate(
+    run_dir: Path,
+    task_root: Path,
+    relative_candidate: PurePosixPath,
+    explicit: str | None,
+) -> Path:
+    if explicit is not None:
+        candidate = Path(explicit).expanduser()
+        if not candidate.is_absolute():
+            candidate = REPO_ROOT / candidate
+    else:
+        artifact_pattern = (
+            f"*/*/artifacts/workspace/repo/{relative_candidate.as_posix()}"
+        )
+        matches = sorted((run_dir / "harbor").glob(artifact_pattern))
+        candidate = (
+            matches[0]
+            if matches
+            else task_root
+            / "environment"
+            / "workspace"
+            / "repo"
+            / Path(*relative_candidate.parts)
+        )
+    if not candidate.exists():
+        raise SystemExit(f"candidate not found: {candidate}")
+    return candidate.resolve()
+
+
+def retained_verifier_memory(task_root: Path) -> str:
+    """Read the verifier limit recorded in the retained Harbor task."""
+
+    task_path = task_root / "task.toml"
+    try:
+        with task_path.open("rb") as handle:
+            task = tomllib.load(handle)
+        memory_mb = task["verifier"]["environment"]["memory_mb"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        # Compatibility for old retained renders that predate recorded resource
+        # envelopes. This is deliberately only a fallback, not the current
+        # ECDSA default.
+        return "20g"
+    if not isinstance(memory_mb, int) or isinstance(memory_mb, bool) or memory_mb <= 0:
+        raise SystemExit(f"invalid verifier memory_mb in {task_path}: {memory_mb!r}")
+    return f"{memory_mb}m"
+
+
+def verify_run(args: argparse.Namespace) -> int:
+    run_dir = find_run_directory(args.run_id)
+    if run_dir is None:
+        raise SystemExit(f"run not found: runs/{args.run_id}")
+    task_root = run_dir / "debug" / "harbor-task"
+    tests_root = task_root / "tests"
+    if not tests_root.is_dir():
+        raise SystemExit(
+            f"verifier bundle not found: {tests_root}\n"
+            "Launch the run with --keep-render so its exact verifier is retained."
+        )
+
+    relative_candidate = verifier_candidate_path(tests_root / "Dockerfile")
+    candidate = resolve_verification_candidate(
+        run_dir,
+        task_root,
+        relative_candidate,
+        args.candidate,
+    )
+    container_path = PurePosixPath("/workspace/repo") / relative_candidate
+    output_dir = run_dir / "verify-out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for stale_name in ("score.json", "reward.json"):
+        stale_path = output_dir / stale_name
+        if stale_path.exists():
+            stale_path.unlink()
+    image_name = "dungeness-verify-" + re.sub(
+        r"[^a-z0-9_.-]+", "-", args.run_id.lower()
+    )
+    memory_limit = args.memory or retained_verifier_memory(task_root)
+
+    print(f">> building verifier image from {tests_root}", flush=True)
+    subprocess.run(
+        ["docker", "build", "-t", image_name, str(tests_root)],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    print(
+        f">> grading {candidate} with no network at {container_path} "
+        f"(memory limit {memory_limit})",
+        flush=True,
+    )
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--memory",
+            memory_limit,
+            "-v",
+            f"{candidate}:{container_path}:ro",
+            "-v",
+            f"{output_dir.resolve()}:/logs/verifier",
+            image_name,
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+
+    score_path = output_dir / "score.json"
+    if not score_path.is_file():
+        raise SystemExit(f"verifier produced no score: {score_path}")
+    print(">> score:")
+    print(score_path.read_text(encoding="utf-8").rstrip())
+    return 0
+
+
+def add_run_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "target",
+        help="task id under tasks/ or path to a run-spec YAML file",
+    )
+    parser.add_argument("--agent", help="research agent id under agents/")
+    parser.add_argument(
+        "--checkpoint",
+        metavar="REF",
+        help="public checkpoint commit prefix or <namespace>/<commit>",
+    )
+    parser.add_argument(
+        "--fresh-start",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="blank the checkpoint candidate instead of seeding its solution",
+    )
+    parser.add_argument(
+        "--scaffold-start",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="start from the task's trusted reconstruction scaffold",
+    )
+    parser.add_argument("--run-id", help="explicit run identity")
+    parser.add_argument(
+        "--namespace",
+        help="run namespace override; otherwise uses environment or user config",
+    )
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="searchable run label; repeatable",
+    )
+    parser.add_argument("--resume-from", metavar="RUN_ID")
+    parser.add_argument("--max-model-tokens", type=int, metavar="N")
+    parser.add_argument("--max-usd", type=float, metavar="USD")
+    parser.add_argument(
+        "--agent-timeout-sec",
+        type=int,
+        metavar="SECONDS",
+        help="wall-clock limit for the research-agent phase",
+    )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        metavar="PATH",
+        help="Harbor environment file relative to the repository root (default: .env)",
+    )
+    parser.add_argument(
+        "--keep-render",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="retain the Harbor task under the namespaced run directory for inspection",
+    )
+    parser.add_argument(
+        "--keep-images",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="retain run-scoped Docker images after teardown (default: remove them)",
+    )
+
+
+def build_command(args: argparse.Namespace, run_id: str) -> list[str]:
+    command = [
+        "uv",
+        "run",
+        str(BUILD_SCRIPT.relative_to(REPO_ROOT)),
+        args.task,
+        "--task-namespace",
+        args.task_namespace,
+        "--agent",
+        args.agent,
+        "--agent-namespace",
+        args.agent_namespace,
+        "--checkpoint",
+        args.checkpoint,
+        "--run-id",
+        run_id,
+        "--namespace",
+        args.namespace,
+    ]
+    for flag, value in (
+        ("--resume-from", args.resume_from),
+        ("--max-model-tokens", args.max_model_tokens),
+        ("--max-usd", args.max_usd),
+        ("--agent-timeout-sec", getattr(args, "agent_timeout_sec", None)),
+        ("--reasoning-effort", args.reasoning_effort),
+        ("--reasoning-summary", args.reasoning_summary),
+    ):
+        if value is not None:
+            command.extend((flag, str(value)))
+    for label in args.label:
+        command.extend(("--label", label))
+    if args.fresh_start:
+        command.append("--fresh-start")
+    if getattr(args, "scaffold_start", False):
+        command.append("--scaffold-start")
+    if args.run_spec_path is not None:
+        command.extend(("--run-spec", str(args.run_spec_path)))
+        if args.run_spec_ref is not None:
+            run_spec_namespace = (
+                args.run_spec_ref.removeprefix("run-spec:").rsplit("/", 1)[0]
+            )
+            command.extend(("--run-spec-namespace", run_spec_namespace))
+    return command
+
+
+def execute_run(args: argparse.Namespace) -> int:
+    args = resolve_run_spec_arguments(args)
+    args.namespace = resolve_namespace(args.namespace)
+    env_file = REPO_ROOT / args.env_file
+    if not env_file.is_file():
+        raise SystemExit(
+            f"environment file not found: {env_file}\n"
+            "Run ./dungeness setup first, then fill in the required provider keys."
+        )
+
+    run_id = args.run_id or default_run_id(args)
+    run_dir = run_directory(args.namespace, run_id)
+    if run_dir.exists() and any(run_dir.iterdir()):
+        display_path = run_dir.relative_to(REPO_ROOT).as_posix()
+        raise SystemExit(
+            f"run already exists: {display_path}\n"
+            "Run records are immutable; choose another --run-id."
+        )
+    print(
+        ">> live transcript (run in another terminal): "
+        + transcript_server_command(run_dir),
+        flush=True,
+    )
+    print(
+        ">> evaluation events (rerun as needed): "
+        + evaluation_events_command(run_dir),
+        flush=True,
+    )
+    check_docker_network_capacity()
+
+    rendered_path: Path | None = None
+    record_path: Path | None = None
+    final_status = "failed"
+    failure: str | None = None
+    try:
+        print(">> rendering temporary run task", flush=True)
+        rendered_text = stream_command(build_command(args, run_id))
+        rendered_path = Path(rendered_text)
+        if not rendered_path.is_absolute():
+            rendered_path = REPO_ROOT / rendered_path
+        job_path = rendered_path / "harbor-job.yaml"
+        if not job_path.is_file():
+            raise RuntimeError(
+                f"renderer did not produce a Harbor job at {job_path}"
+            )
+        control_plane_env = control_plane_agent_environment(job_path, env_file)
+        environment, scrubbed_host_env = harbor_launch_environment(
+            os.environ, control_plane_env
+        )
+        record_path = start_run_record(
+            rendered_path,
+            run_id,
+            environment_file=args.env_file,
+            keep_images=args.keep_images,
+            control_plane_environment=control_plane_env,
+            scrubbed_host_environment=scrubbed_host_env,
+        )
+        print(f">> recorded run {run_id}", flush=True)
+
+        if scrubbed_host_env:
+            print(
+                ">> dropping host provider variables from the Harbor control plane: "
+                + ", ".join(scrubbed_host_env),
+                flush=True,
+            )
+        for key, value in control_plane_env.items():
+            print(f">> exporting {key}={value} to the Harbor control plane", flush=True)
+        adapter_path = str(REPO_ROOT / "adapters/harbor")
+        existing_pythonpath = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            adapter_path
+            if not existing_pythonpath
+            else adapter_path + os.pathsep + existing_pythonpath
+        )
+        print(f">> executing run from {job_path}", flush=True)
+        with prepared_subscription_auth(args) as auth_environment:
+            environment.update(auth_environment)
+            stream_command(
+                [
+                    "uvx",
+                    "--python",
+                    "3.12",
+                    "--from",
+                    f"harbor=={HARBOR_VERSION}",
+                    "--with",
+                    f"litellm=={LITELLM_VERSION}",
+                    "harbor",
+                    "run",
+                    "--env-file",
+                    args.env_file,
+                    "--config",
+                    str(job_path),
+                ],
+                env=environment,
+            )
+        final_status = "completed"
+    except KeyboardInterrupt:
+        final_status = "cancelled"
+        failure = "interrupted"
+        raise
+    except BaseException as error:
+        failure = f"{type(error).__name__}: {error}"
+        raise
+    finally:
+        teardown_run_environments(
+            run_dir,
+            remove_images=not args.keep_images,
+        )
+        if record_path is not None:
+            try:
+                finalize_run_record(
+                    record_path,
+                    status=final_status,
+                    error=failure,
+                )
+            except Exception as error:
+                if failure is None and final_status == "completed":
+                    raise
+                print(f">> warning: could not finalize run record: {error}", file=sys.stderr)
+        if rendered_path is not None:
+            retained_path = dispose_render(
+                rendered_path,
+                run_id,
+                run_dir,
+                keep=args.keep_render,
+            )
+            if retained_path is not None:
+                print(f">> retained render at {retained_path}", flush=True)
+            print(">> removed temporary run task", flush=True)
+        events_path = run_dir / "usage" / "events.jsonl"
+        timeline_path = run_dir / "usage" / "gateway-timeline.jsonl"
+        audit_path = events_path if events_path.is_file() else timeline_path
+        if audit_path.is_file():
+            print(
+                f">> usage events at {audit_path.relative_to(REPO_ROOT)}",
+                flush=True,
+            )
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="dungeness")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    init_parser = subparsers.add_parser(
+        "init", help="configure the namespace used for new records"
+    )
+    init_parser.add_argument(
+        "--namespace",
+        required=True,
+        help="personal or team namespace, for example users/bx",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing user namespace configuration",
+    )
+    init_parser.set_defaults(handler=initialize)
+    setup_parser = subparsers.add_parser(
+        "setup", help="check prerequisites and initialize .env"
+    )
+    setup_parser.set_defaults(handler=setup_environment)
+    auth_parser = subparsers.add_parser(
+        "auth", help="manage local credentials used by subscription agents"
+    )
+    auth_subparsers = auth_parser.add_subparsers(
+        dest="auth_command",
+        required=True,
+    )
+    auth_login_parser = auth_subparsers.add_parser(
+        "login", help="authenticate a supported subscription agent"
+    )
+    auth_login_parser.add_argument("agent", choices=["codex"])
+    auth_login_parser.add_argument(
+        "--device-auth",
+        action="store_true",
+        help="use Codex device-code authentication",
+    )
+    auth_login_parser.set_defaults(handler=codex_auth_command)
+    auth_status_parser = auth_subparsers.add_parser(
+        "status", help="check a supported subscription credential"
+    )
+    auth_status_parser.add_argument("agent", choices=["codex"])
+    auth_status_parser.set_defaults(
+        handler=codex_auth_command,
+        device_auth=False,
+    )
+    run_parser = subparsers.add_parser(
+        "run", help="render and execute one run"
+    )
+    add_run_arguments(run_parser)
+    run_parser.set_defaults(handler=execute_run)
+    runs_parser = subparsers.add_parser(
+        "runs", help="find runs produced from a run spec"
+    )
+    runs_parser.add_argument(
+        "target",
+        help="run-spec id, qualified reference, or YAML path",
+    )
+    runs_parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="show only the newest matching run",
+    )
+    runs_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable JSON",
+    )
+    runs_parser.set_defaults(handler=list_runs)
+    evals_parser = subparsers.add_parser(
+        "evals",
+        help="show evaluation events from a run's usage/events.jsonl",
+    )
+    evals_parser.add_argument(
+        "target",
+        help="run ID, run directory, usage directory, or events.jsonl path",
+    )
+    evals_parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="emit the complete matching JSON lines unchanged",
+    )
+    evals_parser.set_defaults(handler=show_evaluations)
+    experiment_parser = subparsers.add_parser(
+        "experiment",
+        help="create and execute multi-run experiments",
+    )
+    experiment_subparsers = experiment_parser.add_subparsers(
+        dest="experiment_command",
+        required=True,
+    )
+    experiment_create_parser = experiment_subparsers.add_parser(
+        "create",
+        help="materialize run specs from an authored experiment YAML",
+    )
+    experiment_create_parser.add_argument(
+        "target",
+        help="experiment id in the default namespace, YAML path, or directory",
+    )
+    experiment_create_parser.set_defaults(handler=create_experiment)
+    experiment_run_parser = experiment_subparsers.add_parser(
+        "run",
+        help="validate and sequentially execute an experiment's run specs",
+    )
+    experiment_run_parser.add_argument(
+        "target",
+        help="experiment id in the default namespace, YAML path, or directory",
+    )
+    experiment_run_parser.add_argument(
+        "--namespace",
+        help="namespace override for all resulting run records",
+    )
+    experiment_run_parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help="environment-file override for all experiment cells",
+    )
+    experiment_run_parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="additional run label applied to every cell; repeatable",
+    )
+    experiment_run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and list cells without executing them",
+    )
+    experiment_run_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the budget confirmation prompt",
+    )
+    experiment_run_parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="continue with later cells when one run fails",
+    )
+    experiment_run_parser.set_defaults(handler=run_experiment)
+    verify_parser = subparsers.add_parser(
+        "verify", help="grade a retained run candidate with the clean verifier"
+    )
+    verify_parser.add_argument("run_id", help="run whose verifier should be used")
+    verify_parser.add_argument(
+        "candidate",
+        nargs="?",
+        help="candidate file or directory; defaults to the run artifact",
+    )
+    verify_parser.add_argument(
+        "--memory",
+        help=(
+            "Docker memory limit for verification "
+            "(default: the limit recorded in the retained run)"
+        ),
+    )
+    verify_parser.set_defaults(handler=verify_run)
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="release Docker environments left behind by finished runs",
+    )
+    clean_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt",
+    )
+    clean_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="clean even while a run appears to be executing",
+    )
+    clean_parser.set_defaults(handler=clean_environments)
+
+    prune_parser = subparsers.add_parser(
+        "prune", help="permanently remove an unreferenced local run"
+    )
+    prune_parser.add_argument("run_id", help="run directory to remove")
+    prune_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt",
+    )
+    prune_parser.set_defaults(handler=prune_run)
+    args = parser.parse_args()
+    try:
+        return args.handler(args)
+    except subprocess.CalledProcessError as error:
+        return error.returncode
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

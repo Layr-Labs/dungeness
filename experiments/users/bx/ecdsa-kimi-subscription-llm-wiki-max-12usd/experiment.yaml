@@ -1,0 +1,75 @@
+schema_version: 1
+type: experiment
+namespace: users/bx
+id: ecdsa-kimi-subscription-llm-wiki-max-12usd
+
+labels:
+  problem: ecdsa-fail
+  purpose: persistent-working-knowledge-base-comparison
+  phase: exploratory
+  status: planned
+
+relations:
+  problem: problem:public/ecdsafail-challenge/ecdsa-fail
+  claims:
+    - claim:users/bx/ecdsa-kimi-subscription-llm-wiki-effect-max-12usd
+  run_specs:
+    - run-spec:users/bx/ecdsa-kimi-subscription-llm-wiki-max-12usd-control
+    - run-spec:users/bx/ecdsa-kimi-subscription-llm-wiki-max-12usd-knowledge-base
+
+design:
+  kind: controlled-comparison
+  controls:
+    benchmark_contract: ecdsa-fail-v2
+    agent: agent:projects/dungeness/codex-kimi-subscription
+    model:
+      provider: kimi-code
+      upstream_id: kimi-code/k3
+      request_model: k3
+      api: openai-responses
+    checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+    agent_options:
+      reasoning_effort: max
+      reasoning_summary: none
+    initialization:
+      mode: checkpoint
+    budget:
+      max_usd: 12
+      max_model_tokens: 5000000
+    web_search:
+      profile: web-search-profile:system/dungeness/optional-v1
+    evaluation:
+      mode: full-benchmark
+      prompt_profile: evaluation-profile:system/dungeness/iterative-v1
+      metric: ecdsafail_score
+      direction: minimize
+    runtime:
+      agent_timeout_sec: 3600
+      continuation:
+        max_resumes: 0
+    artifact_access:
+      mode: none
+  treatments:
+    - id: control
+      task: task:users/bx/ecdsa-fail-v2
+      initial_prompt: none
+    - id: knowledge-base
+      task: task:users/bx/ecdsa-fail-v2-llm-wiki
+      initial_prompt: task-statement-prefix
+      workspace_knowledge_base: knowledge-base/
+      prompt_source:
+        title: LLM Wiki
+        url: https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw/ac46de1ad27f92b28ac95459c782c07f6b8c964a/llm-wiki.md
+        revision: ac46de1ad27f92b28ac95459c782c07f6b8c964a
+      required_files:
+        - index.md
+        - log.md
+        - problem.md
+        - hypotheses.md
+  planned_runs: 2
+  nominal_budget_usd: 24.0
+
+created_at: '2026-08-31T21:15:05Z'
+published_at: null
+run_refs: []
+artifact_refs: []

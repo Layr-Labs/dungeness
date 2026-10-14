@@ -1,0 +1,32 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-kimi-k3-subscription-1m-smoke
+
+task: task:users/bx/ecdsa-fail-v2
+agent: agent:projects/dungeness/codex-kimi-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: low
+  reasoning_summary: none
+
+budget:
+  max_usd: 0.25
+  max_model_tokens: 100000
+
+initialization:
+  mode: checkpoint
+
+labels:
+  purpose: kimi-k3-membership-harbor-smoke
+  checkpoint: 62ae3d0
+  model: k3
+  route: kimi-code-membership
+  context_window: 1m
+  reasoning_effort: low
+
+runtime:
+  env_file: .env
+  keep_render: true
+  agent_timeout_sec: 900

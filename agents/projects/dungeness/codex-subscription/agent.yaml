@@ -1,0 +1,37 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: codex-subscription
+execution_mode: installed
+
+image:
+  from: agent:projects/dungeness/codex-openrouter
+
+package:
+  name: "@openai/codex"
+  version: "0.148.0"
+
+authentication:
+  mode: chatgpt-subscription
+  credential: codex
+  isolation: reduced
+
+model:
+  provider: openai-chatgpt
+  upstream_id: openai/gpt-5.6-sol
+  request_model: gpt-5.6-sol
+  api: openai-responses
+  name_format: request
+  defaults:
+    reasoning_effort: xhigh
+    reasoning_summary: detailed
+
+harbor:
+  agent: codex
+  import_path: codex_subscription:CodexSubscription
+  kwargs:
+    web_search: disabled
+
+# Subscription credentials are mounted per run. Provider secrets and endpoints
+# must never be authored in this editable agent profile.
+environment: {}

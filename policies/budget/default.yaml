@@ -1,0 +1,19 @@
+schema_version: 1
+type: policy
+namespace: system/dungeness
+id: default
+
+web:
+  searches: 100
+  fetches: 200
+
+model:
+  requests: 500
+  total_tokens: 1000000
+
+# Agent-facing dev-scorer submissions (feedback), metered so the agent cannot
+# hill-climb the dev slice by probing it.
+evaluation:
+  submissions: 200
+
+gateway_wall_clock_seconds: 7200

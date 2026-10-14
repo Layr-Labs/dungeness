@@ -1,0 +1,75 @@
+schema_version: 1
+type: knowledge-base-prompt-profile
+namespace: system/dungeness
+id: ecdsa-8-paper-frontier-v1
+created_at: '2026-09-10T00:00:00Z'
+published_at: null
+
+mode: question-first-cross-paper-frontier-v1
+prompt: |
+
+  ---
+
+  ## ECDSA eight-paper decision frontier
+
+  A read-only question-first knowledge base derived from `{source_ref}` is
+  available. It covers eight papers, but it is not organized as a paper survey
+  or a catalog of isolated mechanisms. It is organized as cross-paper decision
+  dossiers with competing representations, transfer barriers, bridge
+  hypotheses, and falsifying experiments.
+
+  Read these orientation pages with direct commands:
+
+  1. `knowledge-base read START.md`
+  2. `knowledge-base read frontier-map.md`
+  3. `knowledge-base read RESEARCH_PROTOCOL.md`
+
+  Run every knowledge-base invocation as one direct shell command. Do not pipe,
+  redirect, combine, wrap, or suppress it. Available commands:
+
+  - `knowledge-base status`
+  - `knowledge-base list`
+  - `knowledge-base search "<query>" [--max-results N] [--context-lines N]`
+  - `knowledge-base read <relative-page>`
+  - `knowledge-base neighbors <dossier-id-or-page>`
+  - `knowledge-base inspire --search-id <id> --passage
+    relative/page.md:L10-L18 --takeaway "<idea>" --planned-change "<change>"`
+
+  First determine whether the repository already has a valid candidate. If it
+  does, preserve and profile it. If it does not, use the bootstrap route in
+  `START.md` and obtain a valid paper-derived candidate early. Do not spend the
+  opening phase reading all eight papers.
+
+  After a valid baseline exists:
+
+  1. identify the average executed-Toffoli owner and hard maximum-qubit-ID
+     owner;
+  2. choose one matching decision dossier;
+  3. state the base architecture, grafted mechanism, discarded information,
+     recovery method, field representation, explicit inverse, predicted
+     complete-shell deltas, and smallest falsifying test;
+  4. test the bridge before importing the full paper architecture;
+  5. re-profile and select a materially different frontier while budget and
+     time permit.
+
+  Shared words such as “adder,” “history,” “measurement,” and “inversion” do
+  not establish compatibility. Compose contracts, not headlines. Include
+  output placement, global corrections, representation conversion, cleanup,
+  phase repair, and hard-ID allocation in every cost comparison.
+
+  Evidence labels:
+
+  - `[PAPER]`: stated by one of the eight papers.
+  - `[CODE]`: recovered from a pinned companion implementation.
+  - `[BENCHMARK]`: established by the task or evaluator contract.
+  - `[INFERENCE]`: an unverified bridge, composition, or proposed experiment.
+
+  The trusted benchmark is authoritative. Preserve value correctness,
+  reversibility, clean ancillas and classical obligations, relative phase, and
+  explicit forward/reverse behavior.
+
+  Implementing one paper successfully is a milestone, not task completion.
+  Before finalizing, test at least one materially different representation,
+  algebra, or schedule/measurement frontier after the first strong valid
+  paper-derived candidate, unless the remaining budget cannot support its
+  decisive experiment.

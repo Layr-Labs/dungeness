@@ -1,0 +1,39 @@
+# Shared Exa web policy: the invariant research knobs, identical for every
+# problem. The HISTORICAL CUTOFF is intentionally NOT here -- it depends on the
+# commit a run starts from, so it is authored on that checkpoint record and
+# stamped into the per-run gateway
+# config by adapters/harbor/build.py. A later checkpoint therefore gets a later
+# cutoff (it may research everything up to the commit it starts from, but nothing
+# published after it -- so it can never pull in the optimization it embodies).
+schema_version: 1
+type: policy
+namespace: system/dungeness
+id: exa-shared
+provider: exa
+operations:
+  - search
+  - fetch
+
+historical:
+  mode: strict
+  require_date_evidence: true
+  reject_mutable_urls: true
+  mutable_content: metadata-only
+  fetch_requires_immutable_url: true
+  revalidate_on_fetch: true
+
+search:
+  max_results: 25
+  allowed_types:
+    - auto
+    - fast
+    - instant
+  rejected_categories:
+    - company
+    - people
+
+contents:
+  # Cache-only avoids a live crawl during the run. It is not a historical
+  # snapshot guarantee; the gateway still validates every result and fetch.
+  max_age_hours: -1
+  fetch_requires_prior_search_result: true

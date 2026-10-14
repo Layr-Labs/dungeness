@@ -1,0 +1,1225 @@
+[
+  {
+    "slug": "haner-2020-077",
+    "source_id": "IACR ePrint 2020/077",
+    "title": "Improved quantum circuits for elliptic curve discrete logarithms",
+    "pdf": "raw/2020-077.pdf",
+    "sha256": "ed7daaba41f3a6d2a42536b977a91a97e343a23a9f0d9324d3b9aaf3eb0848c2",
+    "page_count": 22,
+    "word_count": 11444,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/haner-2020-077/page-01.md",
+        "word_count": 510
+      },
+      {
+        "page": 2,
+        "path": "source-pages/haner-2020-077/page-02.md",
+        "word_count": 696
+      },
+      {
+        "page": 3,
+        "path": "source-pages/haner-2020-077/page-03.md",
+        "word_count": 701
+      },
+      {
+        "page": 4,
+        "path": "source-pages/haner-2020-077/page-04.md",
+        "word_count": 661
+      },
+      {
+        "page": 5,
+        "path": "source-pages/haner-2020-077/page-05.md",
+        "word_count": 507
+      },
+      {
+        "page": 6,
+        "path": "source-pages/haner-2020-077/page-06.md",
+        "word_count": 512
+      },
+      {
+        "page": 7,
+        "path": "source-pages/haner-2020-077/page-07.md",
+        "word_count": 386
+      },
+      {
+        "page": 8,
+        "path": "source-pages/haner-2020-077/page-08.md",
+        "word_count": 662
+      },
+      {
+        "page": 9,
+        "path": "source-pages/haner-2020-077/page-09.md",
+        "word_count": 263
+      },
+      {
+        "page": 10,
+        "path": "source-pages/haner-2020-077/page-10.md",
+        "word_count": 502
+      },
+      {
+        "page": 11,
+        "path": "source-pages/haner-2020-077/page-11.md",
+        "word_count": 459
+      },
+      {
+        "page": 12,
+        "path": "source-pages/haner-2020-077/page-12.md",
+        "word_count": 689
+      },
+      {
+        "page": 13,
+        "path": "source-pages/haner-2020-077/page-13.md",
+        "word_count": 556
+      },
+      {
+        "page": 14,
+        "path": "source-pages/haner-2020-077/page-14.md",
+        "word_count": 568
+      },
+      {
+        "page": 15,
+        "path": "source-pages/haner-2020-077/page-15.md",
+        "word_count": 622
+      },
+      {
+        "page": 16,
+        "path": "source-pages/haner-2020-077/page-16.md",
+        "word_count": 558
+      },
+      {
+        "page": 17,
+        "path": "source-pages/haner-2020-077/page-17.md",
+        "word_count": 602
+      },
+      {
+        "page": 18,
+        "path": "source-pages/haner-2020-077/page-18.md",
+        "word_count": 648
+      },
+      {
+        "page": 19,
+        "path": "source-pages/haner-2020-077/page-19.md",
+        "word_count": 308
+      },
+      {
+        "page": 20,
+        "path": "source-pages/haner-2020-077/page-20.md",
+        "word_count": 302
+      },
+      {
+        "page": 21,
+        "path": "source-pages/haner-2020-077/page-21.md",
+        "word_count": 528
+      },
+      {
+        "page": 22,
+        "path": "source-pages/haner-2020-077/page-22.md",
+        "word_count": 204
+      }
+    ]
+  },
+  {
+    "slug": "spooky-2110.08973v3",
+    "source_id": "arXiv:2110.08973v3",
+    "title": "Tight Bounds on the Spooky Pebble Game: Recycling Qubits with Measurements",
+    "pdf": "raw/2110.08973v3.pdf",
+    "sha256": "13ee62c1108a9a2bd9654235f6ad6cffe30660c35f524b60dd54a38af8d18997",
+    "page_count": 25,
+    "word_count": 12093,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/spooky-2110.08973v3/page-01.md",
+        "word_count": 411
+      },
+      {
+        "page": 2,
+        "path": "source-pages/spooky-2110.08973v3/page-02.md",
+        "word_count": 586
+      },
+      {
+        "page": 3,
+        "path": "source-pages/spooky-2110.08973v3/page-03.md",
+        "word_count": 491
+      },
+      {
+        "page": 4,
+        "path": "source-pages/spooky-2110.08973v3/page-04.md",
+        "word_count": 545
+      },
+      {
+        "page": 5,
+        "path": "source-pages/spooky-2110.08973v3/page-05.md",
+        "word_count": 474
+      },
+      {
+        "page": 6,
+        "path": "source-pages/spooky-2110.08973v3/page-06.md",
+        "word_count": 577
+      },
+      {
+        "page": 7,
+        "path": "source-pages/spooky-2110.08973v3/page-07.md",
+        "word_count": 459
+      },
+      {
+        "page": 8,
+        "path": "source-pages/spooky-2110.08973v3/page-08.md",
+        "word_count": 556
+      },
+      {
+        "page": 9,
+        "path": "source-pages/spooky-2110.08973v3/page-09.md",
+        "word_count": 397
+      },
+      {
+        "page": 10,
+        "path": "source-pages/spooky-2110.08973v3/page-10.md",
+        "word_count": 470
+      },
+      {
+        "page": 11,
+        "path": "source-pages/spooky-2110.08973v3/page-11.md",
+        "word_count": 360
+      },
+      {
+        "page": 12,
+        "path": "source-pages/spooky-2110.08973v3/page-12.md",
+        "word_count": 393
+      },
+      {
+        "page": 13,
+        "path": "source-pages/spooky-2110.08973v3/page-13.md",
+        "word_count": 659
+      },
+      {
+        "page": 14,
+        "path": "source-pages/spooky-2110.08973v3/page-14.md",
+        "word_count": 542
+      },
+      {
+        "page": 15,
+        "path": "source-pages/spooky-2110.08973v3/page-15.md",
+        "word_count": 473
+      },
+      {
+        "page": 16,
+        "path": "source-pages/spooky-2110.08973v3/page-16.md",
+        "word_count": 607
+      },
+      {
+        "page": 17,
+        "path": "source-pages/spooky-2110.08973v3/page-17.md",
+        "word_count": 682
+      },
+      {
+        "page": 18,
+        "path": "source-pages/spooky-2110.08973v3/page-18.md",
+        "word_count": 483
+      },
+      {
+        "page": 19,
+        "path": "source-pages/spooky-2110.08973v3/page-19.md",
+        "word_count": 366
+      },
+      {
+        "page": 20,
+        "path": "source-pages/spooky-2110.08973v3/page-20.md",
+        "word_count": 609
+      },
+      {
+        "page": 21,
+        "path": "source-pages/spooky-2110.08973v3/page-21.md",
+        "word_count": 482
+      },
+      {
+        "page": 22,
+        "path": "source-pages/spooky-2110.08973v3/page-22.md",
+        "word_count": 485
+      },
+      {
+        "page": 23,
+        "path": "source-pages/spooky-2110.08973v3/page-23.md",
+        "word_count": 458
+      },
+      {
+        "page": 24,
+        "path": "source-pages/spooky-2110.08973v3/page-24.md",
+        "word_count": 469
+      },
+      {
+        "page": 25,
+        "path": "source-pages/spooky-2110.08973v3/page-25.md",
+        "word_count": 59
+      }
+    ]
+  },
+  {
+    "slug": "luongo-2407.20167v1",
+    "source_id": "arXiv:2407.20167v1",
+    "title": "Measurement-based uncomputation of quantum circuits for modular arithmetic",
+    "pdf": "raw/2407.20167v1.pdf",
+    "sha256": "c5b152e5dbfdbc767e49edaec45f3550e623fdefa269fdabed0ab578d7a392f0",
+    "page_count": 45,
+    "word_count": 20546,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/luongo-2407.20167v1/page-01.md",
+        "word_count": 398
+      },
+      {
+        "page": 2,
+        "path": "source-pages/luongo-2407.20167v1/page-02.md",
+        "word_count": 436
+      },
+      {
+        "page": 3,
+        "path": "source-pages/luongo-2407.20167v1/page-03.md",
+        "word_count": 676
+      },
+      {
+        "page": 4,
+        "path": "source-pages/luongo-2407.20167v1/page-04.md",
+        "word_count": 660
+      },
+      {
+        "page": 5,
+        "path": "source-pages/luongo-2407.20167v1/page-05.md",
+        "word_count": 717
+      },
+      {
+        "page": 6,
+        "path": "source-pages/luongo-2407.20167v1/page-06.md",
+        "word_count": 509
+      },
+      {
+        "page": 7,
+        "path": "source-pages/luongo-2407.20167v1/page-07.md",
+        "word_count": 442
+      },
+      {
+        "page": 8,
+        "path": "source-pages/luongo-2407.20167v1/page-08.md",
+        "word_count": 381
+      },
+      {
+        "page": 9,
+        "path": "source-pages/luongo-2407.20167v1/page-09.md",
+        "word_count": 478
+      },
+      {
+        "page": 10,
+        "path": "source-pages/luongo-2407.20167v1/page-10.md",
+        "word_count": 408
+      },
+      {
+        "page": 11,
+        "path": "source-pages/luongo-2407.20167v1/page-11.md",
+        "word_count": 391
+      },
+      {
+        "page": 12,
+        "path": "source-pages/luongo-2407.20167v1/page-12.md",
+        "word_count": 487
+      },
+      {
+        "page": 13,
+        "path": "source-pages/luongo-2407.20167v1/page-13.md",
+        "word_count": 414
+      },
+      {
+        "page": 14,
+        "path": "source-pages/luongo-2407.20167v1/page-14.md",
+        "word_count": 391
+      },
+      {
+        "page": 15,
+        "path": "source-pages/luongo-2407.20167v1/page-15.md",
+        "word_count": 421
+      },
+      {
+        "page": 16,
+        "path": "source-pages/luongo-2407.20167v1/page-16.md",
+        "word_count": 478
+      },
+      {
+        "page": 17,
+        "path": "source-pages/luongo-2407.20167v1/page-17.md",
+        "word_count": 333
+      },
+      {
+        "page": 18,
+        "path": "source-pages/luongo-2407.20167v1/page-18.md",
+        "word_count": 373
+      },
+      {
+        "page": 19,
+        "path": "source-pages/luongo-2407.20167v1/page-19.md",
+        "word_count": 344
+      },
+      {
+        "page": 20,
+        "path": "source-pages/luongo-2407.20167v1/page-20.md",
+        "word_count": 464
+      },
+      {
+        "page": 21,
+        "path": "source-pages/luongo-2407.20167v1/page-21.md",
+        "word_count": 494
+      },
+      {
+        "page": 22,
+        "path": "source-pages/luongo-2407.20167v1/page-22.md",
+        "word_count": 443
+      },
+      {
+        "page": 23,
+        "path": "source-pages/luongo-2407.20167v1/page-23.md",
+        "word_count": 496
+      },
+      {
+        "page": 24,
+        "path": "source-pages/luongo-2407.20167v1/page-24.md",
+        "word_count": 387
+      },
+      {
+        "page": 25,
+        "path": "source-pages/luongo-2407.20167v1/page-25.md",
+        "word_count": 428
+      },
+      {
+        "page": 26,
+        "path": "source-pages/luongo-2407.20167v1/page-26.md",
+        "word_count": 430
+      },
+      {
+        "page": 27,
+        "path": "source-pages/luongo-2407.20167v1/page-27.md",
+        "word_count": 481
+      },
+      {
+        "page": 28,
+        "path": "source-pages/luongo-2407.20167v1/page-28.md",
+        "word_count": 571
+      },
+      {
+        "page": 29,
+        "path": "source-pages/luongo-2407.20167v1/page-29.md",
+        "word_count": 460
+      },
+      {
+        "page": 30,
+        "path": "source-pages/luongo-2407.20167v1/page-30.md",
+        "word_count": 452
+      },
+      {
+        "page": 31,
+        "path": "source-pages/luongo-2407.20167v1/page-31.md",
+        "word_count": 540
+      },
+      {
+        "page": 32,
+        "path": "source-pages/luongo-2407.20167v1/page-32.md",
+        "word_count": 490
+      },
+      {
+        "page": 33,
+        "path": "source-pages/luongo-2407.20167v1/page-33.md",
+        "word_count": 556
+      },
+      {
+        "page": 34,
+        "path": "source-pages/luongo-2407.20167v1/page-34.md",
+        "word_count": 384
+      },
+      {
+        "page": 35,
+        "path": "source-pages/luongo-2407.20167v1/page-35.md",
+        "word_count": 399
+      },
+      {
+        "page": 36,
+        "path": "source-pages/luongo-2407.20167v1/page-36.md",
+        "word_count": 426
+      },
+      {
+        "page": 37,
+        "path": "source-pages/luongo-2407.20167v1/page-37.md",
+        "word_count": 417
+      },
+      {
+        "page": 38,
+        "path": "source-pages/luongo-2407.20167v1/page-38.md",
+        "word_count": 499
+      },
+      {
+        "page": 39,
+        "path": "source-pages/luongo-2407.20167v1/page-39.md",
+        "word_count": 477
+      },
+      {
+        "page": 40,
+        "path": "source-pages/luongo-2407.20167v1/page-40.md",
+        "word_count": 527
+      },
+      {
+        "page": 41,
+        "path": "source-pages/luongo-2407.20167v1/page-41.md",
+        "word_count": 483
+      },
+      {
+        "page": 42,
+        "path": "source-pages/luongo-2407.20167v1/page-42.md",
+        "word_count": 414
+      },
+      {
+        "page": 43,
+        "path": "source-pages/luongo-2407.20167v1/page-43.md",
+        "word_count": 429
+      },
+      {
+        "page": 44,
+        "path": "source-pages/luongo-2407.20167v1/page-44.md",
+        "word_count": 472
+      },
+      {
+        "page": 45,
+        "path": "source-pages/luongo-2407.20167v1/page-45.md",
+        "word_count": 190
+      }
+    ]
+  },
+  {
+    "slug": "litinski-2410.00899v1",
+    "source_id": "arXiv:2410.00899v1",
+    "title": "Quantum schoolbook multiplication with fewer Toffoli gates",
+    "pdf": "raw/2410.00899v1.pdf",
+    "sha256": "5da56cc0dd20b0afe73b3d0a188ba7e0e9826960c37b9b972671520755a74713",
+    "page_count": 6,
+    "word_count": 2462,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/litinski-2410.00899v1/page-01.md",
+        "word_count": 839
+      },
+      {
+        "page": 2,
+        "path": "source-pages/litinski-2410.00899v1/page-02.md",
+        "word_count": 484
+      },
+      {
+        "page": 3,
+        "path": "source-pages/litinski-2410.00899v1/page-03.md",
+        "word_count": 188
+      },
+      {
+        "page": 4,
+        "path": "source-pages/litinski-2410.00899v1/page-04.md",
+        "word_count": 332
+      },
+      {
+        "page": 5,
+        "path": "source-pages/litinski-2410.00899v1/page-05.md",
+        "word_count": 603
+      },
+      {
+        "page": 6,
+        "path": "source-pages/litinski-2410.00899v1/page-06.md",
+        "word_count": 16
+      }
+    ]
+  },
+  {
+    "slug": "gidney-2507.23079v1",
+    "source_id": "arXiv:2507.23079v1",
+    "title": "A Classical-Quantum Adder with Constant Workspace and Linear Gates",
+    "pdf": "raw/2507.23079v1.pdf",
+    "sha256": "31c8fb8d52329c79cd29816d8c22087d5e84aa6fee46458f1f5c0ef726adba3f",
+    "page_count": 8,
+    "word_count": 2722,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/gidney-2507.23079v1/page-01.md",
+        "word_count": 503
+      },
+      {
+        "page": 2,
+        "path": "source-pages/gidney-2507.23079v1/page-02.md",
+        "word_count": 379
+      },
+      {
+        "page": 3,
+        "path": "source-pages/gidney-2507.23079v1/page-03.md",
+        "word_count": 543
+      },
+      {
+        "page": 4,
+        "path": "source-pages/gidney-2507.23079v1/page-04.md",
+        "word_count": 141
+      },
+      {
+        "page": 5,
+        "path": "source-pages/gidney-2507.23079v1/page-05.md",
+        "word_count": 104
+      },
+      {
+        "page": 6,
+        "path": "source-pages/gidney-2507.23079v1/page-06.md",
+        "word_count": 83
+      },
+      {
+        "page": 7,
+        "path": "source-pages/gidney-2507.23079v1/page-07.md",
+        "word_count": 688
+      },
+      {
+        "page": 8,
+        "path": "source-pages/gidney-2507.23079v1/page-08.md",
+        "word_count": 281
+      }
+    ]
+  },
+  {
+    "slug": "khattar-2510.10967v1",
+    "source_id": "arXiv:2510.10967v1",
+    "title": "Verifiable Quantum Advantage via Optimized DQI Circuits",
+    "pdf": "raw/2510.10967v1.pdf",
+    "sha256": "dcbbd0034ebcc3918a31ecc211ab108ec3a11d02840a78f504f915b73a5370ca",
+    "page_count": 52,
+    "word_count": 29238,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/khattar-2510.10967v1/page-01.md",
+        "word_count": 438
+      },
+      {
+        "page": 2,
+        "path": "source-pages/khattar-2510.10967v1/page-02.md",
+        "word_count": 531
+      },
+      {
+        "page": 3,
+        "path": "source-pages/khattar-2510.10967v1/page-03.md",
+        "word_count": 638
+      },
+      {
+        "page": 4,
+        "path": "source-pages/khattar-2510.10967v1/page-04.md",
+        "word_count": 714
+      },
+      {
+        "page": 5,
+        "path": "source-pages/khattar-2510.10967v1/page-05.md",
+        "word_count": 670
+      },
+      {
+        "page": 6,
+        "path": "source-pages/khattar-2510.10967v1/page-06.md",
+        "word_count": 641
+      },
+      {
+        "page": 7,
+        "path": "source-pages/khattar-2510.10967v1/page-07.md",
+        "word_count": 594
+      },
+      {
+        "page": 8,
+        "path": "source-pages/khattar-2510.10967v1/page-08.md",
+        "word_count": 743
+      },
+      {
+        "page": 9,
+        "path": "source-pages/khattar-2510.10967v1/page-09.md",
+        "word_count": 686
+      },
+      {
+        "page": 10,
+        "path": "source-pages/khattar-2510.10967v1/page-10.md",
+        "word_count": 731
+      },
+      {
+        "page": 11,
+        "path": "source-pages/khattar-2510.10967v1/page-11.md",
+        "word_count": 501
+      },
+      {
+        "page": 12,
+        "path": "source-pages/khattar-2510.10967v1/page-12.md",
+        "word_count": 575
+      },
+      {
+        "page": 13,
+        "path": "source-pages/khattar-2510.10967v1/page-13.md",
+        "word_count": 776
+      },
+      {
+        "page": 14,
+        "path": "source-pages/khattar-2510.10967v1/page-14.md",
+        "word_count": 600
+      },
+      {
+        "page": 15,
+        "path": "source-pages/khattar-2510.10967v1/page-15.md",
+        "word_count": 626
+      },
+      {
+        "page": 16,
+        "path": "source-pages/khattar-2510.10967v1/page-16.md",
+        "word_count": 518
+      },
+      {
+        "page": 17,
+        "path": "source-pages/khattar-2510.10967v1/page-17.md",
+        "word_count": 588
+      },
+      {
+        "page": 18,
+        "path": "source-pages/khattar-2510.10967v1/page-18.md",
+        "word_count": 731
+      },
+      {
+        "page": 19,
+        "path": "source-pages/khattar-2510.10967v1/page-19.md",
+        "word_count": 681
+      },
+      {
+        "page": 20,
+        "path": "source-pages/khattar-2510.10967v1/page-20.md",
+        "word_count": 755
+      },
+      {
+        "page": 21,
+        "path": "source-pages/khattar-2510.10967v1/page-21.md",
+        "word_count": 632
+      },
+      {
+        "page": 22,
+        "path": "source-pages/khattar-2510.10967v1/page-22.md",
+        "word_count": 523
+      },
+      {
+        "page": 23,
+        "path": "source-pages/khattar-2510.10967v1/page-23.md",
+        "word_count": 661
+      },
+      {
+        "page": 24,
+        "path": "source-pages/khattar-2510.10967v1/page-24.md",
+        "word_count": 484
+      },
+      {
+        "page": 25,
+        "path": "source-pages/khattar-2510.10967v1/page-25.md",
+        "word_count": 530
+      },
+      {
+        "page": 26,
+        "path": "source-pages/khattar-2510.10967v1/page-26.md",
+        "word_count": 627
+      },
+      {
+        "page": 27,
+        "path": "source-pages/khattar-2510.10967v1/page-27.md",
+        "word_count": 778
+      },
+      {
+        "page": 28,
+        "path": "source-pages/khattar-2510.10967v1/page-28.md",
+        "word_count": 823
+      },
+      {
+        "page": 29,
+        "path": "source-pages/khattar-2510.10967v1/page-29.md",
+        "word_count": 166
+      },
+      {
+        "page": 30,
+        "path": "source-pages/khattar-2510.10967v1/page-30.md",
+        "word_count": 231
+      },
+      {
+        "page": 31,
+        "path": "source-pages/khattar-2510.10967v1/page-31.md",
+        "word_count": 192
+      },
+      {
+        "page": 32,
+        "path": "source-pages/khattar-2510.10967v1/page-32.md",
+        "word_count": 640
+      },
+      {
+        "page": 33,
+        "path": "source-pages/khattar-2510.10967v1/page-33.md",
+        "word_count": 761
+      },
+      {
+        "page": 34,
+        "path": "source-pages/khattar-2510.10967v1/page-34.md",
+        "word_count": 613
+      },
+      {
+        "page": 35,
+        "path": "source-pages/khattar-2510.10967v1/page-35.md",
+        "word_count": 612
+      },
+      {
+        "page": 36,
+        "path": "source-pages/khattar-2510.10967v1/page-36.md",
+        "word_count": 396
+      },
+      {
+        "page": 37,
+        "path": "source-pages/khattar-2510.10967v1/page-37.md",
+        "word_count": 445
+      },
+      {
+        "page": 38,
+        "path": "source-pages/khattar-2510.10967v1/page-38.md",
+        "word_count": 536
+      },
+      {
+        "page": 39,
+        "path": "source-pages/khattar-2510.10967v1/page-39.md",
+        "word_count": 578
+      },
+      {
+        "page": 40,
+        "path": "source-pages/khattar-2510.10967v1/page-40.md",
+        "word_count": 608
+      },
+      {
+        "page": 41,
+        "path": "source-pages/khattar-2510.10967v1/page-41.md",
+        "word_count": 186
+      },
+      {
+        "page": 42,
+        "path": "source-pages/khattar-2510.10967v1/page-42.md",
+        "word_count": 461
+      },
+      {
+        "page": 43,
+        "path": "source-pages/khattar-2510.10967v1/page-43.md",
+        "word_count": 318
+      },
+      {
+        "page": 44,
+        "path": "source-pages/khattar-2510.10967v1/page-44.md",
+        "word_count": 445
+      },
+      {
+        "page": 45,
+        "path": "source-pages/khattar-2510.10967v1/page-45.md",
+        "word_count": 745
+      },
+      {
+        "page": 46,
+        "path": "source-pages/khattar-2510.10967v1/page-46.md",
+        "word_count": 685
+      },
+      {
+        "page": 47,
+        "path": "source-pages/khattar-2510.10967v1/page-47.md",
+        "word_count": 565
+      },
+      {
+        "page": 48,
+        "path": "source-pages/khattar-2510.10967v1/page-48.md",
+        "word_count": 159
+      },
+      {
+        "page": 49,
+        "path": "source-pages/khattar-2510.10967v1/page-49.md",
+        "word_count": 661
+      },
+      {
+        "page": 50,
+        "path": "source-pages/khattar-2510.10967v1/page-50.md",
+        "word_count": 295
+      },
+      {
+        "page": 51,
+        "path": "source-pages/khattar-2510.10967v1/page-51.md",
+        "word_count": 583
+      },
+      {
+        "page": 52,
+        "path": "source-pages/khattar-2510.10967v1/page-52.md",
+        "word_count": 562
+      }
+    ]
+  },
+  {
+    "slug": "schrottenloher-2606.02235v1",
+    "source_id": "arXiv:2606.02235v1",
+    "title": "Optimized Point Addition Circuits for Elliptic Curve Discrete Logarithms",
+    "pdf": "raw/2606.02235v1.pdf",
+    "sha256": "8744ef6db6c60b62d952a1dd24e5bd433242af970f4755c8b49b020a731584af",
+    "page_count": 19,
+    "word_count": 6765,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-01.md",
+        "word_count": 345
+      },
+      {
+        "page": 2,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-02.md",
+        "word_count": 483
+      },
+      {
+        "page": 3,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-03.md",
+        "word_count": 390
+      },
+      {
+        "page": 4,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-04.md",
+        "word_count": 444
+      },
+      {
+        "page": 5,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-05.md",
+        "word_count": 487
+      },
+      {
+        "page": 6,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-06.md",
+        "word_count": 451
+      },
+      {
+        "page": 7,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-07.md",
+        "word_count": 347
+      },
+      {
+        "page": 8,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-08.md",
+        "word_count": 346
+      },
+      {
+        "page": 9,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-09.md",
+        "word_count": 346
+      },
+      {
+        "page": 10,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-10.md",
+        "word_count": 500
+      },
+      {
+        "page": 11,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-11.md",
+        "word_count": 225
+      },
+      {
+        "page": 12,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-12.md",
+        "word_count": 329
+      },
+      {
+        "page": 13,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-13.md",
+        "word_count": 379
+      },
+      {
+        "page": 14,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-14.md",
+        "word_count": 412
+      },
+      {
+        "page": 15,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-15.md",
+        "word_count": 234
+      },
+      {
+        "page": 16,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-16.md",
+        "word_count": 264
+      },
+      {
+        "page": 17,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-17.md",
+        "word_count": 232
+      },
+      {
+        "page": 18,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-18.md",
+        "word_count": 392
+      },
+      {
+        "page": 19,
+        "path": "source-pages/schrottenloher-2606.02235v1/page-19.md",
+        "word_count": 159
+      }
+    ]
+  },
+  {
+    "slug": "luo-2607.13816v2",
+    "source_id": "arXiv:2607.13816v2",
+    "title": "Quantum Algorithm for Elliptic Curve Discrete Logarithms with Space-Efficient Point Addition",
+    "pdf": "raw/2607.13816v2.pdf",
+    "sha256": "8e61e2ce2be1a9a9404c67fe2b42b1e381093e215ada2e20ce3f2de925938901",
+    "page_count": 50,
+    "word_count": 18896,
+    "pages": [
+      {
+        "page": 1,
+        "path": "source-pages/luo-2607.13816v2/page-01.md",
+        "word_count": 389
+      },
+      {
+        "page": 2,
+        "path": "source-pages/luo-2607.13816v2/page-02.md",
+        "word_count": 521
+      },
+      {
+        "page": 3,
+        "path": "source-pages/luo-2607.13816v2/page-03.md",
+        "word_count": 488
+      },
+      {
+        "page": 4,
+        "path": "source-pages/luo-2607.13816v2/page-04.md",
+        "word_count": 349
+      },
+      {
+        "page": 5,
+        "path": "source-pages/luo-2607.13816v2/page-05.md",
+        "word_count": 445
+      },
+      {
+        "page": 6,
+        "path": "source-pages/luo-2607.13816v2/page-06.md",
+        "word_count": 478
+      },
+      {
+        "page": 7,
+        "path": "source-pages/luo-2607.13816v2/page-07.md",
+        "word_count": 463
+      },
+      {
+        "page": 8,
+        "path": "source-pages/luo-2607.13816v2/page-08.md",
+        "word_count": 418
+      },
+      {
+        "page": 9,
+        "path": "source-pages/luo-2607.13816v2/page-09.md",
+        "word_count": 450
+      },
+      {
+        "page": 10,
+        "path": "source-pages/luo-2607.13816v2/page-10.md",
+        "word_count": 365
+      },
+      {
+        "page": 11,
+        "path": "source-pages/luo-2607.13816v2/page-11.md",
+        "word_count": 438
+      },
+      {
+        "page": 12,
+        "path": "source-pages/luo-2607.13816v2/page-12.md",
+        "word_count": 514
+      },
+      {
+        "page": 13,
+        "path": "source-pages/luo-2607.13816v2/page-13.md",
+        "word_count": 416
+      },
+      {
+        "page": 14,
+        "path": "source-pages/luo-2607.13816v2/page-14.md",
+        "word_count": 487
+      },
+      {
+        "page": 15,
+        "path": "source-pages/luo-2607.13816v2/page-15.md",
+        "word_count": 335
+      },
+      {
+        "page": 16,
+        "path": "source-pages/luo-2607.13816v2/page-16.md",
+        "word_count": 289
+      },
+      {
+        "page": 17,
+        "path": "source-pages/luo-2607.13816v2/page-17.md",
+        "word_count": 570
+      },
+      {
+        "page": 18,
+        "path": "source-pages/luo-2607.13816v2/page-18.md",
+        "word_count": 388
+      },
+      {
+        "page": 19,
+        "path": "source-pages/luo-2607.13816v2/page-19.md",
+        "word_count": 233
+      },
+      {
+        "page": 20,
+        "path": "source-pages/luo-2607.13816v2/page-20.md",
+        "word_count": 354
+      },
+      {
+        "page": 21,
+        "path": "source-pages/luo-2607.13816v2/page-21.md",
+        "word_count": 338
+      },
+      {
+        "page": 22,
+        "path": "source-pages/luo-2607.13816v2/page-22.md",
+        "word_count": 349
+      },
+      {
+        "page": 23,
+        "path": "source-pages/luo-2607.13816v2/page-23.md",
+        "word_count": 359
+      },
+      {
+        "page": 24,
+        "path": "source-pages/luo-2607.13816v2/page-24.md",
+        "word_count": 342
+      },
+      {
+        "page": 25,
+        "path": "source-pages/luo-2607.13816v2/page-25.md",
+        "word_count": 460
+      },
+      {
+        "page": 26,
+        "path": "source-pages/luo-2607.13816v2/page-26.md",
+        "word_count": 252
+      },
+      {
+        "page": 27,
+        "path": "source-pages/luo-2607.13816v2/page-27.md",
+        "word_count": 399
+      },
+      {
+        "page": 28,
+        "path": "source-pages/luo-2607.13816v2/page-28.md",
+        "word_count": 426
+      },
+      {
+        "page": 29,
+        "path": "source-pages/luo-2607.13816v2/page-29.md",
+        "word_count": 382
+      },
+      {
+        "page": 30,
+        "path": "source-pages/luo-2607.13816v2/page-30.md",
+        "word_count": 339
+      },
+      {
+        "page": 31,
+        "path": "source-pages/luo-2607.13816v2/page-31.md",
+        "word_count": 279
+      },
+      {
+        "page": 32,
+        "path": "source-pages/luo-2607.13816v2/page-32.md",
+        "word_count": 325
+      },
+      {
+        "page": 33,
+        "path": "source-pages/luo-2607.13816v2/page-33.md",
+        "word_count": 250
+      },
+      {
+        "page": 34,
+        "path": "source-pages/luo-2607.13816v2/page-34.md",
+        "word_count": 428
+      },
+      {
+        "page": 35,
+        "path": "source-pages/luo-2607.13816v2/page-35.md",
+        "word_count": 432
+      },
+      {
+        "page": 36,
+        "path": "source-pages/luo-2607.13816v2/page-36.md",
+        "word_count": 506
+      },
+      {
+        "page": 37,
+        "path": "source-pages/luo-2607.13816v2/page-37.md",
+        "word_count": 298
+      },
+      {
+        "page": 38,
+        "path": "source-pages/luo-2607.13816v2/page-38.md",
+        "word_count": 302
+      },
+      {
+        "page": 39,
+        "path": "source-pages/luo-2607.13816v2/page-39.md",
+        "word_count": 291
+      },
+      {
+        "page": 40,
+        "path": "source-pages/luo-2607.13816v2/page-40.md",
+        "word_count": 303
+      },
+      {
+        "page": 41,
+        "path": "source-pages/luo-2607.13816v2/page-41.md",
+        "word_count": 317
+      },
+      {
+        "page": 42,
+        "path": "source-pages/luo-2607.13816v2/page-42.md",
+        "word_count": 402
+      },
+      {
+        "page": 43,
+        "path": "source-pages/luo-2607.13816v2/page-43.md",
+        "word_count": 481
+      },
+      {
+        "page": 44,
+        "path": "source-pages/luo-2607.13816v2/page-44.md",
+        "word_count": 344
+      },
+      {
+        "page": 45,
+        "path": "source-pages/luo-2607.13816v2/page-45.md",
+        "word_count": 327
+      },
+      {
+        "page": 46,
+        "path": "source-pages/luo-2607.13816v2/page-46.md",
+        "word_count": 374
+      },
+      {
+        "page": 47,
+        "path": "source-pages/luo-2607.13816v2/page-47.md",
+        "word_count": 395
+      },
+      {
+        "page": 48,
+        "path": "source-pages/luo-2607.13816v2/page-48.md",
+        "word_count": 372
+      },
+      {
+        "page": 49,
+        "path": "source-pages/luo-2607.13816v2/page-49.md",
+        "word_count": 377
+      },
+      {
+        "page": 50,
+        "path": "source-pages/luo-2607.13816v2/page-50.md",
+        "word_count": 57
+      }
+    ]
+  }
+]

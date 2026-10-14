@@ -1,0 +1,81 @@
+schema_version: 1
+type: knowledge-base
+namespace: users/bx/contaminated
+id: ecdsa-paper-kb-v1
+title: ECDSA.fail paper knowledge base
+entrypoint: index.md
+
+source:
+  archive: ecdsa-paper-kb.zip
+  archive_sha256: a59420d7ef658d76f9b73e7065a7b048cccfddd08aaba0b4756f8d53e0bf1b2e
+
+maintenance:
+  mutable_during_run: false
+  mutable_overlay: knowledge-base-notes/
+  preserve_source_facts: true
+  append_only_log: log.md
+  inference_marker: '[INFERENCE]'
+
+scope_manifest:
+  name: ECDSA.fail paper knowledge base
+  authority: authoritative_for_domain
+  topics:
+    - ECDSA
+    - secp256k1
+    - point addition
+    - modular inversion
+    - modular multiplication
+    - reversible arithmetic
+    - quantum resource estimation
+    - Toffoli cost
+    - ancilla cleanup
+  common_entities:
+    - ecdsa.fail
+    - Kaliski inversion
+    - ECDSA paper
+    - companion implementation
+  exclusions:
+    - generic syntax
+    - Git operations
+    - repository navigation
+  initial_search_seed: point addition modular inversion multiplication reversible arithmetic benchmark adaptation
+  citation_format: '[KB: relative/path.md#L10-L18]'
+
+behavior_feedback:
+  enabled: true
+  mode: shadow
+  minimum_improvement: 0
+  kb_attribution_window_evaluations: 1
+  no_progress_evaluations: 3
+  expose_pre_stick_counter: true
+  qualifying_sources:
+    prefixes:
+      - nodes/
+    pages:
+      - sources/companion-code-map.md
+  retrieval:
+    max_results_per_search: 8
+    context_lines: 3
+    max_passage_characters: 1600
+    max_total_result_characters: 8000
+
+preload:
+  status: ready
+  intended_destination: knowledge-base/
+  copy_contents: true
+  core_files: []
+
+content_layers:
+  paper_knowledge_base:
+    - README.md
+    - AGENTS.md
+    - agent-pack.md
+    - graph.md
+    - log.md
+    - sections/
+    - nodes/
+    - concepts/
+    - sources/
+
+created_at: '2026-08-31T00:00:00Z'
+updated_at: '2026-08-31T00:00:00Z'

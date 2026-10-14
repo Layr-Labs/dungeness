@@ -1,0 +1,49 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-kimi-subscription-research-state-web-high-12usd
+
+task: task:users/bx/ecdsa-fail-v2
+agent: agent:projects/dungeness/codex-kimi-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: high
+  reasoning_summary: none
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: checkpoint
+
+web_search:
+  profile: web-search-profile:system/dungeness/m2-adaptive-single-agent-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+research_state:
+  profile: research-state-profile:system/dungeness/two-knob-v1
+  controls:
+    web_search:
+      mode: enforce_minimum
+      level: high
+    evaluation:
+      mode: observe
+      level: low
+
+labels:
+  experiment: ecdsa-kimi-subscription-research-state-web-high-12usd
+  purpose: web-search-minimum-mechanics
+  model: k3
+  route: kimi-code-membership
+  reasoning_effort: high
+  web_search_minimum: "10"
+  evaluation_mode: observe
+
+runtime:
+  env_file: .env
+  keep_render: true
+  agent_timeout_sec: 3600

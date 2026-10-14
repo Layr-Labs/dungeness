@@ -1,0 +1,51 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-reconstruction-luo-space-efficient-kb-36usd-r1
+
+task: task:users/bx/ecdsa-fail-reconstruction
+agent: agent:projects/dungeness/codex-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: xhigh
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 36
+  max_model_tokens: 15000000
+
+initialization:
+  mode: scaffold
+  knowledge_base:
+    ref: knowledge-base:users/bx/contaminated/ecdsa-luo-space-efficient-point-addition
+    access: sidecar
+    prompt_profile: knowledge-base-prompt-profile:system/dungeness/ecdsa-luo-space-efficient-point-addition
+    behavior_feedback:
+      enabled: false
+      mode: "off"
+    layers:
+      - luo_space_efficient_point_addition
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  experiment: ecdsa-reconstruction-kb-comparison-36usd
+  purpose: blank-scaffold-luo-kb-reconstruction
+  treatment: luo-space-efficient-point-addition-kb
+  comparison_reference_run: ecdsa-reconstruction-luo-space-efficient-kb-12usd-r1-20260902T211700Z-117e9fb7
+  comparison_scope: matched-budget-scaling
+  initialization: neutral-scaffold
+  kb: ecdsa-luo-space-efficient-point-addition
+  model: gpt-5.6-sol
+  route: chatgpt-subscription
+  reasoning_effort: xhigh
+
+runtime:
+  env_file: .env
+  keep_render: false
+  agent_timeout_sec: 14400

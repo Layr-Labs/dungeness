@@ -1,0 +1,41 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: codex-astra-subscription
+execution_mode: installed
+
+image:
+  from: agent:projects/dungeness/codex-openrouter
+
+# Use the Codex release that includes GPT-6 Astra support. The explicit context
+# window below also keeps custom-provider runs independent of catalog fallback.
+package:
+  name: "@openai/codex"
+  version: "0.153.3"
+
+authentication:
+  mode: chatgpt-subscription
+  credential: codex
+  isolation: reduced
+
+model:
+  provider: openai-chatgpt
+  upstream_id: openai/gpt-6-astra
+  request_model: gpt-6-astra
+  api: openai-responses
+  name_format: request
+  context_window: 1050000
+  supported_reasoning_efforts: [low, medium, high, xhigh, max]
+  defaults:
+    reasoning_effort: high
+    reasoning_summary: detailed
+
+harbor:
+  agent: codex
+  import_path: codex_subscription:CodexSubscription
+  kwargs:
+    web_search: disabled
+
+# Subscription credentials are mounted per run. Provider secrets and endpoints
+# must never be authored in this editable agent profile.
+environment: {}

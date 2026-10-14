@@ -1,0 +1,27 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-prime-agent-62ae3d0-1usd
+
+task: task:users/bx/ecdsa-fail
+agent: agent:projects/dungeness/prime-agent
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+budget:
+  max_usd: 1
+  max_model_tokens: 1000000
+
+initialization:
+  mode: checkpoint
+
+labels:
+  experiment: ecdsa-runtime-checkpoint-sweep-1usd
+  purpose: agent-checkpoint-comparison
+  agent: prime-agent
+  checkpoint: 62ae3d0
+  phase: exploratory-pilot
+  repetition: "1"
+
+runtime:
+  env_file: .env
+  keep_render: false

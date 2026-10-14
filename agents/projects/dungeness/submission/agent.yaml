@@ -1,0 +1,58 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: submission
+execution_mode: installed
+
+# ============================================================================
+# SUBMISSION SLOT -- this is the agent benchmark runner uses by default.
+#
+# Edit or replace this directory (agent.yaml + Dockerfile) with your own agent.
+# The sibling agents (codex-openrouter/, claude/, pi/) are reference examples you can copy
+# from or delete. An agent needs exactly two files:
+#   - agent.yaml : this descriptor (id MUST equal the directory name)
+#   - Dockerfile   : pre-bakes the agent + any gateway-routing config
+# build.py renders it into a Harbor job behind the metering/budget/no-egress
+# gateway; nothing else is required.
+#
+# Seeded from the pi agent on OpenRouter (any model behind one endpoint).
+# ============================================================================
+
+# Pin the pi coding-agent release. Harbor's built-in `pi` adapter installs
+# @mariozechner/pi-coding-agent; we pre-bake it in the image (below) so no
+# network install happens after the sandbox starts.
+package:
+  name: "@mariozechner/pi-coding-agent"
+  version: "0.73.1"
+
+model:
+  provider: openrouter
+  upstream_id: openai/gpt-5.6-sol
+  request_model: openai/gpt-5.6-sol
+  api: openai-completions
+  name_format: provider/request
+  defaults:
+    reasoning_effort: high
+
+harbor:
+  agent: pi
+  # Harbor's stock `pi` adapter always runs a NETWORK install() at setup (curl
+  # nvm + npm install), which dies in the no-egress sandbox. We route to a
+  # pre-baked subclass that skips it (pi is baked into the image), mirroring how
+  # Codex/Claude short-circuit install when the binary is already present.
+  # Selecting a class by import_path requires the module on PYTHONPATH --
+  # benchmark.sh sets PYTHONPATH=adapters/harbor for you.
+  import_path: "pi_prebaked:PiPrebaked"
+  kwargs:
+    # pi's adapter exposes exactly one tunable CLI flag: --thinking. Tool parity
+    # is automatic -- pi's built-ins are read/bash/edit/write/grep/find/ls with
+    # NO web tool, so research is forced through the gateway `web` command.
+    thinking: "high"
+
+# Provider detection: build.py keys off OPENROUTER_API_KEY in this block to
+# select the OpenRouter gateway route + inject the real upstream key into the
+# gateway only. The agent holds just the placeholder. The gateway base URL is
+# NOT set here (pi ignores base-URL env vars) -- it comes from the baked
+# models.json (see Dockerfile).
+environment:
+  OPENROUTER_API_KEY: testbed

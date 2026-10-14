@@ -1,0 +1,50 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-astra-high-kb-v1-regression-12usd
+
+task: task:users/bx/ecdsa-fail-reconstruction
+agent: agent:projects/dungeness/codex-astra-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: high
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 12
+  max_model_tokens: 5000000
+
+initialization:
+  mode: scaffold
+  knowledge_base:
+    ref: knowledge-base:users/bx/contaminated/ecdsa-paper-kb-v1
+    access: sidecar
+    prompt_profile: knowledge-base-prompt-profile:system/dungeness/ecdsa-paper-v1
+    behavior_feedback:
+      enabled: false
+      mode: "off"
+    layers:
+      - paper_knowledge_base
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  purpose: single-paper-knowledge-base-baseline
+  treatment: kb-v1
+  comparison: ecdsa-astra-high-kb-8-paper-12usd
+  kb: ecdsa-paper-kb-v1
+  paper_count: "1"
+  model: gpt-6-astra
+  route: chatgpt-subscription
+  reasoning_effort: high
+  codex_package: "0.153.3"
+
+runtime:
+  env_file: .env
+  keep_render: true
+  agent_timeout_sec: 14400

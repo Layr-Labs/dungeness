@@ -1,0 +1,40 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: prime-agent
+execution_mode: installed
+
+# Prime Intellect's prime-agent, pinned to the release tarball baked into the
+# image (see Dockerfile). A pi-mono derivative: same headless `--print --mode
+# json` flow and models.json provider system as the `pi` agent.
+package:
+  name: "prime-agent"
+  version: "0.7.3"
+
+model:
+  provider: openrouter
+  upstream_id: openai/gpt-5.6-sol
+  request_model: openai/gpt-5.6-sol
+  api: openai-responses
+  name_format: provider/request
+  defaults:
+    reasoning_effort: high
+
+harbor:
+  agent: prime-agent
+  # Harbor has no built-in prime-agent adapter, so route to our custom class.
+  # import_path requires the module on PYTHONPATH -- run harbor with
+  # PYTHONPATH=adapters/harbor (benchmark.sh does this).
+  import_path: "prime_agent:PrimeAgent"
+  kwargs:
+    # prime-agent exposes the pi-mono --thinking flag (off..max). Its tools run
+    # in a persistent IPython kernel (the RLM model); it reaches the gateway
+    # `web`/`evaluate` commands by executing shell from that kernel.
+    thinking: "high"
+
+# The placeholder is forwarded to the OpenRouter gateway route, which injects
+# the real upstream key (TESTBED_OPENROUTER_API_KEY) into the
+# gateway only. The agent holds just the placeholder; the base URL comes from the
+# baked models.json (see Dockerfile).
+environment:
+  OPENROUTER_API_KEY: testbed

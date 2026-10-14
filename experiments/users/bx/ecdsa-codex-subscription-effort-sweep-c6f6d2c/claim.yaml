@@ -1,0 +1,44 @@
+schema_version: 1
+type: claim
+namespace: users/bx
+id: ecdsa-codex-subscription-effort-effect-c6f6d2c
+
+relations:
+  experiment: experiment:users/bx/ecdsa-codex-subscription-effort-sweep-c6f6d2c-12usd
+
+statement: >-
+  At the earliest public ECDSA checkpoint, requested Codex reasoning effort
+  affects verified improvement under a fixed normalized model budget.
+
+predictions:
+  - The ordering across effort levels may differ from the later checkpoint
+    because this checkpoint has substantially more optimization headroom.
+  - Higher effort may improve solution quality, but may also leave fewer model
+    turns for implementation under the fixed normalized budget.
+
+estimands:
+  primary:
+    name: verified_relative_improvement
+    formula: (checkpoint_score - final_score) / checkpoint_score
+  secondary:
+    - final_score
+    - best_score
+    - reasoning_tokens
+    - input_tokens
+    - output_tokens
+    - model_turns
+    - evaluations
+    - time_to_best_score
+
+analysis:
+  group_by: reasoning_effort
+  comparison: descriptive
+  exclusion_criteria:
+    - Runs that use web sources published after the configured historical cutoff.
+
+limitations:
+  - One run per effort level cannot distinguish effort effects from stochastic variance.
+  - This checkpoint uses the historical point-add-file-v1 interface, so comparisons
+    with later checkpoint experiments may reflect both checkpoint and interface changes.
+  - Subscription quota and provider conditions may vary over execution time.
+  - Reasoning summaries are model-generated summaries, not raw chain-of-thought.

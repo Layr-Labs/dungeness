@@ -1,0 +1,39 @@
+schema_version: 1
+type: research-state-profile
+namespace: system/dungeness
+id: two-knob-double-high-v1
+created_at: null
+published_at: null
+
+controls:
+  web_search:
+    low:
+      minimum: 0
+      soft_min: 0
+      soft_max: 3
+    medium:
+      minimum: 4
+      soft_min: 4
+      soft_max: 8
+    high:
+      minimum: 20
+      soft_min: 20
+      soft_max: 40
+  evaluation:
+    low:
+      minimum: 1
+      soft_min: 1
+      soft_max: 3
+    medium:
+      minimum: 5
+      soft_min: 5
+      soft_max: 10
+    high:
+      minimum: 24
+      soft_min: 24
+      soft_max: 48
+
+safeguards:
+  max_stop_interventions: 4
+  max_stalled_interventions: 2
+  finalization_reserve_sec: 120

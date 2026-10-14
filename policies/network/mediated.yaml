@@ -1,0 +1,13 @@
+schema_version: 1
+type: policy
+namespace: system/dungeness
+id: gateway-only
+mode: mediated
+
+agent:
+  allowed_services:
+    - gateway
+  public_egress: false
+
+verifier:
+  network: none

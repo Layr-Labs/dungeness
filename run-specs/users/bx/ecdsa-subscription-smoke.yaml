@@ -1,0 +1,23 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-subscription-smoke
+
+task: task:users/bx/ecdsa-fail
+agent: agent:projects/dungeness/codex-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+budget:
+  max_usd: 0.02
+  max_model_tokens: 5000
+
+initialization:
+  mode: checkpoint
+
+labels:
+  purpose: subscription-smoke
+  plan: free
+
+runtime:
+  env_file: .env
+  keep_render: false

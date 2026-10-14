@@ -1,0 +1,27 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-pi-afcc72e-1usd
+
+task: task:users/bx/ecdsa-fail
+agent: agent:projects/dungeness/pi
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/afcc72ef9dce8cec98f2310fd3ca27d0dd021f2e
+
+budget:
+  max_usd: 1
+  max_model_tokens: 1000000
+
+initialization:
+  mode: checkpoint
+
+labels:
+  experiment: ecdsa-runtime-checkpoint-sweep-1usd
+  purpose: agent-checkpoint-comparison
+  agent: pi
+  checkpoint: afcc72e
+  phase: exploratory-pilot
+  repetition: "1"
+
+runtime:
+  env_file: .env
+  keep_render: false

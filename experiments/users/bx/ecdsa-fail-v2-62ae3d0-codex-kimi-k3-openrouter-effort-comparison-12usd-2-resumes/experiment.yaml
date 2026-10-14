@@ -1,0 +1,68 @@
+schema_version: 1
+type: experiment
+namespace: users/bx
+id: ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes
+
+labels:
+  problem: ecdsa-fail
+  purpose: kimi-reasoning-effort-and-budget-utilization-comparison
+  phase: exploratory
+  status: planned
+
+relations:
+  task: task:users/bx/ecdsa-fail-v2
+  claims:
+    - claim:users/bx/ecdsa-fail-v2-62ae3d0-kimi-k3-effort-and-budget-utilization
+  problem: problem:public/ecdsafail-challenge/ecdsa-fail
+  run_specs:
+    - run-spec:users/bx/ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes-low
+    - run-spec:users/bx/ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes-high
+    - run-spec:users/bx/ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes-max
+
+design:
+  kind: full-factorial
+  controls:
+    task: task:users/bx/ecdsa-fail-v2
+    model:
+      provider: openrouter
+      upstream_id: moonshotai/kimi-k3
+      api: openai-responses
+    agent_options:
+      reasoning_summary: none
+    initialization:
+      mode: checkpoint
+    budget:
+      max_usd: 12
+      max_model_tokens: 5000000
+    runtime:
+      agent_timeout_sec: 3600
+      continuation:
+        max_resumes: 2
+        min_remaining_sec: 600
+    artifact_access:
+      mode: none
+    evaluation:
+      mode: full-benchmark
+      metric: ecdsafail_score
+      direction: minimize
+  axes:
+    agents:
+      - ref: agent:projects/dungeness/codex-kimi-openrouter
+    checkpoints:
+      - ref: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+    reasoning_efforts:
+      - low
+      - high
+      - max
+  planned_runs: 3
+  nominal_budget_usd: 36.0
+
+run_labels:
+  experiment: ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes
+  purpose: kimi-reasoning-effort-and-budget-utilization-comparison
+  phase: exploratory
+
+created_at: '2026-08-23T17:49:42Z'
+published_at: null
+run_refs: []
+artifact_refs: []

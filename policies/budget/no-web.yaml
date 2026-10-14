@@ -1,0 +1,16 @@
+schema_version: 1
+type: policy
+namespace: system/dungeness
+id: no-web
+
+web:
+  searches: 0
+  fetches: 0
+
+model:
+  requests: 1000
+  total_tokens: 5000000
+  max_usd: 12
+
+evaluation:
+  submissions: 200

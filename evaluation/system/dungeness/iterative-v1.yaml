@@ -1,0 +1,25 @@
+schema_version: 1
+type: evaluation-profile
+namespace: system/dungeness
+id: iterative-v1
+created_at: null
+published_at: null
+
+mode: iterative
+prompt: |
+
+  ### Evaluation loop
+
+  {evaluation_tool}
+
+  Treat this score as the objective to {goal} ({better} is better), and work
+  iteratively:
+
+  1. Get a first version running and `evaluate` it early. Do not wait until you
+     think you are done.
+  2. Read the score, form a hypothesis about what would improve it, make that
+     change, and `evaluate` again.
+  3. Repeat the improve-and-re-evaluate loop. Do not stop at the first version
+     that merely runs or compiles.
+
+  {evaluation_caveat}

@@ -1,0 +1,38 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: codex-astra-openai
+execution_mode: installed
+
+# Reuse the pinned Codex image and direct OpenAI Responses route. This profile
+# is additive; codex-openai remains pinned to GPT-5.6-sol for historical runs.
+image:
+  from: agent:projects/dungeness/codex-openrouter
+
+package:
+  name: "@openai/codex"
+  version: "0.153.3"
+
+model:
+  provider: openai
+  upstream_id: openai/gpt-6-astra
+  request_model: gpt-6-astra
+  api: openai-responses
+  name_format: request
+  context_window: 1050000
+  supported_reasoning_efforts: [low, medium, high, xhigh, max]
+  defaults:
+    reasoning_effort: high
+    reasoning_summary: detailed
+
+harbor:
+  agent: codex
+  import_path: codex_gateway:CodexGateway
+  kwargs:
+    gateway_base_url: http://gateway:8080/model/openai/v1
+    web_search: disabled
+
+# Agent-side client values only; the gateway holds the real OpenAI API key.
+environment:
+  OPENAI_BASE_URL: http://gateway:8080/model/openai/v1
+  OPENAI_API_KEY: testbed

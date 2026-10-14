@@ -1,0 +1,9 @@
+schema_version: 1
+type: adapter
+namespace: system/dungeness
+id: responses-to-chat
+
+data:
+  accepts: openai-responses
+  emits: openai-chat-completions
+  implementation: services/gateway/kimi_adapter.py

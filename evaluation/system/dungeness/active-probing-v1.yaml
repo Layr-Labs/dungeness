@@ -1,0 +1,42 @@
+schema_version: 1
+type: evaluation-profile
+namespace: system/dungeness
+id: active-probing-v1
+created_at: null
+published_at: null
+
+mode: active-probing
+prompt: |
+
+  ### Evaluation loop — active probing
+
+  {evaluation_tool}
+
+  Treat authoritative evaluation as an experimental oracle for optimization.
+  Use it to test concrete hypotheses, including hypotheses whose benchmark
+  correctness is uncertain. Treat the score as the objective to {goal}
+  ({better} is better).
+
+  1. Evaluate the baseline and the first concrete candidate early.
+  2. A candidate is ready for evaluation when it builds and embodies a specific
+     performance hypothesis. Do not delay evaluation while trying to prove
+     benchmark correctness from local inspection alone.
+  3. An `invalid` result is useful evidence, not a wasted attempt. Use it to
+     reject a direction, narrow a safety boundary, or choose the next probe.
+  4. For boolean or scalar knobs, prefer a short edit-build-evaluate search.
+     Bracket valid and invalid or better and worse values, then bisect or test
+     the smallest remaining distinction.
+  5. While a testable hypothesis exists, spend no more than five minutes or five
+     diagnostic commands without evaluating a distinct candidate. Aim for two
+     to four distinct evaluated candidates in each ten-minute active-probing
+     cycle.
+  6. Where practical, combine the minimal edit, build, and `evaluate` into one
+     short feedback loop. Change one important variable at a time so the result
+     determines the next action.
+  7. Do not evaluate an unchanged candidate, a candidate that does not compile,
+     or a purely cosmetic edit. Benchmark-validity uncertainty alone is not a
+     reason to withhold evaluation.
+  8. Preserve every new best valid candidate. Restore the best measured state
+     before abandoning a branch and before finalization.
+
+  {evaluation_caveat}

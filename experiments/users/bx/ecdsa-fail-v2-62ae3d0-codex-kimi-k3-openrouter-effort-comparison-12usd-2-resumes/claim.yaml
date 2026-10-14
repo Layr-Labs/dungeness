@@ -1,0 +1,43 @@
+schema_version: 1
+type: claim
+namespace: users/bx
+id: ecdsa-fail-v2-62ae3d0-kimi-k3-effort-and-budget-utilization
+
+relations:
+  experiment: experiment:users/bx/ecdsa-fail-v2-62ae3d0-codex-kimi-k3-openrouter-effort-comparison-12usd-2-resumes
+
+statement: >-
+  With the same v2 task, checkpoint, Codex harness, Kimi K3 model, budget, and
+  continuation policy, reasoning effort affects both verified improvement and
+  how much of the available model budget is consumed.
+
+predictions:
+  - High effort consumes at least as much billed model cost as low effort.
+  - High effort produces at least as much verified score improvement as low effort.
+  - Either effort may terminate before reaching the USD ceiling because max_usd is a limit, not a target.
+
+estimands:
+  primary:
+    name: budget_utilization
+    formula: billed_usd / 12
+  secondary:
+    - final_score
+    - best_score
+    - verified_relative_improvement
+    - billed_usd
+    - reasoning_tokens
+    - input_tokens
+    - output_tokens
+    - model_turns
+    - evaluations
+    - time_to_best_score
+    - termination_reason
+
+analysis:
+  group_by: reasoning_effort
+  comparison: descriptive
+
+limitations:
+  - One run per effort level cannot distinguish effort effects from stochastic variance.
+  - OpenRouter availability, latency, and routing conditions may vary between runs.
+  - Kimi reasoning_content is provider-visible output, but it does not guarantee identical internal behavior across requests.

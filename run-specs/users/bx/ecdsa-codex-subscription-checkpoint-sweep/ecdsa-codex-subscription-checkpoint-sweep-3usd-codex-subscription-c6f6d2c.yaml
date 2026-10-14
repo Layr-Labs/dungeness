@@ -1,0 +1,21 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-codex-subscription-checkpoint-sweep-3usd-codex-subscription-c6f6d2c
+task: task:users/bx/ecdsa-fail
+agent: agent:projects/dungeness/codex-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/c6f6d2c7f50353259241e296458afb0e651e6c37
+budget:
+  max_usd: 3
+  max_model_tokens: 1000000
+initialization:
+  mode: checkpoint
+labels:
+  experiment: ecdsa-codex-subscription-checkpoint-sweep-3usd
+  purpose: experiment-cell
+  agent: codex-subscription
+  checkpoint: c6f6d2c
+  repetition: '1'
+runtime:
+  env_file: .env
+  keep_render: false

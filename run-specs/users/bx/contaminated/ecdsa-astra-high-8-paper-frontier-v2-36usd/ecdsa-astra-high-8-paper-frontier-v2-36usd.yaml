@@ -1,0 +1,59 @@
+schema_version: 1
+type: run-spec
+namespace: users/bx
+id: ecdsa-astra-high-8-paper-frontier-v2-36usd
+
+task: task:users/bx/ecdsa-fail-reconstruction
+agent: agent:projects/dungeness/codex-astra-subscription
+checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+
+agent_options:
+  reasoning_effort: high
+  reasoning_summary: detailed
+
+budget:
+  max_usd: 36
+  max_model_tokens: 15000000
+
+initialization:
+  mode: scaffold
+  knowledge_base:
+    ref: knowledge-base:users/bx/contaminated/ecdsa-8-paper-frontier-kb-v2
+    access: sidecar
+    prompt_profile: knowledge-base-prompt-profile:system/dungeness/ecdsa-8-paper-frontier-v2
+    behavior_feedback:
+      enabled: false
+      mode: 'off'
+    layers:
+      - orientation
+      - decision_dossiers
+      - operational_evidence
+      - searchable_source_pages
+      - unchanged_source_pdfs
+
+web_search:
+  profile: web-search-profile:system/dungeness/disabled-v1
+
+evaluation:
+  profile: evaluation-profile:system/dungeness/iterative-v1
+
+labels:
+  purpose: knowledge-base-form-comparison
+  treatment: evidence-preserving-eight-paper-decision-frontier-v2
+  comparison: ecdsa-astra-high-8-paper-frontier-36usd
+  secondary_comparison: ecdsa-astra-high-raw-8-paper-36usd
+  kb: ecdsa-8-paper-frontier-kb-v2
+  kb_form: evidence-ladder-dossiers-cards-full-page-source
+  paper: ecdsa-eight-paper-corpus
+  paper_count: '8'
+  preprocessing: full-page-evidence-operational-cards-cross-paper-dossiers
+  access: read-only
+  model: gpt-6-astra
+  route: chatgpt-subscription
+  reasoning_effort: high
+  codex_package: '0.153.3'
+
+runtime:
+  env_file: .env
+  keep_render: true
+  agent_timeout_sec: 14400
