@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir --requirement /app/requirements.txt
 
 COPY gateway.py /app/gateway.py
 COPY gateway_models.py /app/gateway_models.py
+COPY gateway_request_policy.py /app/gateway_request_policy.py
 COPY gateway_pricing.py /app/gateway_pricing.py
 COPY gateway_runtime.py /app/gateway_runtime.py
 COPY gateway_usage.py /app/gateway_usage.py

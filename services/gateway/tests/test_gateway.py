@@ -26,6 +26,7 @@ os.environ.update(
         "EXA_API_KEY": "unused",
         "OPENAI_API_KEY": "unused",
         "OPENROUTER_API_KEY": "unused",
+        "DUNGENESS_OPENROUTER_INFERENCE_ONLY": "1",
         "ANTHROPIC_API_KEY": "unused",
         "MOONSHOT_API_KEY": "unused",
         "KIMI_CODE_API_KEY": "membership-unused",
@@ -144,6 +145,7 @@ class ModuleLayoutTests(unittest.TestCase):
         for filename in (
             "gateway.py",
             "gateway_models.py",
+            "gateway_request_policy.py",
             "gateway_pricing.py",
             "gateway_runtime.py",
             "gateway_usage.py",

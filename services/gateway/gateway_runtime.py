@@ -29,6 +29,7 @@ from gateway_models import (
     provider_auth_headers,
     usage_extractor,
 )
+import gateway_pricing
 from gateway_pricing import (
     CACHED_TOKEN_WEIGHT,
     pricing_for_request,
@@ -36,6 +37,7 @@ from gateway_pricing import (
     request_pricing_rates,
     request_usd,
 )
+from gateway_request_policy import validate_model_headers, validate_model_request, validate_model_transport
 from gateway_usage import (
     METRICS,
     UsageLedger,
@@ -97,6 +99,10 @@ class Gateway:
         self.allowed_fetch_targets: dict[str, dict[str, Any]] = {}
         allowed = os.environ.get("DUNGENESS_ALLOWED_MODELS")
         self.allowed_models = {tuple(pair) for pair in json.loads(allowed)} if allowed else None
+        # OpenRouter can force account-default plugins even when a request
+        # disables them. This assertion belongs to the trusted operator, never
+        # a run spec or agent request. Leave the route closed until configured.
+        self.openrouter_inference_only = os.environ.get("DUNGENESS_OPENROUTER_INFERENCE_ONLY") == "1"
         # Model reasoning can legitimately take longer than an ordinary web
         # request. Responses are streamed to the agent as they arrive, while a
         # bounded overall timeout still prevents abandoned provider calls.
@@ -376,17 +382,31 @@ class Gateway:
                 status=status,
             )
 
-    async def admit_model(self, provider: str, request: Request) -> None:
-        if self.allowed_models is None:
-            self.ledger.reserve("model_requests")
-            return
-        payload = await request.json()
-        if (not isinstance(payload, dict) or not isinstance(payload.get("model"), str)
-                or (provider, payload["model"]) not in self.allowed_models):
+    async def admit_model(self, provider: str, request: Request, operation: str) -> dict:
+        validate_model_transport(operation, request.method, list(request.query_params.multi_items()),
+                                 await request.body())
+        validate_model_headers(request.headers)
+        try:
+            payload = await request.json()
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise ValueError("model request body must be valid JSON") from error
+        # Access policy is independent of command/legacy harness identity,
+        # pricing mode, web budgets, and whether a model allowlist was supplied.
+        validate_model_request(provider, operation, payload)
+        if provider == "openrouter" and not self.openrouter_inference_only:
+            raise ValueError(
+                "OpenRouter inference requires the operator to disable account-default "
+                "server tools/plugins and set TESTBED_OPENROUTER_INFERENCE_ONLY=1"
+            )
+        if self.allowed_models is not None and (provider, payload["model"]) not in self.allowed_models:
             raise ValueError("model is not authorized for this run")
         from gateway_models import validate_declared_request
         validate_declared_request(payload, pricing_for_request(provider, payload["model"]))
-        self.ledger.admit_model(request.state.request_id)
+        if self.allowed_models is None:
+            self.ledger.reserve("model_requests")
+        else:
+            self.ledger.admit_model(request.state.request_id)
+        return payload
 
     async def proxy_model(
         self, provider: str, path: str, request: Request
@@ -401,7 +421,18 @@ class Gateway:
             return JSONResponse(
                 {"error": "unsupported model operation"}, status_code=404
             )
-        await self.admit_model(provider, request)
+        if normalized == "models":
+            validate_model_transport(normalized, request.method, list(request.query_params.multi_items()),
+                                     await request.body())
+            validate_model_headers(request.headers)
+            # Discovery is local. Do not expose arbitrary provider operations,
+            # account state or unapproved model aliases through this GET route.
+            names = sorted({name for entry in gateway_pricing.MODEL_PRICING if entry["provider"] == provider
+                            for name in entry["request_models"]
+                            if self.allowed_models is None or (provider, name) in self.allowed_models})
+            return JSONResponse({"object": "list", "data": [
+                {"id": name, "object": "model", "owned_by": provider} for name in names]})
+        payload = await self.admit_model(provider, request, normalized)
         started = time.monotonic()
         status = "error"
         usage: dict[str, int] = {}
@@ -569,13 +600,6 @@ class Gateway:
         response_body = bytearray()
         content_type = "application/json"
         try:
-            body = await request.body()
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError as error:
-                raise ValueError("model request body must be valid JSON") from error
-            if not isinstance(payload, dict):
-                raise ValueError("model request body must be a JSON object")
             model = bounded_model_name(payload.get("model"))
             request_pricing = pricing_for_request(provider, model)
             if normalized == "chat/completions" and payload.get("stream"):
@@ -589,6 +613,10 @@ class Gateway:
                     # OpenRouter returns provider-visible reasoning by default,
                     # but make that invariant explicit for research traces.
                     reasoning["exclude"] = False
+            if provider == "openrouter":
+                # A missing plugins field can inherit an account's default web
+                # plugin. This override is gateway-owned; agents cannot set it.
+                payload["plugins"] = [{"id": "web", "enabled": False}]
             body = json.dumps(payload, separators=(",", ":")).encode()
             # Record how this agent composed the prompt (profile always; full
             # body only under TESTBED_CAPTURE_PROMPTS) -- lets us measure
@@ -615,9 +643,7 @@ class Gateway:
                     # API profiles receive a gateway-owned secret. Subscription
                     # profiles explicitly forward Codex's ChatGPT bearer token.
                     **provider_auth_headers(provider, request.headers),
-                    "content-type": request.headers.get(
-                        "content-type", "application/json"
-                    ),
+                    "content-type": "application/json",
                     "accept": request.headers.get("accept", "application/json"),
                     # Force uncompressed responses: we forward raw upstream bytes
                     # to the agent (only content-type, not content-encoding) and
@@ -728,7 +754,7 @@ class Gateway:
             return JSONResponse(
                 {"error": "unsupported model operation"}, status_code=404
             )
-        await self.admit_model(provider, request)
+        payload = await self.admit_model(provider, request, normalized)
         started = time.monotonic()
         status = "error"
         response_body = bytearray()
@@ -736,7 +762,6 @@ class Gateway:
         model = "unknown"
         request_pricing: dict[str, Any] | None = None
         finalized = False
-        payload: dict[str, Any] = {}
 
         def trace(event: dict[str, Any]) -> None:
             record = {
@@ -877,14 +902,7 @@ class Gateway:
                 self.ledger.finish_model(request_id, accounted=bool(usage))
 
         try:
-            body = await request.body()
-            try:
-                parsed_payload = json.loads(body)
-            except json.JSONDecodeError as error:
-                raise ValueError("model request body must be valid JSON") from error
-            if not isinstance(parsed_payload, dict):
-                raise ValueError("model request body must be a JSON object")
-            payload = parsed_payload
+            body = json.dumps(payload, separators=(",", ":")).encode()
             model = bounded_model_name(payload.get("model"))
             request_pricing = pricing_for_request(provider, model)
             capture_prompt(request_id, provider, normalized, model, body, payload)

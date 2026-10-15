@@ -2039,6 +2039,9 @@ def build_compose(
                     **exa_secret_env,
                     **provider_secret_env,
                     **usd_env,
+                    # Trusted operator assertion; never supplied by the run
+                    # spec or forwarded to the submitted harness container.
+                    "DUNGENESS_OPENROUTER_INFERENCE_ONLY": "${TESTBED_OPENROUTER_INFERENCE_ONLY:-}",
                     # Prompt profiles are embedded in usage/events.jsonl. Set
                     # TESTBED_CAPTURE_PROMPTS=1 to additionally dump each full
                     # request body for prompt-bias debugging. Default off.

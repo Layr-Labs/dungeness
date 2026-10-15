@@ -37,7 +37,11 @@ def validate_declared_request(payload, pricing):
         if not isinstance(items, list):
             raise ValueError("tools must be a list")
         for tool in items:
-            if not isinstance(tool, dict) or tool.get("type", "function") not in ("function", "custom", "namespace"):
+            if not isinstance(tool, dict) or tool.get("type", "function") not in (
+                "function", "custom", "namespace", "local_shell", "shell", "apply_patch",
+                "bash_20250124", "text_editor_20250124", "text_editor_20250429",
+                "text_editor_20250728", "memory_20250818", "tool_search",
+            ):
                 raise ValueError("only harness-executed tools are metered by this contract")
             if tool.get("type") == "namespace":
                 tools(tool.get("tools", []))
@@ -52,10 +56,14 @@ def validate_declared_request(payload, pricing):
             for item in value:
                 content(item)
         elif isinstance(value, dict):
-            if value.get("type") in media_types or set(value) & {"image_url", "input_audio", "video_url"}:
+            if (isinstance(value.get("type"), str) and value["type"] in media_types
+                    or set(value) & {"image_url", "input_audio", "video_url"}):
                 raise ValueError("this reference pricing snapshot supports text input only")
-            for item in value.values():
-                content(item)
+            # Tool arguments are opaque data, not protocol-level media. A
+            # harness may manipulate JSON containing keys such as image_url.
+            for key, item in value.items():
+                if key not in {"input", "arguments"}:
+                    content(item)
     if payload.get("modalities", ["text"]) != ["text"] or "audio" in payload:
         raise ValueError("this reference pricing snapshot supports text output only")
     content(payload.get("input", []))
@@ -459,8 +467,6 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "billed": True,
         "passthrough": (
             "openai-beta",
-            "openai-organization",
-            "openai-project",
             "idempotency-key",
         ),
         "extract_usage": extract_usage,
@@ -513,9 +519,7 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
             "x-openai-subagent",
             "x-client-request-id",
             "x-codex-turn-metadata",
-            "x-codex-turn-state",
             "x-codex-installation-id",
-            "x-codex-routing-hint",
             "x-oai-attestation",
             "x-responsesapi-include-timing",
             "traceparent",

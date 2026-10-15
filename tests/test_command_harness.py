@@ -46,6 +46,9 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertTrue(compose["networks"]["agent_internal"]["internal"])
         self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
         self.assertEqual(compose["services"]["gateway"]["environment"]["MAX_MODEL_USD"], "1")
+        self.assertEqual(compose["services"]["gateway"]["environment"]["DUNGENESS_OPENROUTER_INFERENCE_ONLY"],
+                         "${TESTBED_OPENROUTER_INFERENCE_ONLY:-}")
+        self.assertNotIn("DUNGENESS_OPENROUTER_INFERENCE_ONLY", compose["services"]["main"]["environment"])
         self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
         self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
         self.assertNotIn("DUNGENESS_KNOWLEDGE_BASE", json.dumps(compose))

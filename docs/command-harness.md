@@ -63,7 +63,12 @@ are never presented as actual billed dollars.
 Command runs reject undeclared model fallbacks, asynchronous background
 inference, paid provider tools and service-tier overrides whose costs cannot
 be established by the request's token ledger. Harness-executed function and
-custom tools remain available.
+custom tools remain available. The
+[gateway request policy](gateway-request-policy.md) applies equally to command
+harnesses and legacy agents: only reviewed request fields and harness-executed
+tools are accepted, independently of the run's web-access setting. OpenRouter
+additionally requires the trusted operator to disable account-default server
+tools/plugins and set `TESTBED_OPENROUTER_INFERENCE_ONLY=1`.
 
 `DUNGENESS_TASK` names the JSON task file. It contains `instruction`, `workspace`,
 `models` (including gateway `base_url`), and `resume`. Subagents may be ordinary

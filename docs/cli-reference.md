@@ -316,7 +316,9 @@ For the simpler OpenRouter path, select:
 agent: agent:projects/dungeness/codex-kimi-openrouter
 ```
 
-This profile needs only `TESTBED_OPENROUTER_API_KEY`. OpenRouter's Responses
+This profile needs `TESTBED_OPENROUTER_API_KEY` and the operator's
+[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults).
+OpenRouter's Responses
 API serves `moonshotai/kimi-k3` directly. Dungeness explicitly requests
 provider-visible reasoning and records the reconstructed reasoning stream plus
 the untouched response events in `usage/events.jsonl`.
@@ -337,7 +339,8 @@ To hold the Codex harness fixed and vary only the model, select:
 agent: agent:projects/dungeness/codex-claude-openrouter
 ```
 
-This profile needs only `TESTBED_OPENROUTER_API_KEY` and reuses the
+This profile needs `TESTBED_OPENROUTER_API_KEY`, the operator's
+[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults), and reuses the
 `codex-openrouter` image. OpenRouter's Responses API serves
 `anthropic/claude-opus-5` with function calling, maps Codex's
 `reasoning_effort` (`low`, `medium`, `high`, `xhigh`) onto Anthropic thinking
@@ -356,7 +359,9 @@ is OpenRouter, which serves the Anthropic Messages API that Claude Code speaks:
 agent: agent:projects/dungeness/claude-openrouter
 ```
 
-This profile needs only `TESTBED_OPENROUTER_API_KEY`. It reuses the pinned
+This profile needs `TESTBED_OPENROUTER_API_KEY` and the operator's
+[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults).
+It reuses the pinned
 Claude Code image from `agents/projects/dungeness/claude`, disables Claude
 Code's built-in `WebSearch` and `WebFetch` tools so research goes through the
 gateway `web` command, and bills `anthropic/claude-opus-5` from the trusted
@@ -645,7 +650,11 @@ web_search:
 `disabled` sets search and fetch budgets to zero. `optional` exposes only the
 trusted, metered web tools allowed by the task. Neither grants direct internet
 access or injects search instructions. The old `disabled-v1` and `optional-v1`
-profile references are accepted as access-only compatibility aliases.
+profile references are accepted as access-only compatibility aliases. They do
+not select or constrain the harness architecture. The mandatory
+[gateway request policy](gateway-request-policy.md) blocks provider-hosted search
+and accepts only reviewed inference fields and locally executed tools in either
+mode, including for legacy agents.
 
 Strategy profiles, run-spec `evaluation`, `research_state`, and
 `initialization.knowledge_base` are rejected with migration messages. Bundle
