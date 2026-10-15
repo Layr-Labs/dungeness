@@ -39,13 +39,11 @@ RUN printf 'export PATH=/usr/local/cargo/bin:$PATH\n' > /etc/profile.d/rust.sh
 COPY workspace/ /workspace/repo/
 COPY web_client.py /usr/local/bin/web
 COPY evaluate.py /usr/local/bin/evaluate
-COPY research_worker.py /usr/local/bin/research-worker
 COPY run_status.py /usr/local/bin/run-status
 COPY candidate_state.py /usr/local/bin/candidate-state
 
 RUN ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
     && chmod 0555 /usr/local/bin/web /usr/local/bin/evaluate \
-      /usr/local/bin/research-worker \
       /usr/local/bin/run-status /usr/local/bin/candidate-state \
     && codex --version \
     && if [ -f /workspace/repo/Cargo.toml ]; then \

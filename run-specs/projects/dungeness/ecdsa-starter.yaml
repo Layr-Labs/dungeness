@@ -19,7 +19,7 @@ initialization:
   mode: checkpoint
 
 web_search:
-  profile: web-search-profile:system/dungeness/disabled-v1
+  mode: disabled
 
 runtime:
   env_file: .env

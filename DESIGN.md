@@ -104,7 +104,7 @@ For example:
 
 ```text
 agent:projects/dungeness/claude
-task:users/bx/ecdsa-fail
+task:projects/dungeness/ecdsa-starter
 checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00...
 run-spec:users/bx/ecdsa-fail-claude-1usd
 run:users/bx/<run-id>
@@ -144,7 +144,7 @@ Examples:
 
 ```text
 problem:public/ecdsafail-challenge/ecdsa-fail
-task:users/bx/ecdsa-fail
+task:projects/dungeness/ecdsa-starter
 agent:projects/dungeness/claude
 policy:system/dungeness/gateway-only
 ```
@@ -220,8 +220,6 @@ The current record types are intentionally small.
 | `policy` | Implemented | Trusted execution policy |
 | `service` | Implemented | Trusted runtime service |
 | `adapter` | Implemented | Integration with an execution system |
-| `web-search-profile` | Implemented | Versioned agent-facing web-search instructions |
-| `evaluation-profile` | Implemented | Versioned agent-facing evaluation-loop instructions |
 | `artifact` | Future catalog type | Searchable output referenced by a run |
 | `experiment` | Implemented orchestration | Controlled collection of run specs |
 | `claim` | Authored; catalog tooling future | Research statement and interpretation plan |
@@ -357,7 +355,7 @@ type: run-spec
 namespace: users/bx
 id: ecdsa-fail-claude-1usd
 
-task: task:users/bx/ecdsa-fail
+task: task:projects/dungeness/ecdsa-starter
 agent: agent:projects/dungeness/claude
 checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>
 
@@ -368,10 +366,7 @@ initialization:
   mode: checkpoint
 
 web_search:
-  profile: web-search-profile:system/dungeness/optional-v1
-
-evaluation:
-  profile: evaluation-profile:system/dungeness/iterative-v1
+  mode: optional
 
 labels:
   purpose: baseline
@@ -384,47 +379,18 @@ runtime:
 ```
 
 `runtime.agent_timeout_sec` overrides the task's default Harbor agent deadline
-for this run. The rendered instruction includes a proportional execution
-timebox so the agent evaluates and finalizes before that deadline.
+for this run. The rendered instruction reports this hard deadline without prescribing
+work cycles or a finalization strategy.
 
 `runtime.keep_images` defaults to `false`, so run-scoped Docker images are
 removed after teardown. Set it to `true` only when those images are needed for
 debugging.
 
-`web_search.profile` selects a qualified, file-backed prompt profile under:
-
-```text
-web-search/<namespace>/<id>.yaml
-```
-
-The profile ID versions agent-facing behavior. `optional-v1` renders the
-existing discoverability notice unchanged. `initial-required-v1` requests at
-least one agent-chosen search before the first candidate edit or evaluation,
-without imposing a maximum or prescribing the web-search strategy. Its prompt
-states the selected checkpoint's resolved historical cutoff and explains
-expected policy rejections. `required-preflight-v1` provides the older bounded
-preflight behavior.
-
-The resolved profile is snapshotted in the run record. It is a behavioral
-experimental variable only; trusted web access and cutoff enforcement remain
-owned by the system policy and gateway under `policies/web/`.
-
-For research-policy comparisons, Codex images also provide a read-only
-`research-worker` command. A thin worker executes a main-agent-defined branch;
-an autonomous worker chooses and follows a complete search path before returning
-an evidence packet. Worker model and web traffic uses the same gateway and
-shared run limits as the main agent. This preserves research-policy ownership as
-the treatment without granting worker arms additional budget.
-
-`evaluation.profile` follows the same pattern under:
-
-```text
-evaluation/<namespace>/<id>.yaml
-```
-
-It renders a separate evaluation-loop prompt section and is snapshotted in the
-run record. The selected task still owns the evaluation mode, sidecar,
-benchmark, and budget; this profile controls only the agent-facing instructions.
+`web_search.mode` controls access (`disabled` or `optional`), subject to trusted
+budgets and web policy. Disabled access zeros search and fetch allowances. The
+resolved access mode is captured in provenance. Research prompts, evaluation
+cadence and subagent topology belong to the harness. The runtime does not load
+strategy profiles or install a `research-worker` command.
 
 Task, agent, and checkpoint references are qualified so namespace mismatches
 are detected before execution. The run spec may provide labels, budgets,
@@ -448,7 +414,7 @@ new run ID and record:
   "id": "ecdsa-fail-claude-1usd-20260820T120000Z-a1b2c3d4",
   "relations": {
     "run_spec": "run-spec:users/bx/ecdsa-fail-claude-1usd",
-    "task": "task:users/bx/ecdsa-fail",
+    "task": "task:projects/dungeness/ecdsa-starter",
     "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
     "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
     "agent": "agent:projects/dungeness/claude"
@@ -553,22 +519,9 @@ There is no claim-specific CLI or catalog implementation yet. For now, a claim
 is an explicitly identified YAML record stored beside the experiment that it
 references.
 
-The maintained authored experiment is:
-
-```text
-experiments/users/bx/ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/experiment.yaml
-```
-
-It defines a fixed-budget full-factorial matrix across Codex reasoning-effort
-levels with the agent, model, authentication mode, checkpoint, and detailed
-reasoning summaries held constant. Its qualified `relations.run_specs`
-references point to the executable cells under
-`run-specs/users/bx/ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/`. Each run spec can
-be launched independently, or the ordered set can be executed with:
-
-```bash
-./dungeness experiment run ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd
-```
+Personal experiment matrices and analysis scripts are archived separately.
+The generic experiment CLI accepts user-authored local manifests and creates
+ordinary run specs; it does not supply a research strategy.
 
 ### System Types
 
@@ -647,7 +600,7 @@ Dungeness then:
 The flag-only form is supported for ad hoc runs:
 
 ```bash
-./dungeness run ecdsa-fail \
+./dungeness run projects/dungeness/ecdsa-starter \
   --agent claude \
   --checkpoint 62ae3d0 \
   --max-usd 1
@@ -835,7 +788,7 @@ must not be treated as visibility or authorization.
 problems/       semantic objectives
 tasks/          executable problem representations
 run-specs/      local and intentionally shared single-run configurations
-experiments/    multi-run research designs and artifact references
+experiments/    locally authored experiments (created when needed)
 checkpoints/    immutable public source samples
 agents/         research-agent definitions and images
 verifiers/      trusted grading implementations

@@ -15,10 +15,10 @@ experimental search/evaluation quotas.
 See [command harnesses](docs/command-harness.md). Existing Codex, Claude Code and
 other maintained adapters remain supported.
 
-Dungeness is an internal runtime. Catalyst solvers submit source and temporary
-model access to the remote service; they do not need this repository. Authorized
-operators can use a checkout or the [runtime source bundle](docs/runtime-distribution.md).
-Publishing a third-party local runner is a separate release decision.
+The source is public and can be used for local development and controlled agent
+runs. Catalyst solvers can also submit source and authorized temporary model
+access directly to the remote service without installing Dungeness. Local runs
+do not create official Catalyst scores or receipts.
 
 ## Quick start for operators
 
@@ -92,7 +92,7 @@ record its score and cumulative usage independently of the harness's logs.
 Outputs are created locally under `runs/<namespace>/<run-id>/`. They are ignored
 by Git and excluded from runtime distributions. Keep them in local or service
 artifact storage; commit run **inputs**, not traces. `verify`, continuation,
-the watcher and cleanup commands still work on retained local outputs.
+the optional transcript tools and cleanup commands still work on retained local outputs.
 
 ## Runtime and research material
 
@@ -103,12 +103,13 @@ the watcher and cleanup commands still work on retained local outputs.
 | `agents/projects/dungeness/`, `tasks/projects/dungeness/` | Maintained adapters and starter task |
 | `run-specs/projects/dungeness/` | Small maintained run examples |
 | `verifiers/`, `checkpoints/`, `problems/` | Grading and pinned task identities |
-| `*/users/`, `experiments/` | Research inputs and validation utilities; not runtime dependencies |
+| `tools/transcripts/` | Optional local transcript viewer; excluded from default runtime bundles |
+| `doc/` | Implementation notes |
 | `runs/` | Generated local output; not committed |
 
 The [runtime exporter](docs/runtime-distribution.md) creates a reproducible source
-bundle without personal experiments, knowledge bases or run output. Reports,
-result charts and result tables belong in local or service artifact storage.
+bundle without personal experiments, knowledge bases or run output. Personal knowledge bases, run recipes, experiments and reports are archived
+separately. New user-authored inputs and run outputs belong in local or service storage.
 This repository starts from a reviewed source snapshot with fresh history.
 Historical runs and reports are retained separately in the private research
 archive.
@@ -116,10 +117,11 @@ archive.
 ## Documentation and checks
 
 - [Bring your own command harness](docs/command-harness.md)
-- [CLI reference and historical examples](docs/cli-reference.md)
+- [CLI reference](docs/cli-reference.md)
 - [Runtime distribution and artifact retention](docs/runtime-distribution.md)
 - [Record and configuration model](DESIGN.md)
 - [Gateway architecture](services/DESIGN.md)
+- [Implementation notes](doc/README.md) (full repository only)
 
 No-model-call regression checks from a full source checkout, using a Python
 environment with the gateway's pinned requirements installed:
@@ -127,9 +129,8 @@ environment with the gateway's pinned requirements installed:
 ```sh
 python -m unittest discover -s tests
 PYTHONPATH=services/gateway python -m unittest discover -s services/gateway/tests
-python -m unittest discover -s watcher -p 'test_*.py'
+python -m unittest discover -s tools/transcripts -p 'test_*.py'
 ```
 
-Harbor 0.18.0 is needed for the adapter API contract test; that test skips when
-Harbor is absent. These checks do not launch paid model runs or establish Docker
+Use an environment with Harbor 0.18.0 for the adapter API contract tests. These checks do not launch paid model runs or establish Docker
 provider compatibility. Use an explicitly funded smoke run for that boundary.

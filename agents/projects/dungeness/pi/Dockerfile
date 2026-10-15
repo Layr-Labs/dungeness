@@ -12,7 +12,7 @@ FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0
 ARG PI_VERSION=0.73.1
 
 # python3 runs the web/evaluate clients; git + g++ give parity with the other
-# agents (git workflow, local C++ compile for world-map); curl matches what
+# agents (git workflow, local C++ compilation); curl matches what
 # pi's own installer expects. Rust is added below. pi is installed GLOBALLY so
 # the `pi` binary is on PATH: Harbor's pi adapter runs `. ~/.nvm/nvm.sh; pi ...`
 # unconditionally, but the `;` means a missing nvm is non-fatal and the global

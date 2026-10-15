@@ -24,7 +24,7 @@ harbor:
   agent: prime-agent
   # Harbor has no built-in prime-agent adapter, so route to our custom class.
   # import_path requires the module on PYTHONPATH -- run harbor with
-  # PYTHONPATH=adapters/harbor (benchmark.sh does this).
+  # PYTHONPATH=adapters/harbor (set by the Dungeness launcher).
   import_path: "prime_agent:PrimeAgent"
   kwargs:
     # prime-agent exposes the pi-mono --thinking flag (off..max). Its tools run

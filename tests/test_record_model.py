@@ -44,10 +44,6 @@ subscription_proxy = load_module(
     "dungeness_codex_subscription_proxy",
     REPOSITORY_ROOT / "services/codex-subscription-proxy/proxy.py",
 )
-research_worker = load_module(
-    "dungeness_research_worker",
-    REPOSITORY_ROOT / "agents/common/research_worker.py",
-)
 candidate_state = load_module(
     "dungeness_candidate_state",
     REPOSITORY_ROOT / "agents/common/candidate_state.py",
@@ -62,7 +58,7 @@ def write_run_spec(path: Path, *, namespace: str = "users/bx") -> None:
                 "type: run-spec",
                 f"namespace: {namespace}",
                 "id: ecdsa-fail-claude-1usd",
-                "task: task:users/bx/ecdsa-fail",
+                "task: task:projects/dungeness/ecdsa-starter",
                 "agent: agent:projects/dungeness/claude",
                 "checkpoint: checkpoint:public/github/layr-labs/"
                 "ecdsafail-challenge/"
@@ -111,7 +107,7 @@ class CompilerCompatibilityTests(unittest.TestCase):
             REPOSITORY_ROOT / "src/dungeness/compiler.py",
         )
         agent = build.load_agent("claude-openrouter")
-        task = REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail"
+        task = REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter"
         self.assertEqual(
             build.build_harbor_job("compatibility-test", agent, task),
             compiler.build_harbor_job(
@@ -367,219 +363,11 @@ class RecordModelTests(unittest.TestCase):
             "${EXA_API_KEY:?EXA_API_KEY is required}",
         )
 
-    def test_optional_web_search_profile_preserves_stable_contract(self) -> None:
-        default_path, default_profile, default_resolved = (
-            build.resolve_web_search_profile(None)
-        )
-        explicit_path, explicit_profile, explicit_resolved = (
-            build.resolve_web_search_profile(
-                {
-                    "profile": (
-                        "web-search-profile:system/dungeness/optional-v1"
-                    )
-                }
-            )
-        )
-        self.assertEqual(default_path, explicit_path)
-        self.assertEqual(default_profile, explicit_profile)
-        self.assertEqual(default_resolved, explicit_resolved)
-        self.assertEqual(default_path.name, "optional-v1.yaml")
-        self.assertEqual(
-            default_resolved,
-            {
-                "profile": "web-search-profile:system/dungeness/optional-v1",
-                "mode": "optional",
-            },
-        )
-        cutoff = "2026-05-28T23:59:59.999Z"
-        notice = build.build_web_notice(default_profile, cutoff)
-        self.assertEqual(
-            notice,
-            build.build_web_notice(explicit_profile, cutoff),
-        )
-        self.assertIn("## Stable web-tool contract", notice)
-        self.assertIn("untrusted external content", notice)
-        self.assertIn(cutoff, notice)
-        self.assertIn("BEGIN EXPERIMENTAL WEB-RESEARCH POLICY", notice)
-        self.assertIn("No additional search behavior", notice)
 
-    def test_initial_required_web_search_includes_resolved_cutoff(self) -> None:
-        cutoff = "2026-05-28T23:59:59.999Z"
-        _, profile, resolved = build.resolve_web_search_profile(
-            {
-                "profile": (
-                    "web-search-profile:system/dungeness/initial-required-v1"
-                )
-            }
-        )
-        notice = build.build_web_notice(profile, cutoff)
-        self.assertEqual(resolved["mode"], "initial-required")
-        self.assertIn("Initial web search", notice)
-        self.assertIn("perform at least one `web search`", notice)
-        self.assertIn("there is no prompt-defined maximum", notice)
-        self.assertIn(cutoff, notice)
-        self.assertIn(
-            "Policy\nrejections are expected",
-            notice,
-        )
 
-    def test_required_web_preflight_profile_is_bounded(self) -> None:
-        _, profile, resolved = build.resolve_web_search_profile(
-            {
-                "profile": (
-                    "web-search-profile:system/dungeness/"
-                    "required-preflight-v1"
-                )
-            }
-        )
-        notice = build.build_web_notice(
-            profile,
-            "2026-05-28T23:59:59.999Z",
-        )
-        self.assertEqual(resolved["mode"], "required-preflight")
-        self.assertTrue(notice.startswith("\n---\n\n## Stable web-tool contract"))
-        self.assertIn("Required web-search preflight", notice)
-        self.assertIn("at least 2 and no more than", notice)
-        self.assertIn("3 targeted `web search` queries", notice)
-        self.assertIn("5 minutes", notice)
-        self.assertIn("fetchEligible: true", notice)
 
-    def test_cli_validates_namespaced_web_search_profile(self) -> None:
-        cli.validate_run_spec_web_search(
-            {
-                "web_search": {
-                    "profile": (
-                        "web-search-profile:system/dungeness/"
-                        "required-preflight-v1"
-                    )
-                }
-            }
-        )
-        cli.validate_run_spec_web_search(
-            {
-                "web_search": {
-                    "profile": (
-                        "web-search-profile:system/dungeness/"
-                        "initial-required-v1"
-                    )
-                }
-            }
-        )
-        with self.assertRaisesRegex(SystemExit, "fully qualified"):
-            cli.validate_run_spec_web_search(
-                {"web_search": {"profile": "initial-required-v1"}}
-            )
-        with self.assertRaisesRegex(SystemExit, "does not exist"):
-            cli.validate_run_spec_web_search(
-                {
-                    "web_search": {
-                        "profile": (
-                            "web-search-profile:system/dungeness/missing-v1"
-                        )
-                    }
-                }
-            )
 
-    def test_web_research_policy_profiles_encode_distinct_ownership(self) -> None:
-        cutoff = "2026-05-28T23:59:59.999Z"
-        expected = {
-            "m2-adaptive-single-agent-v1": (
-                "m2-adaptive-single-agent",
-                "Do not invoke `research-worker`",
-            ),
-            "m3-planner-thin-workers-v1": (
-                "m3-planner-thin-workers",
-                "research-worker thin",
-            ),
-            "m4-dedicated-researcher-v1": (
-                "m4-dedicated-researcher",
-                "research-worker autonomous",
-            ),
-        }
-        for profile_id, (mode, marker) in expected.items():
-            with self.subTest(profile=profile_id):
-                _, profile, resolved = build.resolve_web_search_profile(
-                    {
-                        "profile": (
-                            "web-search-profile:system/dungeness/"
-                            f"{profile_id}"
-                        )
-                    }
-                )
-                notice = build.build_web_notice(profile, cutoff)
-                self.assertEqual(resolved["mode"], mode)
-                self.assertIn(marker, notice)
-                self.assertIn(cutoff, notice)
-                self.assertNotIn("no more than", notice)
 
-    def test_research_worker_is_read_only_and_non_recursive(self) -> None:
-        prompt = research_worker.worker_prompt(
-            "thin",
-            "Find evidence about reversible modular inversion algorithms.",
-        )
-        self.assertIn("main agent owns the research agenda", prompt)
-        self.assertIn("Do not edit files", prompt)
-        with tempfile.TemporaryDirectory() as directory:
-            command = research_worker.build_command(
-                model="k3",
-                reasoning_effort="low",
-                reasoning_summary="none",
-                output_path=Path(directory) / "evidence.md",
-                prompt=prompt,
-            )
-        self.assertIn("read-only", command)
-        self.assertIn("multi_agent", command)
-        self.assertIn("model_reasoning_effort=low", command)
-        self.assertIn("model_reasoning_summary=none", command)
-        self.assertEqual(command[command.index("--model") + 1], "k3")
-        research_worker.require_topology("thin", "thin-workers")
-        research_worker.require_topology(
-            "autonomous",
-            "dedicated-researcher",
-        )
-        with self.assertRaisesRegex(ValueError, "unavailable"):
-            research_worker.require_topology("thin", "single-agent")
-        with self.assertRaisesRegex(ValueError, "unavailable"):
-            research_worker.require_topology(
-                "autonomous",
-                "thin-workers",
-            )
-        with tempfile.TemporaryDirectory() as directory:
-            state_root = Path(directory)
-            research_worker.reserve_dedicated_researcher(state_root)
-            with self.assertRaisesRegex(ValueError, "exactly one"):
-                research_worker.reserve_dedicated_researcher(state_root)
-        kimi_agent = build.load_agent(
-            "codex-kimi-subscription",
-            "projects/dungeness",
-        )
-        self.assertEqual(
-            build.research_worker_environment(
-                kimi_agent,
-                {
-                    "reasoning_effort": "low",
-                    "reasoning_summary": "none",
-                },
-                "m3-planner-thin-workers",
-            ),
-            {
-                "DUNGENESS_RESEARCH_MODEL": "k3",
-                "DUNGENESS_RESEARCH_REASONING_EFFORT": "low",
-                "DUNGENESS_RESEARCH_REASONING_SUMMARY": "none",
-                "DUNGENESS_RESEARCH_TOPOLOGY": "thin-workers",
-            },
-        )
-        self.assertEqual(
-            build.research_worker_environment(
-                kimi_agent,
-                {
-                    "reasoning_effort": "low",
-                    "reasoning_summary": "none",
-                },
-                "m2-adaptive-single-agent",
-            )["DUNGENESS_RESEARCH_TOPOLOGY"],
-            "single-agent",
-        )
 
     def test_candidate_state_round_trips_directory_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -598,242 +386,11 @@ class RecordModelTests(unittest.TestCase):
             )
             self.assertEqual(candidate_state.digest_path(candidate), baseline_digest)
 
-    def test_web_research_policy_experiment_run_specs_are_controlled(self) -> None:
-        directory = (
-            REPOSITORY_ROOT
-            / "run-specs/users/bx/"
-            "ecdsa-kimi-subscription-web-research-policy-low-12usd"
-        )
-        documents = []
-        for method in ("m2", "m3", "m4"):
-            path = (
-                directory
-                / f"ecdsa-kimi-subscription-web-research-policy-low-12usd-{method}.yaml"
-            )
-            _, document = cli.load_run_spec(str(path))
-            documents.append(document)
-            self.assertEqual(document["labels"]["research_method"], method)
 
-        controlled_fields = (
-            "task",
-            "agent",
-            "checkpoint",
-            "agent_options",
-            "budget",
-            "initialization",
-            "evaluation",
-            "runtime",
-        )
-        for field in controlled_fields:
-            self.assertEqual(
-                [document[field] for document in documents],
-                [documents[0][field]] * len(documents),
-            )
-        self.assertEqual(
-            {
-                document["web_search"]["profile"]
-                for document in documents
-            },
-            {
-                "web-search-profile:system/dungeness/"
-                "m2-adaptive-single-agent-v1",
-                "web-search-profile:system/dungeness/"
-                "m3-planner-thin-workers-v1",
-                "web-search-profile:system/dungeness/"
-                "m4-dedicated-researcher-v1",
-            },
-        )
 
-    def test_evaluation_profile_preserves_default_iterative_prompt(self) -> None:
-        default_path, default_profile, default_resolved = (
-            build.resolve_evaluation_profile(None)
-        )
-        explicit_path, explicit_profile, explicit_resolved = (
-            build.resolve_evaluation_profile(
-                {
-                    "profile": (
-                        "evaluation-profile:system/dungeness/iterative-v1"
-                    )
-                }
-            )
-        )
-        self.assertEqual(default_path, explicit_path)
-        self.assertEqual(default_profile, explicit_profile)
-        self.assertEqual(default_resolved, explicit_resolved)
-        self.assertEqual(default_path.name, "iterative-v1.yaml")
-        self.assertEqual(
-            default_resolved,
-            {
-                "profile": (
-                    "evaluation-profile:system/dungeness/iterative-v1"
-                ),
-                "mode": "iterative",
-            },
-        )
 
-        split_notice = build.build_eval_notice(
-            default_profile,
-            "split",
-            "src/point_add",
-            "maximize",
-        )
-        self.assertIn("### Evaluation loop", split_notice)
-        self.assertIn("hidden\n  dev cases", split_notice)
-        self.assertIn("separate hidden holdout cases", split_notice)
-        self.assertIn("maximize (higher is better)", split_notice)
 
-        full_notice = build.build_eval_notice(
-            default_profile,
-            "full-benchmark",
-            "src/point_add",
-            "minimize",
-        )
-        self.assertIn("### Evaluation loop", full_notice)
-        self.assertIn("the real benchmark", full_notice)
-        self.assertIn("status: invalid", full_notice)
-        self.assertIn("minimize (lower is better)", full_notice)
-        self.assertNotIn("keep driving it down", full_notice)
 
-    def test_frequent_feedback_evaluation_profile_encourages_regular_use(
-        self,
-    ) -> None:
-        _, profile, resolved = build.resolve_evaluation_profile(
-            {
-                "profile": (
-                    "evaluation-profile:system/dungeness/"
-                    "frequent-feedback-v1"
-                )
-            }
-        )
-        self.assertEqual(resolved["mode"], "frequent-feedback")
-
-        notice = build.build_eval_notice(
-            profile,
-            "full-benchmark",
-            "src/point_add",
-            "minimize",
-        )
-        self.assertIn(
-            "Authoritative evaluation provides valuable feedback",
-            notice,
-        )
-        self.assertIn(
-            "After each meaningful, runnable candidate change",
-            notice,
-        )
-        self.assertIn(
-            "Distribute evaluations throughout the run",
-            notice,
-        )
-        self.assertNotIn("limited optimization resource", notice)
-
-    def test_active_probing_evaluation_profile_uses_invalid_results(
-        self,
-    ) -> None:
-        _, profile, resolved = build.resolve_evaluation_profile(
-            {
-                "profile": (
-                    "evaluation-profile:system/dungeness/"
-                    "active-probing-v1"
-                )
-            }
-        )
-        self.assertEqual(resolved["mode"], "active-probing")
-
-        notice = build.build_eval_notice(
-            profile,
-            "full-benchmark",
-            "src/point_add",
-            "minimize",
-        )
-        self.assertIn(
-            "Treat authoritative evaluation as an experimental oracle",
-            notice,
-        )
-        self.assertIn(
-            "An `invalid` result is useful evidence",
-            notice,
-        )
-        self.assertIn(
-            "Bracket valid and invalid or better and worse values",
-            notice,
-        )
-        self.assertIn(
-            "to four distinct evaluated candidates",
-            notice,
-        )
-        self.assertIn(
-            "Benchmark-validity uncertainty alone is not a",
-            notice,
-        )
-        self.assertNotIn(
-            "Avoid evaluations of unchanged, broken",
-            notice,
-        )
-
-    def test_web_search_and_evaluation_are_separate_prompt_sections(self) -> None:
-        _, web_profile, _ = build.resolve_web_search_profile(
-            {
-                "profile": (
-                    "web-search-profile:system/dungeness/initial-required-v1"
-                )
-            }
-        )
-        _, evaluation_profile, _ = build.resolve_evaluation_profile(None)
-        notice = (
-            build.build_web_tool_notice("2026-05-28T23:59:59.999Z")
-            + build.build_workspace_notice(
-                "src/point_add",
-                evaluation_available=True,
-            )
-            + build.build_eval_notice(
-            evaluation_profile,
-            "full-benchmark",
-            "src/point_add",
-            "minimize",
-            )
-            + build.build_timebox_notice(3600)
-            + build.build_experimental_web_notice(web_profile)
-        )
-        self.assertEqual(notice.count("### Initial web search"), 1)
-        self.assertEqual(notice.count("### Evaluation loop"), 1)
-        self.assertLess(
-            notice.index("### Evaluation loop"),
-            notice.index("### Initial web search"),
-        )
-        self.assertLess(
-            notice.index("## Execution timebox"),
-            notice.index("## Experimental web-research policy"),
-        )
-        self.assertNotIn("candidate-state save baseline", notice)
-        self.assertNotIn("candidate-state restore baseline", notice)
-        self.assertIn("candidate-state restore best", notice)
-        self.assertIn("`evaluate` (equivalently", notice)
-
-    def test_cli_validates_namespaced_evaluation_profile(self) -> None:
-        cli.validate_run_spec_evaluation(
-            {
-                "evaluation": {
-                    "profile": (
-                        "evaluation-profile:system/dungeness/iterative-v1"
-                    )
-                }
-            }
-        )
-        with self.assertRaisesRegex(SystemExit, "fully qualified"):
-            cli.validate_run_spec_evaluation(
-                {"evaluation": {"profile": "iterative-v1"}}
-            )
-        with self.assertRaisesRegex(SystemExit, "does not exist"):
-            cli.validate_run_spec_evaluation(
-                {
-                    "evaluation": {
-                        "profile": (
-                            "evaluation-profile:system/dungeness/missing-v1"
-                        )
-                    }
-                }
-            )
 
     def test_namespace_resolution_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -940,7 +497,7 @@ class RecordModelTests(unittest.TestCase):
                 keep_render=None,
             )
             resolved = cli.resolve_run_spec_arguments(args)
-            self.assertEqual(resolved.task, "ecdsa-fail")
+            self.assertEqual(resolved.task, "ecdsa-starter")
             self.assertEqual(resolved.agent, "claude")
             self.assertIsNone(resolved.namespace)
             self.assertEqual(
@@ -1072,7 +629,7 @@ class RecordModelTests(unittest.TestCase):
         self.assertEqual(
             cli.transcript_server_command(run_dir),
             (
-                "python3 watcher/serve_gateway_transcripts.py "
+                "python3 tools/transcripts/serve_gateway_transcripts.py "
                 "runs/users/bx/example-run"
             ),
         )
@@ -1177,7 +734,7 @@ class RecordModelTests(unittest.TestCase):
                         "type: run-spec",
                         "namespace: users/bx",
                         "id: wrong-agent-scope",
-                        "task: task:users/bx/ecdsa-fail",
+                        "task: task:projects/dungeness/ecdsa-starter",
                         "agent: agent:users/bx/claude",
                         "checkpoint: checkpoint:public/github/layr-labs/"
                         "ecdsafail-challenge/"
@@ -1243,7 +800,7 @@ class RecordModelTests(unittest.TestCase):
 
     def test_task_binds_problem_checkpoint_interface_and_verifier(self) -> None:
         task = build.load_yaml(
-            REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail/task.yaml"
+            REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter/task.yaml"
         )
         problem = build.resolve_problem(task["relations"]["problem"])
         checkpoint = build.resolve_checkpoint("62ae3d0")
@@ -1303,7 +860,6 @@ class RecordModelTests(unittest.TestCase):
             "codex-subscription",
             "pi",
             "prime-agent",
-            "submission",
         }
         agents_root = REPOSITORY_ROOT / "agents"
         self.assertEqual(
@@ -1367,7 +923,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "codex-model-test",
                 codex,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
             )
         )
         self.assertEqual(
@@ -1433,25 +989,6 @@ class RecordModelTests(unittest.TestCase):
             config,
         )
 
-    def test_ecdsa_fail_v2_statement_preserves_reviewed_contract(self) -> None:
-        task_path = (
-            REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail-v2/task.yaml"
-        )
-        task = build.load_yaml(task_path)
-        self.assertEqual(task["id"], "ecdsa-fail-v2")
-        self.assertEqual(
-            task["relations"]["problem"],
-            "problem:public/ecdsafail-challenge/ecdsa-fail",
-        )
-        statement = (task_path.parent / task["instruction"]).read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("1,480,849,785", statement)
-        self.assertIn("point_add::build()", statement)
-        self.assertIn("9024", statement)
-        self.assertNotIn("Kaliski", statement)
-        self.assertNotIn("Karatsuba", statement)
-
     def test_codex_gateway_continuation_reaches_harbor_job(self) -> None:
         agent = build.load_agent("codex-kimi-openrouter")
         assert agent is not None
@@ -1468,7 +1005,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "continuation-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail-v2",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 continuation=policy,
             )
         )
@@ -1477,44 +1014,7 @@ class RecordModelTests(unittest.TestCase):
         self.assertEqual(kwargs["continuation_min_remaining_sec"], 600)
         self.assertEqual(kwargs["continuation_timeout_sec"], 3600)
 
-    def test_v2_run_spec_selects_versioned_task_and_continuation(self) -> None:
-        path = (
-            REPOSITORY_ROOT
-            / "run-specs/users/bx/"
-            "ecdsa-fail-v2-kimi-k3-openrouter-62ae3d0-high-12usd-"
-            "continuation.yaml"
-        )
-        run_spec = build.load_yaml(path)
-        self.assertEqual(run_spec["task"], "task:users/bx/ecdsa-fail-v2")
-        self.assertEqual(
-            build.resolve_continuation_policy(run_spec["runtime"]),
-            {
-                "max_resumes": 2,
-                "min_remaining_sec": 600,
-            },
-        )
 
-    def test_openai_subscription_v2_run_spec_matches_kimi_task_policy(self) -> None:
-        path = (
-            REPOSITORY_ROOT
-            / "run-specs/users/bx/"
-            "ecdsa-fail-v2-codex-openai-subscription-62ae3d0-high-12usd-"
-            "continuation.yaml"
-        )
-        run_spec = build.load_yaml(path)
-        self.assertEqual(run_spec["task"], "task:users/bx/ecdsa-fail-v2")
-        self.assertEqual(
-            run_spec["agent"],
-            "agent:projects/dungeness/codex-subscription",
-        )
-        self.assertEqual(run_spec["agent_options"]["reasoning_effort"], "high")
-        self.assertEqual(
-            build.resolve_continuation_policy(run_spec["runtime"]),
-            {
-                "max_resumes": 2,
-                "min_remaining_sec": 600,
-            },
-        )
 
     def test_codex_subscription_uses_gateway_and_auth_only_proxy(self) -> None:
         agent = build.load_agent("codex-subscription")
@@ -1568,7 +1068,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "subscription-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
             )
         )
         self.assertEqual(
@@ -1581,7 +1081,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "subscription-effort-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={
                     "reasoning_effort": "low",
                     "reasoning_summary": "detailed",
@@ -1605,7 +1105,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "subscription-continuation-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail-v2",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={
                     "reasoning_effort": "high",
                     "reasoning_summary": "detailed",
@@ -1770,7 +1270,7 @@ class RecordModelTests(unittest.TestCase):
             build.build_harbor_job(
                 "kimi-code-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail-v2",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={
                     "reasoning_effort": "low",
                     "reasoning_summary": "none",
@@ -1786,169 +1286,6 @@ class RecordModelTests(unittest.TestCase):
             job["agents"][0]["kwargs"]["reasoning_effort"],
             "low",
         )
-        run_spec = build.load_yaml(
-            REPOSITORY_ROOT
-            / "run-specs/users/bx/ecdsa-kimi-k3-subscription-1m-smoke.yaml"
-        )
-        self.assertEqual(
-            run_spec["agent"],
-            "agent:projects/dungeness/codex-kimi-subscription",
-        )
-        self.assertEqual(run_spec["budget"]["max_model_tokens"], 100000)
-
-    def test_subscription_effort_experiment_matrix_resolves(self) -> None:
-        path = (
-            REPOSITORY_ROOT
-            / "experiments/users/bx/"
-            "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/"
-            "experiment.yaml"
-        )
-        experiment = build.load_yaml(path)
-        self.assertEqual(experiment["schema_version"], 1)
-        self.assertEqual(experiment["type"], "experiment")
-        self.assertEqual(experiment["namespace"], "users/bx")
-        for claim_field in (
-            "statement",
-            "question",
-            "hypotheses",
-            "predictions",
-            "estimands",
-            "analysis_plan",
-            "validity",
-            "limitations",
-        ):
-            self.assertNotIn(claim_field, experiment)
-
-        design = experiment["design"]
-        agents = design["axes"]["agents"]
-        checkpoints = design["axes"]["checkpoints"]
-        efforts = design["axes"]["reasoning_efforts"]
-        repetitions = design.get("repetitions", 1)
-        self.assertEqual(
-            design["planned_runs"],
-            len(agents) * len(checkpoints) * len(efforts) * repetitions,
-        )
-        self.assertEqual(design["nominal_budget_usd"], 48)
-        self.assertEqual(design["controls"]["budget"]["max_usd"], 12)
-        self.assertEqual(
-            design["controls"]["budget"]["max_model_tokens"],
-            2400000,
-        )
-        self.assertEqual(design["controls"]["artifact_access"]["mode"], "none")
-        self.assertEqual(
-            design["controls"]["agent_options"],
-            {"reasoning_summary": "detailed"},
-        )
-        self.assertEqual(efforts, ["low", "medium", "high", "xhigh"])
-        claim_path = path.with_name("claim.yaml")
-        claim = build.load_yaml(claim_path)
-        self.assertEqual(claim["schema_version"], 1)
-        self.assertEqual(claim["type"], "claim")
-        self.assertEqual(claim["namespace"], "users/bx")
-        self.assertEqual(
-            claim["relations"]["experiment"],
-            "experiment:users/bx/"
-            "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd",
-        )
-        self.assertEqual(
-            claim["estimands"]["primary"]["name"],
-            "verified_relative_improvement",
-        )
-        self.assertIn(
-            "claim:users/bx/"
-            "ecdsa-codex-openai-subscription-effort-effect-62ae3d0",
-            experiment["relations"]["claims"],
-        )
-        self.assertEqual(
-            {item["ref"] for item in agents},
-            {"agent:projects/dungeness/codex-subscription"},
-        )
-        self.assertEqual(
-            design["controls"]["model"],
-            {
-                "upstream_id": "openai/gpt-5.6-sol",
-                "provider": "openai-chatgpt",
-                "api": "openai-responses",
-            },
-        )
-        run_spec_refs = experiment["relations"]["run_specs"]
-        self.assertEqual(len(run_spec_refs), design["planned_runs"])
-
-        for item in agents:
-            agent = build.load_agent(item["ref"].rsplit("/", 1)[-1])
-            self.assertIsNotNone(agent)
-            for key, value in design["controls"]["model"].items():
-                self.assertEqual(agent["model"][key], value)
-
-        for item in agents:
-            namespace, local_id = cli.resolve_record_reference(
-                item["ref"],
-                "agent",
-                qualified=True,
-            )
-            assert namespace is not None
-            cli.validate_local_record_reference("agent", namespace, local_id)
-
-        resolved_efforts: list[str] = []
-        for reference in run_spec_refs:
-            namespace, local_id = cli.resolve_record_reference(
-                reference,
-                "run-spec",
-                qualified=True,
-            )
-            assert namespace is not None
-            cli.validate_local_record_reference("run-spec", namespace, local_id)
-            matching_paths = []
-            for candidate in (REPOSITORY_ROOT / "run-specs").rglob("*.yaml"):
-                document = build.load_yaml(candidate)
-                if (
-                    document.get("type") == "run-spec"
-                    and document.get("namespace") == namespace
-                    and document.get("id") == local_id
-                ):
-                    matching_paths.append(candidate)
-            self.assertEqual(len(matching_paths), 1)
-            _, run_spec = cli.load_run_spec(str(matching_paths[0]))
-            self.assertEqual(run_spec["task"], design["controls"]["task"])
-            self.assertEqual(run_spec["budget"], design["controls"]["budget"])
-            self.assertEqual(
-                run_spec["initialization"],
-                design["controls"]["initialization"],
-            )
-            self.assertEqual(
-                run_spec["labels"]["experiment"],
-                experiment["id"],
-            )
-            self.assertEqual(
-                run_spec["labels"]["phase"],
-                "exploratory",
-            )
-            self.assertEqual(
-                run_spec["agent"],
-                "agent:projects/dungeness/codex-subscription",
-            )
-            self.assertEqual(
-                run_spec["agent_options"]["reasoning_summary"],
-                "detailed",
-            )
-            effort = run_spec["agent_options"]["reasoning_effort"]
-            self.assertEqual(run_spec["labels"]["reasoning_effort"], effort)
-            resolved_efforts.append(effort)
-            self.assertNotIn("repetition", run_spec["labels"])
-        self.assertEqual(
-            {effort: resolved_efforts.count(effort) for effort in efforts},
-            {effort: repetitions for effort in efforts},
-        )
-
-        for item in checkpoints:
-            checkpoint = build.resolve_checkpoint(item["ref"])
-            self.assertEqual(
-                item["ref"],
-                (
-                    "checkpoint:"
-                    f"{checkpoint['namespace']}/{checkpoint['id']}"
-                ),
-            )
 
     def test_experiment_create_materializes_factorial_run_specs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2077,76 +1414,30 @@ class RecordModelTests(unittest.TestCase):
                 self.assertIn(run_spec["labels"]["repetition"], {"1", "2"})
                 self.assertFalse(run_spec["runtime"]["keep_images"])
 
-    def test_experiment_run_dry_run_and_execution_order(self) -> None:
-        target = (
-            REPOSITORY_ROOT
-            / "experiments/users/bx/"
-            "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/"
-            "experiment.yaml"
-        )
-        base_args = {
-            "target": str(target),
-            "namespace": None,
-            "env_file": None,
-            "label": [],
-            "yes": True,
-            "continue_on_error": False,
-        }
-        with patch.object(cli, "execute_run") as execute:
-            self.assertEqual(
-                cli.run_experiment(
-                    cli.argparse.Namespace(**base_args, dry_run=True)
-                ),
-                0,
-            )
-            execute.assert_not_called()
+            args = dict(target=str(experiment_path), namespace="users/bx", env_file=None,
+                        label=[], yes=True, continue_on_error=False)
+            with patch.object(cli, "REPO_ROOT", root), patch.object(cli, "execute_run") as execute:
+                self.assertEqual(cli.run_experiment(argparse.Namespace(**args, dry_run=True)), 0)
+                execute.assert_not_called()
+                execute.return_value = 0
+                self.assertEqual(cli.run_experiment(argparse.Namespace(**args, dry_run=False)), 0)
+                self.assertEqual(execute.call_count, 8)
+                self.assertEqual([Path(call.args[0].target).resolve() for call in execute.call_args_list],
+                    [cli.load_qualified_record(ref, "run-spec")[0].resolve()
+                     for ref in experiment["relations"]["run_specs"]])
 
-            execute.return_value = 0
-            self.assertEqual(
-                cli.run_experiment(
-                    cli.argparse.Namespace(**base_args, dry_run=False)
-                ),
-                0,
-            )
-            self.assertEqual(execute.call_count, 4)
-            targets = [
-                Path(call.args[0].target).name for call in execute.call_args_list
-            ]
-            self.assertEqual(
-                targets[0],
-                "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd-"
-                "codex-subscription-62ae3d0-low.yaml",
-            )
-            self.assertEqual(
-                targets[-1],
-                "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd-"
-                "codex-subscription-62ae3d0-xhigh.yaml",
-            )
 
     def test_run_spec_reasoning_override_reaches_renderer_command(self) -> None:
-        path = (
-            REPOSITORY_ROOT
-            / "run-specs/users/bx/"
-            "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/"
-            "ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd-"
-            "codex-subscription-62ae3d0-low.yaml"
-        )
-        args = cli.resolve_run_spec_arguments(
-            cli.run_arguments_for_spec(
-                path,
-                namespace=None,
-                env_file=None,
-                labels=[],
-            )
-        )
-        command = cli.build_command(args, "effort-override-test")
-        self.assertIn("--reasoning-effort", command)
-        self.assertEqual(command[command.index("--reasoning-effort") + 1], "low")
-        self.assertIn("--reasoning-summary", command)
-        self.assertEqual(
-            command[command.index("--reasoning-summary") + 1],
-            "detailed",
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.yaml"
+            write_run_spec(path)
+            with path.open("a") as output:
+                output.write("agent_options:\n  reasoning_effort: low\n  reasoning_summary: detailed\n")
+            args = cli.resolve_run_spec_arguments(cli.run_arguments_for_spec(
+                path, namespace=None, env_file=None, labels=[]))
+            command = cli.build_command(args, "effort-override-test")
+            self.assertEqual(command[command.index("--reasoning-effort") + 1], "low")
+            self.assertEqual(command[command.index("--reasoning-summary") + 1], "detailed")
 
     def test_checkpoint_samples_are_commit_addressed(self) -> None:
         expected_positions = {
@@ -2253,9 +1544,9 @@ class RecordModelTests(unittest.TestCase):
             run_id="test-run",
             run_namespace="users/bx",
             labels={"purpose": "test"},
-            task_id="ecdsa-fail",
-            task_namespace="users/bx",
-            task_path=REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail/task.yaml",
+            task_id="ecdsa-starter",
+            task_namespace="projects/dungeness",
+            task_path=REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter/task.yaml",
             problem_spec=build.resolve_problem(
                 "problem:public/ecdsafail-challenge/ecdsa-fail"
             ),
@@ -2295,7 +1586,7 @@ class RecordModelTests(unittest.TestCase):
         self.assertEqual(record["labels"], {"purpose": "test"})
         self.assertEqual(
             record["relations"]["task"],
-            "task:users/bx/ecdsa-fail",
+            "task:projects/dungeness/ecdsa-starter",
         )
         self.assertEqual(
             record["relations"]["problem"],
@@ -2414,7 +1705,7 @@ class RecordModelTests(unittest.TestCase):
             with patch.object(build, "checkout") as checkout:
                 with self.assertRaisesRegex(ValueError, "research_state has been removed"):
                     build.build_task(
-                        "ecdsa-fail", "legacy-spec", namespace="users/bx",
+                        "ecdsa-starter", "legacy-spec", namespace="users/bx",
                         run_spec=str(path),
                     )
                 checkout.assert_not_called()
@@ -2474,7 +1765,7 @@ class RecordModelTests(unittest.TestCase):
                     ),
                 ):
                     rendered_path = build.build_task(
-                        "ecdsa-fail",
+                        "ecdsa-starter",
                         "configuration-test",
                         agent_id="claude",
                         checkpoint="62ae3d0",
@@ -2575,7 +1866,7 @@ class RecordModelTests(unittest.TestCase):
                 self.assertFalse((rendered_path / "environment/knowledge_base.py").exists())
                 self.assertNotIn("knowledge-base read", configuration["generated"]["instruction"])
                 self.assertIn(
-                    "## Stable workspace and operating rules",
+                    "## Workspace contract",
                     configuration["generated"]["instruction"],
                 )
                 self.assertIn(
@@ -2590,69 +1881,22 @@ class RecordModelTests(unittest.TestCase):
                     "untrusted external content",
                     configuration["generated"]["instruction"],
                 )
-                self.assertEqual(
-                    configuration["resolved"]["web_search"],
-                    {
-                        "profile": (
-                            "web-search-profile:system/dungeness/optional-v1"
-                        ),
-                        "mode": "optional",
-                    },
-                )
-                self.assertEqual(
-                    configuration["sources"]["web_search_profile"]["document"][
-                        "type"
-                    ],
-                    "web-search-profile",
-                )
-                self.assertEqual(
-                    configuration["resolved"]["evaluation"]["prompt_profile"],
-                    {
-                        "profile": (
-                            "evaluation-profile:system/dungeness/iterative-v1"
-                        ),
-                        "mode": "iterative",
-                    },
-                )
-                self.assertEqual(
-                    configuration["sources"]["evaluation_profile"]["document"][
-                        "type"
-                    ],
-                    "evaluation-profile",
-                )
-                self.assertNotIn(
-                    "Required web-search preflight",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
-                    "### Evaluation loop",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
-                    "the real benchmark",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
-                    "hard wall-clock limit of 45\n  minutes",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertNotIn(
-                    "candidate-state save baseline",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertNotIn(
-                    "candidate-state restore baseline",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
-                    "\n       evaluate\n",
-                    configuration["generated"]["instruction"],
-                )
+                self.assertEqual(configuration["resolved"]["web_search"], {"mode": "optional"})
+                self.assertNotIn("web_search_profile", configuration["sources"])
+                self.assertNotIn("evaluation_profile", configuration["sources"])
+                self.assertNotIn("prompt_profile", configuration["resolved"]["evaluation"])
                 instruction = configuration["generated"]["instruction"]
-                self.assertLess(
-                    instruction.index("### Evaluation loop"),
-                    instruction.index("## Experimental web-research policy"),
-                )
+                self.assertIn("## Evaluation interface", instruction)
+                self.assertIn("the real benchmark", instruction)
+                self.assertIn("hard wall-clock limit of 2700 seconds", instruction)
+                self.assertIn("candidate-state save NAME", instruction)
+                for retired in ("Evaluation loop", "Experimental web-research policy",
+                                "Before changing the candidate", "Within the first",
+                                "research-worker", "Stop starting new architectural"):
+                    self.assertNotIn(retired, instruction)
+                self.assertFalse((rendered_path / "environment/research_worker.py").exists())
+                self.assertFalse(any(key.startswith("DUNGENESS_RESEARCH_") for key in
+                    configuration["generated"]["docker_compose"]["services"]["main"]["environment"]))
                 verifier_compose = build.load_yaml(
                     rendered_path / "tests/docker-compose.yaml"
                 )
@@ -3212,7 +2456,7 @@ class CodexAstraOpenAITests(unittest.TestCase):
             build.build_harbor_job(
                 "codex-astra-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={"reasoning_effort": "max"},
             )
         )
@@ -3271,7 +2515,7 @@ class CodexAstraSubscriptionTests(unittest.TestCase):
             build.build_harbor_job(
                 "codex-astra-subscription-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={"reasoning_effort": "max"},
             )
         )
@@ -3309,7 +2553,7 @@ class CodexClaudeOpenRouterTests(unittest.TestCase):
             build.build_harbor_job(
                 "codex-claude-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 agent_options={"reasoning_effort": "xhigh"},
             )
         )
@@ -3337,7 +2581,7 @@ class CodexClaudeOpenRouterTests(unittest.TestCase):
                 build.build_harbor_job(
                     "control-plane-test",
                     agent,
-                    REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                    REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 ),
                 encoding="utf-8",
             )
@@ -3376,7 +2620,7 @@ class ClaudeOpenRouterTests(unittest.TestCase):
             build.build_harbor_job(
                 "claude-openrouter-test",
                 agent,
-                REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
             )
         )
         entry = job["agents"][0]
@@ -3417,7 +2661,7 @@ class ClaudeOpenRouterTests(unittest.TestCase):
     def test_harbor_job_rejects_misrouted_claude_profiles(self) -> None:
         base = build.load_agent("claude-openrouter")
         assert base is not None
-        task = REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail"
+        task = REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter"
 
         wrong_route = json.loads(json.dumps(base))
         wrong_route["environment"]["ANTHROPIC_BASE_URL"] = (
@@ -3461,7 +2705,7 @@ class ClaudeOpenRouterTests(unittest.TestCase):
                     build.build_harbor_job(
                         "control-plane-test",
                         agent,
-                        REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                        REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                     ),
                     encoding="utf-8",
                 )
@@ -3548,7 +2792,7 @@ class ClaudeOpenRouterTests(unittest.TestCase):
                 build.build_harbor_job(
                     "control-plane-test",
                     agent,
-                    REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail",
+                    REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
                 ),
                 encoding="utf-8",
             )

@@ -16,11 +16,15 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 from typing import Any
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -38,14 +42,11 @@ PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
 EVALUATE_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/evaluate.py"
-RESEARCH_WORKER_PATH = REPOSITORY_ROOT / "agents/common/research_worker.py"
 RUN_STATUS_PATH = REPOSITORY_ROOT / "agents/common/run_status.py"
 CANDIDATE_STATE_PATH = REPOSITORY_ROOT / "agents/common/candidate_state.py"
 NETWORK_POLICY_PATH = REPOSITORY_ROOT / "policies/network/mediated.yaml"
 WEB_POLICY_PATH = REPOSITORY_ROOT / "policies/web/exa.yaml"
 BUDGET_POLICY_PATH = REPOSITORY_ROOT / "policies/budget/default.yaml"
-WEB_SEARCH_PROFILES_ROOT = REPOSITORY_ROOT / "web-search"
-EVALUATION_PROFILES_ROOT = REPOSITORY_ROOT / "evaluation"
 SCAFFOLDS_ROOT = REPOSITORY_ROOT / "scaffolds"
 ADAPTER_MANIFEST_PATH = REPOSITORY_ROOT / "adapters/harbor/adapter.yaml"
 # The source repo is always mounted at this fixed, task-agnostic path in the
@@ -79,13 +80,6 @@ CODEX_REASONING_SUMMARIES = {
     "detailed",
     "none",
 }
-DEFAULT_WEB_SEARCH_PROFILE = (
-    "web-search-profile:system/dungeness/optional-v1"
-)
-DEFAULT_EVALUATION_PROFILE = (
-    "evaluation-profile:system/dungeness/iterative-v1"
-)
-
 WEB_NOTICE = """\
 
 ---
@@ -110,71 +104,6 @@ rejected source.
 """
 
 
-def resolve_web_search_profile(
-    value: Any,
-) -> tuple[Path, dict[str, Any], dict[str, Any]]:
-    """Resolve a namespaced, file-backed web-search prompt profile."""
-
-    if value is None:
-        profile_ref = DEFAULT_WEB_SEARCH_PROFILE
-    else:
-        if not isinstance(value, dict):
-            raise ValueError("run spec web_search must be a mapping")
-        unknown = sorted(set(value) - {"profile"})
-        if unknown:
-            raise ValueError(
-                "unknown run spec web_search fields: " + ", ".join(unknown)
-            )
-        profile_ref = value.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "web-search-profile:"
-    ):
-        raise ValueError(
-            "run spec web_search.profile must be a fully qualified "
-            "web-search-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("web-search-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id)
-    ):
-        raise ValueError(
-            "web-search-profile reference must be "
-            "web-search-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        WEB_SEARCH_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise ValueError(f"web-search profile does not exist: {profile_ref}")
-    profile = load_yaml(profile_path)
-    if (
-        profile.get("schema_version") != 1
-        or profile.get("type") != "web-search-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-    ):
-        raise ValueError(f"invalid web-search profile identity in {profile_path}")
-    mode = profile.get("mode")
-    prompt = profile.get("prompt")
-    if not isinstance(mode, str) or not mode:
-        raise ValueError(f"web-search profile mode is missing in {profile_path}")
-    if not isinstance(prompt, str):
-        raise ValueError(f"web-search profile prompt must be text in {profile_path}")
-    placeholders = set(re.findall(r"{([a-z_][a-z0-9_]*)}", prompt))
-    unsupported = placeholders - {"web_cutoff"}
-    if unsupported:
-        raise ValueError(
-            "unsupported web-search profile placeholders: "
-            + ", ".join(sorted(unsupported))
-        )
-    return profile_path, profile, {"profile": profile_ref, "mode": mode}
-
-
 def build_web_tool_notice(web_cutoff: str) -> str:
     """Render invariant web access, trust, cutoff, and metering mechanics."""
 
@@ -189,247 +118,66 @@ def build_disabled_web_notice() -> str:
 ## Network isolation
 
 Direct internet access, web search, and web fetch are unavailable in this
-treatment. Work only from the sanitized workspace and any explicitly provided
-knowledge base.
+run. The harness can use the sanitized workspace and its own bundled files.
 """
 
 
-def build_experimental_web_notice(profile: dict[str, Any]) -> str:
-    """Render only the replaceable experimental web-research treatment."""
-
-    prompt = profile["prompt"]
-    if not prompt.strip():
-        prompt = "No additional search behavior is required for this treatment.\n"
-    return (
-        """
+def build_eval_notice(candidate_rel: str, direction: str) -> str:
+    """Describe the trusted tool and objective without choosing a research loop."""
+    better = "lower" if direction == "minimize" else "higher"
+    return f"""
 
 ---
 
-## Experimental web-research policy
+## Evaluation interface
 
-The block below is the replaceable treatment. It governs when and how research
-is performed; it does not change tool access, trust boundaries, budgets, the
-benchmark, or evaluation.
-
-<!-- BEGIN EXPERIMENTAL WEB-RESEARCH POLICY -->
+- `evaluate` (or `evaluate {candidate_rel}`) builds and checks the current
+  candidate against the real benchmark. Calls consume the evaluation allowance.
+- Invalid candidates return `status: invalid` with compiler or verification errors.
+- The objective is the verified score; {better} is better.
+- The final verifier independently checks the candidate left at `{candidate_rel}`.
+  Evaluation timing, search strategy and completion decisions belong to the harness.
 """
-        + prompt.strip()
-        + """
-
-<!-- END EXPERIMENTAL WEB-RESEARCH POLICY -->
-"""
-    )
-
-
-def build_web_notice(profile: dict[str, Any], web_cutoff: str) -> str:
-    """Compatibility renderer for the stable contract plus treatment block."""
-
-    prompt = dict(profile)
-    prompt["prompt"] = profile["prompt"].replace("{web_cutoff}", web_cutoff)
-    return build_web_tool_notice(web_cutoff) + build_experimental_web_notice(prompt)
-
-
-def resolve_evaluation_profile(
-    value: Any,
-) -> tuple[Path, dict[str, Any], dict[str, Any]]:
-    """Resolve a namespaced, file-backed evaluation prompt profile."""
-
-    if value is None:
-        profile_ref = DEFAULT_EVALUATION_PROFILE
-    else:
-        if not isinstance(value, dict):
-            raise ValueError("run spec evaluation must be a mapping")
-        unknown = sorted(set(value) - {"profile"})
-        if unknown:
-            raise ValueError(
-                "unknown run spec evaluation fields: " + ", ".join(unknown)
-            )
-        profile_ref = value.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "evaluation-profile:"
-    ):
-        raise ValueError(
-            "run spec evaluation.profile must be a fully qualified "
-            "evaluation-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("evaluation-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id)
-    ):
-        raise ValueError(
-            "evaluation-profile reference must be "
-            "evaluation-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        EVALUATION_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise ValueError(f"evaluation profile does not exist: {profile_ref}")
-    profile = load_yaml(profile_path)
-    if (
-        profile.get("schema_version") != 1
-        or profile.get("type") != "evaluation-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-    ):
-        raise ValueError(f"invalid evaluation profile identity in {profile_path}")
-    mode = profile.get("mode")
-    prompt = profile.get("prompt")
-    if not isinstance(mode, str) or not mode:
-        raise ValueError(f"evaluation profile mode is missing in {profile_path}")
-    if not isinstance(prompt, str):
-        raise ValueError(f"evaluation profile prompt must be text in {profile_path}")
-    placeholders = set(re.findall(r"{([a-z_][a-z0-9_]*)}", prompt))
-    unsupported = placeholders - {
-        "evaluation_tool",
-        "goal",
-        "better",
-        "evaluation_caveat",
-    }
-    if unsupported:
-        raise ValueError(
-            "unsupported evaluation profile placeholders: "
-            + ", ".join(sorted(unsupported))
-        )
-    return profile_path, profile, {"profile": profile_ref, "mode": mode}
-
-
-def build_eval_notice(
-    profile: dict[str, Any],
-    sidecar_mode: str,
-    candidate_rel: str,
-    direction: str,
-) -> str:
-    """Render file-backed `evaluate` guidance for the active sidecar mode."""
-
-    goal = "minimize" if direction == "minimize" else "maximize"
-    better = "lower" if direction == "minimize" else "higher"
-    if sidecar_mode == "split":
-        evaluation_tool = (
-            f"- `evaluate` (equivalently `evaluate {candidate_rel}`) — score your\n"
-            "  current solution on hidden\n"
-            "  dev cases and get a numeric score back (you never see the cases;\n"
-            "  budgeted)."
-        )
-        evaluation_caveat = (
-            "The verifier uses separate hidden holdout cases. Improve the general\n"
-            "algorithm rather than overfitting to evaluation feedback."
-        )
-    else:  # full-benchmark
-        evaluation_tool = (
-            f"- `evaluate` (equivalently `evaluate {candidate_rel}`) — build and run\n"
-            "  your current candidate on\n"
-            "  the real benchmark and get its score back (budgeted). If it fails to\n"
-            "  build or pass the correctness checks it returns `status: invalid` with\n"
-            "  the compiler/harness error, so you can debug straight from it."
-        )
-        evaluation_caveat = (
-            "This is the same un-gameable benchmark the verifier reports, so the score\n"
-            "is the real objective. Keep improving it until further attempts stop\n"
-            "helping or the budget runs low."
-        )
-    return (
-        profile["prompt"]
-        .replace("{evaluation_tool}", evaluation_tool)
-        .replace("{goal}", goal)
-        .replace("{better}", better)
-        .replace("{evaluation_caveat}", evaluation_caveat)
-    )
 
 
 def build_workspace_notice(
-    candidate_rel: str,
-    *,
-    evaluation_available: bool,
+    candidate_rel: str, *, evaluation_available: bool,
     initialization_mode: str = "checkpoint",
 ) -> str:
-    """Per-checkpoint mechanics appended to the invariant statement: which path is
-    editable and how to iterate. The statement stays problem-invariant; the file
-    name and layout differ by start commit, so they live here, not in it."""
     notice = f"""
 
 ---
 
-## Stable workspace and operating rules
+## Workspace contract
 
 - Only changes under **`{candidate_rel}`** are submitted and graded.
-- Do not rely on modifications to the harness, toolchain, or dependencies.
-  Authoritative evaluation replaces them with the trusted files from the
-  selected checkpoint and overlays only your candidate.
-- The pinned toolchain is preinstalled and the repo is a ready-to-build checkout,
-  so you can compile and run it locally. Local measurements should agree while
-  the harness, toolchain, and dependencies remain untouched, but `evaluate` and
-  final verification are authoritative.
+- Authoritative evaluation restores the trusted harness, toolchain and dependencies
+  from the selected checkpoint, then overlays only the candidate.
+- The pinned toolchain is preinstalled. Local compilation is available; the
+  trusted evaluator and final verifier determine correctness and scores.
+- `candidate-state save NAME`, `restore NAME`, and `list` provide optional local
+  snapshots. The harness chooses which candidate to leave for final verification.
 """
     if evaluation_available and initialization_mode == "scaffold":
-        notice += f"""
-
-### Scaffold validation discipline
-
-The starter intentionally declares only the required ABI; it is not a valid
-point-addition circuit and has no baseline score. `evaluate` runs trusted
-validation progressively at 1, 64, 512, and 9,024 shots, stopping at the first
-failure. Only a candidate passing all 9,024 shots is valid or receives a score.
-
-Use `cargo check` for fast Rust feedback, then `evaluate` for authoritative
-circuit feedback. Save a best snapshot only after the first fully valid result.
-Thereafter, preserve the lowest valid score with `candidate-state save best`.
-"""
-    elif evaluation_available:
-        notice += f"""
-
-### Baseline, evaluation, and best-candidate discipline
-
-1. Before changing the candidate, run:
-
-       evaluate
-
-   Record the baseline status and score. If it is valid, also run
-   `candidate-state save best`.
-2. `evaluate` is the authoritative, metered feedback command. The final verifier
-   independently reruns the same benchmark; it alone determines the recorded
-   result.
-3. After every valid improvement, save it with `candidate-state save best`.
-   If an attempted direction regresses or becomes invalid, use
-   `candidate-state restore best` before abandoning that direction or beginning
-   finalization.
-4. Before finishing, restore the best snapshot if necessary, rebuild it, and
-   leave **`{candidate_rel}`** in the best valid state actually measured.
-5. Use `candidate-state list` and `run-status` whenever snapshot, budget, or
-   remaining-time state is uncertain.
+        notice += """
+The scaffold declares the required ABI and has no valid baseline score.
+Trusted validation progresses through 1, 64, 512 and 9,024 shots. Only a
+candidate passing the final stage receives a valid score.
 """
     return notice
 
 
-def build_timebox_notice(
-    timeout_sec: int,
-) -> str:
-    """Tell the agent how to use its finite wall-clock without changing the task."""
-
-    timeout_minutes = max(1, timeout_sec // 60)
-    cycle_minutes = max(3, min(10, timeout_minutes // 4))
-    finalization_minutes = max(2, min(5, timeout_minutes // 6))
+def build_timebox_notice(timeout_sec: int) -> str:
+    """Expose the enforced deadline without prescribing work cycles."""
     return f"""
 
 ---
 
 ## Execution timebox
 
-- The research-agent phase has a hard wall-clock limit of {timeout_minutes}
-  minutes. This limit excludes image construction, service startup, and the final
-  verifier phase.
-- `run-status` reports the current research-agent time remaining.
-- Within the first {cycle_minutes} minutes, make a concrete candidate change and
-  run local validation or `evaluate`. Continue in inspect-hypothesis-edit-test
-  cycles no longer than {cycle_minutes} minutes.
-- Stop starting new architectural investigations with {finalization_minutes}
-  minutes remaining. Leave the best candidate buildable and report what was
-  validated.
+- The research-agent phase has a hard wall-clock limit of {timeout_sec} seconds.
+  Image construction, service startup and final verification are separate phases.
+- `run-status` reports the remaining research-agent time and metered budgets.
 """
 
 
@@ -1692,34 +1440,6 @@ def resolve_agent_options(
     return resolved
 
 
-def research_worker_environment(
-    agent: dict[str, Any],
-    agent_options: dict[str, str],
-    research_mode: str,
-) -> dict[str, str]:
-    """Configure nested workers only for Codex images that install the tool."""
-
-    harbor = agent.get("harbor")
-    if not isinstance(harbor, dict) or harbor.get("agent") != "codex":
-        return {}
-    topology = {
-        "m3-planner-thin-workers": "thin-workers",
-        "m4-dedicated-researcher": "dedicated-researcher",
-    }.get(research_mode, "single-agent")
-    return {
-        "DUNGENESS_RESEARCH_MODEL": agent_model_name(agent),
-        "DUNGENESS_RESEARCH_REASONING_EFFORT": agent_options.get(
-            "reasoning_effort",
-            "high",
-        ),
-        "DUNGENESS_RESEARCH_REASONING_SUMMARY": agent_options.get(
-            "reasoning_summary",
-            "none",
-        ),
-        "DUNGENESS_RESEARCH_TOPOLOGY": topology,
-    }
-
-
 def resolve_model_pricing(
     agent: dict[str, Any],
     pricing_path: Path = PRICING_POLICY_PATH,
@@ -2135,7 +1855,7 @@ def apply_web_search_mode_to_budget(
     budget: dict[str, Any],
     web_search_mode: str,
 ) -> dict[str, Any]:
-    """Return the effective budget after enforcing a disabled web profile."""
+    """Return the effective budget after enforcing disabled web access."""
 
     if web_search_mode != "disabled":
         return budget
@@ -2437,8 +2157,8 @@ def build_compose(
         }
     if dev_scorer is not None:
         # The grader image in serve mode, on the internal network only (no
-        # egress). world-map's holds only the dev slice; ecdsa-fail's runs the
-        # whole (un-gameable) benchmark. Either way it returns a score only.
+        # egress). The sidecar runs the full trusted benchmark and returns
+        # feedback without exposing the verifier workspace.
         environment = {
             "TESTBED_RUN_ID": run_id,
             "MAX_SUBMISSIONS": str(dev_scorer["submissions"]),
@@ -2446,8 +2166,6 @@ def build_compose(
             "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
             "DUNGENESS_EVENT_URL": "http://gateway:8080/internal/events",
         }
-        if dev_scorer.get("score_cases"):
-            environment["SCORE_CASES"] = dev_scorer["score_cases"]
         sidecar_service: dict[str, Any] = {
             "build": {"context": f"./{dev_scorer['context']}"},
             "command": ["python3", "/tests/serve.py"],
@@ -2480,33 +2198,6 @@ def build_compose(
             sidecar_service["mem_limit"] = f"{dev_scorer['memory_mb']}m"
         document["services"]["dev-scorer"] = sidecar_service
     return yaml.safe_dump(document, sort_keys=False)
-
-
-def validate_evaluation_split(evaluation: Any) -> dict[str, list[int]]:
-    """Validate the authored dev/holdout case split; return sorted, disjoint sets.
-
-    dev_cases are reserved for agent-side feedback; the verifier scores only
-    holdout_cases. The two must be disjoint and holdout must be non-empty.
-    """
-    if not isinstance(evaluation, dict):
-        raise ValueError("evaluation must be a mapping")
-
-    def case_list(name: str) -> list[int]:
-        values = evaluation.get(name)
-        if not isinstance(values, list) or not all(
-            isinstance(value, int) and value >= 1 for value in values
-        ):
-            raise ValueError(f"evaluation.{name} must be a list of positive integers")
-        return sorted(set(values))
-
-    dev = case_list("dev_cases")
-    holdout = case_list("holdout_cases")
-    if not holdout:
-        raise ValueError("evaluation.holdout_cases must not be empty")
-    overlap = sorted(set(dev) & set(holdout))
-    if overlap:
-        raise ValueError(f"dev_cases and holdout_cases overlap: {overlap}")
-    return {"dev_cases": dev, "holdout_cases": holdout}
 
 
 def resolve_resume_source(
@@ -2696,9 +2387,7 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
         f"You are continuing from a previous run. `{candidate_rel}` in your "
         "workspace is NOT the original baseline -- it is the best solution reached "
         f"so far. {score_line} You do NOT have the prior session's memory, so treat "
-        "the notes below as your only record of it. Read the current file first, "
-        "then keep improving it with the `evaluate` loop below; do not restart from "
-        "scratch or re-explore what already regressed.\n"
+        "the notes below as retained context. The harness chooses how to use it.\n"
     )
     score_history = resume.get("score_history") or []
     if len(score_history) >= 2:
@@ -2706,7 +2395,7 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
         if len(points) > 8:  # keep first + last few so it stays compact
             points = points[:1] + ["..."] + points[-6:]
         notice += (
-            f"\nScore improved across the prior run ({better} is better): "
+            f"\nRecorded scores across the prior run ({better} is better): "
             + " -> ".join(points)
             + ".\n"
         )
@@ -2719,7 +2408,7 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
     if queries:
         shown = "; ".join(f'"{q}"' for q in queries[:12])
         notice += (
-            f"\nResearch already done in the prior run (no need to repeat): {shown}.\n"
+            f"\nQueries recorded in the prior run: {shown}.\n"
         )
     return notice
 
@@ -2765,16 +2454,7 @@ def build_task(
     run_spec_manifest = None
     run_spec_ref = None
     scaffold = None
-    (
-        web_search_profile_path,
-        web_search_profile,
-        resolved_web_search,
-    ) = resolve_web_search_profile(None)
-    (
-        evaluation_profile_path,
-        evaluation_profile,
-        resolved_evaluation_profile,
-    ) = resolve_evaluation_profile(None)
+    resolved_web_search = resolve_web_access(None)
     continuation_policy = {
         "max_resumes": 0,
         "min_remaining_sec": 600,
@@ -2861,20 +2541,8 @@ def build_task(
                 f"run spec runtime must be a mapping in {run_spec_path}"
             )
         continuation_policy = resolve_continuation_policy(authored_runtime)
-        (
-            web_search_profile_path,
-            web_search_profile,
-            resolved_web_search,
-        ) = resolve_web_search_profile(
-            run_spec_manifest.get("web_search")
-        )
-        (
-            evaluation_profile_path,
-            evaluation_profile,
-            resolved_evaluation_profile,
-        ) = resolve_evaluation_profile(
-            run_spec_manifest.get("evaluation")
-        )
+        resolved_web_search = resolve_web_access(run_spec_manifest.get("web_search"))
+        reject_evaluation_strategy(run_spec_manifest)
         if "research_state" in run_spec_manifest:
             raise ValueError(
                 "research_state has been removed; put research strategy in the harness. "
@@ -3128,41 +2796,15 @@ def build_task(
         raise ValueError("evaluator include_paths must be a non-empty list")
     include_paths = [str(value) for value in include_paths]
 
-    # Eval sidecar mode:
-    #   "split"          -- world-map: a dev-scorer holding only the dev slice,
-    #                       hiding the reported holdout (needs checker + cases).
-    #   "full-benchmark" -- ecdsa-fail: the whole (un-gameable) benchmark, run in
-    #                       serve mode; it returns the real score, so nothing is
-    #                       withheld and there is no case split.
-    evaluation_split = None
-    eval_materials = None
     sidecar_mode = None
     if task.get("evaluation") is not None:
         evaluation = task["evaluation"]
-        sidecar_mode = evaluation.get("mode", "split")
-        if sidecar_mode == "full-benchmark":
-            pass
-        elif sidecar_mode == "split":
-            evaluation_split = validate_evaluation_split(evaluation)
-            if evaluation.get("checker") and evaluation.get("cases_dir"):
-                eval_materials = {
-                    "checker": require_relative_path(
-                        str(evaluation["checker"]), "evaluation.checker"
-                    ),
-                    "cases_dir": require_relative_path(
-                        str(evaluation["cases_dir"]), "evaluation.cases_dir"
-                    ),
-                    "includes": (
-                        require_relative_path(
-                            str(evaluation["checker_includes"]),
-                            "evaluation.checker_includes",
-                        )
-                        if evaluation.get("checker_includes")
-                        else None
-                    ),
-                }
-        else:
-            raise ValueError(f"unknown evaluation.mode: {sidecar_mode!r}")
+        if not isinstance(evaluation, dict) or evaluation.get("mode") != "full-benchmark":
+            raise ValueError("Only task evaluation.mode: full-benchmark is supported; "
+                             "the historical world-map split evaluator has been retired.")
+        if set(evaluation) != {"mode"}:
+            raise ValueError("Unsupported task evaluation fields; split-case configuration is retired.")
+        sidecar_mode = "full-benchmark"
 
     render_root = Path(tempfile.mkdtemp(prefix=f"dungeness-{run_id}-"))
     output = render_root / "task"
@@ -3300,9 +2942,7 @@ def build_task(
             continuation_notice = build_continuation_notice(
                 resume, candidate_rel, direction
             )
-        evaluation_available = (
-            eval_materials is not None or sidecar_mode == "full-benchmark"
-        )
+        evaluation_available = sidecar_mode == "full-benchmark"
         runtime_notice = (
             continuation_notice
             + build_workspace_notice(
@@ -3316,18 +2956,9 @@ def build_task(
                 else build_web_tool_notice(web_cutoff)
             )
         )
-        # Render evaluation as its own profile-backed prompt section whenever an
-        # eval sidecar will be running.
         if evaluation_available:
-            runtime_notice += build_eval_notice(
-                evaluation_profile,
-                sidecar_mode or "split",
-                candidate_rel,
-                direction,
-            )
+            runtime_notice += build_eval_notice(candidate_rel, direction)
         runtime_notice += build_timebox_notice(agent_res["timeout_sec"])
-        if resolved_web_search["mode"] != "disabled":
-            runtime_notice += build_experimental_web_notice(web_search_profile)
         rendered_instruction = instruction.rstrip() + runtime_notice
         (task_root / "instruction.md").write_text(
             rendered_instruction, encoding="utf-8"
@@ -3348,12 +2979,6 @@ def build_task(
             CANDIDATE_STATE_PATH,
             task_root / "environment/candidate_state.py",
         )
-        harbor_agent = agent.get("harbor")
-        if isinstance(harbor_agent, dict) and harbor_agent.get("agent") == "codex":
-            shutil.copy2(
-                RESEARCH_WORKER_PATH,
-                task_root / "environment/research_worker.py",
-            )
         shutil.copytree(GATEWAY_ROOT, task_root / "environment/gateway")
         if agent_provider(agent) == "openai-chatgpt":
             shutil.copytree(
@@ -3362,17 +2987,7 @@ def build_task(
             )
         submissions = budget_policy.get("evaluation", {}).get("submissions", 200)
         dev_scorer_cfg = None
-        if eval_materials is not None:
-            # world-map dev-scorer: its own context carrying only the dev slice.
-            dev_scorer_cfg = {
-                "context": "dev-scorer",
-                "score_cases": ",".join(
-                    str(number) for number in evaluation_split["dev_cases"]
-                ),
-                "submissions": submissions,
-                "port": 8090,
-            }
-        elif sidecar_mode == "full-benchmark":
+        if sidecar_mode == "full-benchmark":
             # ecdsa-fail full-benchmark sidecar: the verifier grader in serve
             # mode, sized to the same memory envelope as the selected verifier
             # interface.
@@ -3393,13 +3008,6 @@ def build_task(
             else budget_policy.get("model", {}).get("max_usd")
         )
         agent_environment = dict((agent or {}).get("environment") or {})
-        agent_environment.update(
-            research_worker_environment(
-                agent,
-                effective_agent_options,
-                resolved_web_search["mode"],
-            )
-        )
         problem_service = resolve_problem_service(
             task_dir, task.get("problem_service"), task_root / "environment/problem-service",
         )
@@ -3460,54 +3068,7 @@ def build_task(
         serve_src = verifier_dir / "serve.py"
         if serve_src.is_file():
             shutil.copy2(serve_src, task_root / "tests" / "serve.py")
-        if evaluation_split is not None:
-            # The verifier reads this to score only the holdout cases; dev cases
-            # stay out of the reported score and are reserved for agent feedback.
-            (task_root / "tests" / "evaluation.json").write_text(
-                json.dumps(evaluation_split, indent=2) + "\n", encoding="utf-8"
-            )
-        if eval_materials is not None:
-            # Build the dev-scorer context: the SAME grader image as the verifier
-            # (grade.py + serve.py + checker), but carrying ONLY the dev slice.
-            # It runs as an agent-facing sidecar (Compose service below) and
-            # returns a score only -- it never holds the holdout.
-            dev_root = task_root / "environment/dev-scorer"
-            dev_eval = dev_root / "evaluator"
-            dev_eval.mkdir(parents=True)
-            checker_rel = eval_materials["checker"]
-            for rel in (checker_rel, checker_rel.parent / "config.yaml"):
-                destination = dev_eval.joinpath(*rel.parts)
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(evaluator_checkout.joinpath(*rel.parts), destination)
-            if eval_materials["includes"] is not None:
-                includes = eval_materials["includes"]
-                shutil.copytree(
-                    evaluator_checkout.joinpath(*includes.parts),
-                    dev_eval.joinpath(*includes.parts),
-                )
-            cases_src = evaluator_checkout.joinpath(*eval_materials["cases_dir"].parts)
-            cases_dst = dev_eval.joinpath(*eval_materials["cases_dir"].parts)
-            cases_dst.mkdir(parents=True, exist_ok=True)
-            for case_number in evaluation_split["dev_cases"]:
-                for suffix in (".in", ".ans"):
-                    shutil.copy2(
-                        cases_src / f"{case_number}{suffix}",
-                        cases_dst / f"{case_number}{suffix}",
-                    )
-            for filename in ("Dockerfile", "grade.py", "test.sh", "serve.py"):
-                shutil.copy2(verifier_dir / filename, dev_root / filename)
-            (dev_root / "evaluation.json").write_text(
-                json.dumps(
-                    {
-                        "dev_cases": evaluation_split["dev_cases"],
-                        "holdout_cases": evaluation_split["dev_cases"],
-                    },
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-        elif sidecar_mode == "full-benchmark":
+        if sidecar_mode == "full-benchmark":
             # The eval sidecar IS the verifier grader in serve mode: the SAME
             # image contents (Dockerfile + grade.py + serve.py + full evaluator),
             # no case slice. It returns the real score, so nothing is withheld.
@@ -3596,14 +3157,6 @@ def build_task(
                 "instruction": text_snapshot(
                     task_dir.joinpath(*instruction_name.parts), instruction
                 ),
-                "web_search_profile": source_snapshot(
-                    web_search_profile_path,
-                    web_search_profile,
-                ),
-                "evaluation_profile": source_snapshot(
-                    evaluation_profile_path,
-                    evaluation_profile,
-                ),
                 "agent_image": file_snapshot(dockerfile),
                 "policies": {
                     "network": source_snapshot(
@@ -3651,9 +3204,7 @@ def build_task(
                 },
                 "evaluation": {
                     "mode": sidecar_mode,
-                    "split": evaluation_split,
                     "sidecar": dev_scorer_cfg,
-                    "prompt_profile": resolved_evaluation_profile,
                 },
                 "verifier": {
                     "bundle": verifier_ref,

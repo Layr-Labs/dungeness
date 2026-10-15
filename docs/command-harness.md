@@ -5,7 +5,9 @@ container through a trusted adapter. The harness does not choose a host Python
 import, and need not identify as Codex, Claude Code, Pi, or another built-in agent.
 Research strategy, memory and completion decisions belong to the harness.
 The former `research_state` controller is removed; old specs that request it
-fail explicitly. Historical experiments must use their original revision.
+fail explicitly, as do run-spec evaluation and web-research strategy profiles.
+Configure only `web_search.mode` (`disabled` or `optional`) as an access control.
+Historical experiments must use their original revision.
 
 An agent descriptor has the ordinary identity fields, `execution_mode: installed`,
 a Dockerfile, and:

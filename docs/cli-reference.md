@@ -1,12 +1,8 @@
-# Dungeness CLI and historical examples
+# Dungeness CLI reference
 
-This reference retains the detailed CLI documentation and earlier experiment examples.
-Start with [the runtime quick start](../README.md) for the maintained workflow.
-Personal run specs and knowledge bases mentioned below remain in the full source
-repository; they are excluded from runtime distributions. Recorded `runs/` outputs
-were removed from the current tree and remain in Git history (LFS objects require
-repository access).
-
+Start with [the runtime quick start](../README.md). Personal experiments, knowledge
+bases and recorded outputs are archived separately from this repository. Examples
+below show configurations you can author; they are not bundled historical runs.
 
 ![Dungeness Spit](../assets/dungeness-spit.jpeg)
 
@@ -57,17 +53,17 @@ subscription authentication, and enough Docker memory for the selected task.
    ./dungeness init --namespace users/<name>
    ```
 
-4. Create `ecdsa-fail-v2-codex-subscription.yaml` under the configured
+4. Create `ecdsa-starter-codex-subscription.yaml` under the configured
    namespace's run-spec directory, for example
-   `run-specs/users/bx/ecdsa-fail-v2-codex-subscription.yaml`. The
+   `run-specs/users/bx/ecdsa-starter-codex-subscription.yaml`. The
    run-spec namespace is inferred from the default configured in step 3:
 
    ```yaml
    schema_version: 1
    type: run-spec
-   id: ecdsa-fail-v2-codex-subscription-1usd
+   id: ecdsa-starter-codex-subscription-1usd
 
-   task: task:users/bx/ecdsa-fail-v2
+   task: task:projects/dungeness/ecdsa-starter
    agent: agent:projects/dungeness/codex-subscription
    checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
 
@@ -99,7 +95,7 @@ subscription authentication, and enough Docker memory for the selected task.
    experimental budget rather than the amount billed by the provider:
 
    ```bash
-   ./dungeness run ecdsa-fail-v2-codex-subscription.yaml
+   ./dungeness run ecdsa-starter-codex-subscription.yaml
    ```
 
 To use a Kimi Code membership instead, set
@@ -383,13 +379,13 @@ The direct Anthropic profile `agent:projects/dungeness/claude` uses
 The preferred input is an authored run specification:
 
 ```bash
-./dungeness run ecdsa-fail-v2-codex-subscription.yaml
+./dungeness run ecdsa-starter-codex-subscription.yaml
 ```
 
 CLI options override values in the YAML:
 
 ```bash
-./dungeness run ecdsa-fail-v2-codex-subscription.yaml \
+./dungeness run ecdsa-starter-codex-subscription.yaml \
   --max-usd 2 \
   --label purpose=comparison
 ```
@@ -397,7 +393,7 @@ CLI options override values in the YAML:
 The equivalent flag-only form remains available:
 
 ```bash
-./dungeness run ecdsa-fail-v2 \
+./dungeness run ecdsa-starter \
   --agent codex-subscription \
   --checkpoint 62ae3d0 \
   --max-usd 1
@@ -435,7 +431,7 @@ copied into the agent workspace.
 Find every canonical run produced from a run spec:
 
 ```bash
-./dungeness runs ecdsa-fail-v2-codex-subscription.yaml
+./dungeness runs ecdsa-starter-codex-subscription.yaml
 ```
 
 The result includes status, reasoning effort, score, and run ID. Repeated and
@@ -469,7 +465,7 @@ labels:
   status: planned
 
 relations:
-  task: task:users/bx/ecdsa-fail
+  task: task:projects/dungeness/ecdsa-starter
   claims:
     - claim:users/bx/runtime-effect
 
@@ -478,7 +474,7 @@ design:
   repetitions: 3
 
   controls:
-    task: task:users/bx/ecdsa-fail
+    task: task:projects/dungeness/ecdsa-starter
     agent_options:
       reasoning_summary: detailed
     budget:
@@ -638,86 +634,26 @@ Quick Start contains a complete one-dollar Codex example. Optional fields
 include `budget.max_model_tokens`, `initialization.resume_from`, and additional
 labels.
 
-Agent-facing web-search instructions are versioned as namespaced profiles under
-`web-search/<namespace>/`. A run spec selects one qualified profile.
-Omitting `web_search`, or explicitly selecting the optional profile, preserves
-the existing prompt:
+Research strategy, memory, worker topology and evaluation cadence belong to the
+harness. Configure only web access in the run spec:
 
 ```yaml
 web_search:
-  profile: web-search-profile:system/dungeness/optional-v1
+  mode: disabled  # or optional, subject to trusted web policy and budget
 ```
 
-To require a short web-search phase before editing:
+`disabled` sets search and fetch budgets to zero. `optional` exposes only the
+trusted, metered web tools allowed by the task. Neither grants direct internet
+access or injects search instructions. The old `disabled-v1` and `optional-v1`
+profile references are accepted as access-only compatibility aliases.
 
-```yaml
-web_search:
-  profile: web-search-profile:system/dungeness/required-preflight-v1
-```
-
-The required preflight asks the agent to form one actionable implementation
-hypothesis, then continue with the normal edit-and-evaluate loop. It does not
-change network access, historical cutoff enforcement, or web budgets.
-
-To require one initial search without prescribing a query count or web-search
-strategy:
-
-```yaml
-web_search:
-  profile: web-search-profile:system/dungeness/initial-required-v1
-```
-
-This profile asks the agent to inspect the workspace, perform at least one
-relevant search before editing or evaluating, and then decide whether further
-web search is useful. The rendered prompt includes the selected checkpoint's exact
-historical cutoff and explains that cutoff, missing-date, and mutable-source
-rejections are expected policy outcomes rather than tool failures.
-
-Adaptive research-policy experiments use three additional profiles:
-
-- `m2-adaptive-single-agent-v1`: the main agent owns search, interpretation,
-  and each next research decision.
-- `m3-planner-thin-workers-v1`: the main agent owns the agenda and synthesis,
-  while read-only `research-worker thin` calls execute narrow branches.
-- `m4-dedicated-researcher-v1`: one read-only
-  `research-worker autonomous` call owns the search process and returns an
-  evidence packet.
-
-Nested workers use the same configured model and reasoning effort. Their model
-and web calls pass through the run's existing gateway and consume the same
-shared budgets; they do not receive hidden extra search or model allowance.
-
-The profile file, including its path, contents, and SHA-256 hash, is captured in
-the run record. Create a new profile ID when changing prompt behavior so runs
-remain comparable. These profiles control only agent instructions; trusted
-network access and cutoff enforcement remain in `policies/web/` and the
-gateway.
-
-Agent-facing evaluation-loop instructions use the same mechanism under
-`evaluation/<namespace>/`. Omitting `evaluation` preserves the default
-iterative profile:
-
-```yaml
-evaluation:
-  profile: evaluation-profile:system/dungeness/iterative-v1
-```
-
-The evaluation profile is rendered as a separate `### Evaluation loop` section
-and captured in run provenance. It controls how the agent is instructed to use
-`evaluate`; the task still determines whether an evaluation sidecar exists,
-which benchmark it runs, and the evaluation budget.
-
-Research strategy and evaluation cadence belong to the harness. The former
-`research_state` run-spec option has been removed; new runs reject it with a
-migration message. The gateway does not inject research-effort prompts, and
-Codex completion is not gated on minimum search or evaluation counts. Replay
-historical experiments using their original revision rather than dropping an
-experimental policy silently.
-
-Knowledge, memory and retrieval belong to the agent image. The knowledge-base
-service, command, prompt profiles and Codex hooks have been removed. New run
-specs reject `initialization.knowledge_base`; move its files and retrieval code
-into the harness. See [command harnesses](command-harness.md).
+Strategy profiles, run-spec `evaluation`, `research_state`, and
+`initialization.knowledge_base` are rejected with migration messages. Bundle
+research instructions, documents, retrieval code and subagents into the harness.
+See [command harnesses](command-harness.md) and [knowledge migration](../doc/knowledge-base-preload.md).
+The task still selects the trusted evaluator and its resource limits. Runtime
+instructions describe candidate paths, tools, accounting and the deadline;
+they do not prescribe evaluation frequency or researcher topology.
 
 When a run spec omits `namespace`, its identity namespace is inferred from the
 configured default. The resulting run namespace is resolved independently
@@ -784,7 +720,7 @@ Examples:
 
 ```text
 problem:public/ecdsafail-challenge/ecdsa-fail
-task:users/bx/ecdsa-fail
+task:projects/dungeness/ecdsa-starter
 agent:projects/dungeness/codex-openrouter
 run-spec:users/bx/ecdsa-fail-codex-openrouter-1usd
 run:users/bx/<run-id>
@@ -873,19 +809,11 @@ Cross-namespace references are normal. A run in `users/alice` may use a task in
 `users/bx`, an agent in `projects/dungeness`, and a checkpoint in
 `public/github/...`.
 
-Experiment artifacts describe a controlled matrix and reference independently
-runnable run specs. The maintained example is
-`experiments/users/bx/ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/experiment.yaml`;
-its 12 cells live under
-`run-specs/users/bx/ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd/`. Run the matrix
-with:
-
-```bash
-./dungeness experiment run ecdsa-codex-openai-subscription-effort-sweep-62ae3d0-12usd
-```
-
-Each cell can also be launched with the ordinary `dungeness run <path>`
-command. Experiments do not require a fixed result format.
+User-authored experiment manifests can describe a controlled matrix and reference
+independently runnable run specs. The `experiment` command operates on those local
+inputs; the repository no longer bundles personal experiment matrices. Each cell
+can also be launched with `dungeness run PATH`. Experiment authoring never starts
+model calls; executing a matrix consumes the configured model allowance.
 
 ## Run Records
 
@@ -905,7 +833,7 @@ The universal envelope is:
   "published_at": "2026-08-20T21:00:00.000Z",
   "labels": {"purpose": "baseline"},
   "relations": {
-    "task": "task:users/bx/ecdsa-fail",
+    "task": "task:projects/dungeness/ecdsa-starter",
     "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
     "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
     "agent": "agent:projects/dungeness/codex-openrouter",
@@ -953,7 +881,7 @@ Gateway details are documented in
 problems/       semantic objectives
 tasks/          executable problem representations
 run-specs/      local and intentionally shared single-run configurations
-experiments/    multi-run research designs and artifact references
+experiments/    locally authored experiments (created when needed)
 checkpoints/    immutable public source samples
 agents/         research-agent definitions and images
 verifiers/      trusted grading implementations

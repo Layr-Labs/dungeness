@@ -69,36 +69,16 @@ fn main() {
 
     def test_run_spec_selects_scaffold_without_fresh_start(self) -> None:
         cli = load_cli()
-        resolved = cli.resolve_run_spec_arguments(
-            argparse.Namespace(
-                target=(
-                    "run-specs/users/bx/ecdsa-reconstruction-pilot/"
-                    "ecdsa-reconstruction-pilot-control.yaml"
-                ),
-                agent=None,
-                checkpoint=None,
-                fresh_start=None,
-                scaffold_start=None,
-                run_id=None,
-                namespace="users/bx",
-                label=[],
-                resume_from=None,
-                max_model_tokens=None,
-                max_usd=None,
-                reasoning_effort=None,
-                reasoning_summary=None,
-                env_file=None,
-                keep_render=None,
-                agent_timeout_sec=None,
-            )
-        )
-        self.assertTrue(resolved.scaffold_start)
-        self.assertFalse(resolved.fresh_start)
-        _, run_spec = cli.load_run_spec(resolved.target)
-        self.assertEqual(
-            run_spec["web_search"]["profile"],
-            "web-search-profile:system/dungeness/disabled-v1",
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "run.yaml"
+            path.write_text((REPOSITORY_ROOT / "run-specs/projects/dungeness/ecdsa-starter.yaml")
+                            .read_text().replace("mode: checkpoint", "mode: scaffold"))
+            args = cli.run_arguments_for_spec(path, namespace="users/test", env_file=None, labels=[])
+            resolved = cli.resolve_run_spec_arguments(args)
+            self.assertTrue(resolved.scaffold_start)
+            self.assertFalse(resolved.fresh_start)
+            _, run_spec = cli.load_run_spec(resolved.target)
+            self.assertEqual(run_spec["web_search"], {"mode": "disabled"})
 
 
 if __name__ == "__main__":

@@ -16,20 +16,23 @@ python3 script/export_runtime.py --revision HEAD \
 
 The exporter reads **only the selected Git commit**, never local credentials or
 uncommitted files. Its allowlist excludes `runs/`, personal knowledge bases,
-personal tasks/run specs, experiments, reports, Git history and tests. It
-rejects symlinks and LFS pointers in the selected runtime. It refuses to replace
+personal run specs, experiments, reports, Git history and tests. No personal
+task directories are included. Catalyst generates its task and checkpoint from
+its own trusted problem package. The exporter rejects symlinks and LFS pointers in the selected runtime. It refuses to replace
 an existing archive.
 
 `RUNTIME_SOURCE.json` records the source commit and SHA-256 of each bundled
 file. The command prints the archive digest. The same revision produces
 identical archive bytes.
 
-This creates an internal source distribution. It neither publishes a package
-nor changes repository access. A third-party installer requires a separately
-approved distribution location and access/license policy. Catalyst solvers
-can submit remotely without installing Dungeness.
+The bundle is source for running Dungeness locally; it is not an official
+Catalyst evaluation or a hosted service. It contains no provider credentials.
 
-## Install an authorized bundle
+The optional local transcript viewer is excluded by default. Include it with
+`--include-transcript-tools` when needed; full checkouts have it under
+`tools/transcripts/`. The CLI prints its launch command only when installed.
+
+## Install a bundle
 
 Verify its digest against the trusted release record, then:
 
@@ -52,7 +55,7 @@ Checkpoint source access and image-build dependency downloads are still required
 
 The CLI creates `runs/<namespace>/<run-id>/` when needed. `runs/` is ignored
 as a whole; execution outputs are no longer committed or uploaded through LFS.
-The runtime, watcher, `evals`, `verify`, continuation and cleanup commands still
+The runtime, optional transcript tools, `evals`, `verify`, continuation and cleanup commands still
 read locally retained runs. Removing tracked output does not disable them.
 
 Commit reproducible inputs under `run-specs/`, `tasks/` and `agents/`. Retain
@@ -76,5 +79,22 @@ completion gates have been removed. Their recipes are no longer active run
 specs. Recover them from the original source revision in the private research
 archive; the cleanup also retained an external backup of the removed files.
 The CLI and transcript viewer can still read historical records, but cannot
-launch the removed controller. Knowledge-base retrieval and its direct-read
-hook remain independent of that controller.
+launch the removed controller. Knowledge-base services and read hooks are also
+removed. Personal corpora and experiment recipes have been moved out of this tree.
+
+## Research-strategy migration
+
+Run-spec `evaluation` profiles and strategy-bearing `web_search.profile` values
+are rejected before source checkout or model execution. Put evaluation cadence,
+search planning and worker orchestration in the harness. The runtime reports
+interfaces, budgets and deadlines without prescribing a research loop.
+
+Use `web_search: {mode: disabled}` or `{mode: optional}` for access control.
+Only the old `disabled-v1` and `optional-v1` profile references remain accepted
+as compatibility aliases, without loading profile files. Disabled access still
+zeros search and fetch budgets. Direct agent egress remains blocked.
+
+The unused world-map development/holdout split evaluator is retired; tasks
+requesting it fail explicitly. Full-benchmark verification is retained. The old
+Dungeness-specific Yukon manifest, placeholder workflow and submission slot are
+removed; Catalyst owns its Yukon integration.

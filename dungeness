@@ -68,9 +68,8 @@ CODEX_REASONING_SUMMARIES = {
     "detailed",
     "none",
 }
-WEB_SEARCH_PROFILES_ROOT = REPO_ROOT / "web-search"
-EVALUATION_PROFILES_ROOT = REPO_ROOT / "evaluation"
-KNOWLEDGE_BASES_ROOT = REPO_ROOT / "knowledge-bases"
+sys.path.insert(0, str(REPO_ROOT / "src"))
+from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
 
 
 def utc_now() -> str:
@@ -251,7 +250,6 @@ def ensure_namespace_directories(namespace: str) -> None:
         "agents",
         "tasks",
         "experiments",
-        "knowledge-bases",
         "run-specs",
         "runs",
     ):
@@ -332,105 +330,11 @@ def require_config_mapping(
 
 
 def validate_run_spec_web_search(document: dict[str, object]) -> None:
-    if "web_search" not in document:
-        return
-    web_search = document["web_search"]
-    if not isinstance(web_search, dict):
-        raise SystemExit("run spec web_search must be a mapping")
-    unknown = sorted(set(web_search) - {"profile"})
-    if unknown:
-        raise SystemExit(
-            "unknown run spec web_search fields: " + ", ".join(unknown)
-        )
-    profile_ref = web_search.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "web-search-profile:"
-    ):
-        raise SystemExit(
-            "run spec web_search.profile must be a fully qualified "
-            "web-search-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("web-search-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not LOCAL_ID_RE.fullmatch(local_id)
-    ):
-        raise SystemExit(
-            "web-search-profile reference must be "
-            "web-search-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        WEB_SEARCH_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise SystemExit(f"web-search profile does not exist: {profile_ref}")
-    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(profile, dict)
-        or profile.get("schema_version") != 1
-        or profile.get("type") != "web-search-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-        or not isinstance(profile.get("mode"), str)
-        or not isinstance(profile.get("prompt"), str)
-    ):
-        raise SystemExit(f"invalid web-search profile: {profile_ref}")
-
-
-def validate_run_spec_evaluation(document: dict[str, object]) -> None:
-    if "evaluation" not in document:
-        return
-    evaluation = document["evaluation"]
-    if not isinstance(evaluation, dict):
-        raise SystemExit("run spec evaluation must be a mapping")
-    unknown = sorted(set(evaluation) - {"profile"})
-    if unknown:
-        raise SystemExit(
-            "unknown run spec evaluation fields: " + ", ".join(unknown)
-        )
-    profile_ref = evaluation.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "evaluation-profile:"
-    ):
-        raise SystemExit(
-            "run spec evaluation.profile must be a fully qualified "
-            "evaluation-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("evaluation-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not LOCAL_ID_RE.fullmatch(local_id)
-    ):
-        raise SystemExit(
-            "evaluation-profile reference must be "
-            "evaluation-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        EVALUATION_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise SystemExit(f"evaluation profile does not exist: {profile_ref}")
-    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(profile, dict)
-        or profile.get("schema_version") != 1
-        or profile.get("type") != "evaluation-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-        or not isinstance(profile.get("mode"), str)
-        or not isinstance(profile.get("prompt"), str)
-    ):
-        raise SystemExit(f"invalid evaluation profile: {profile_ref}")
-
-
+    """Keep the public validator used by Catalyst, without loading profiles."""
+    try:
+        resolve_web_access(document.get("web_search"))
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
 
 def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
@@ -475,7 +379,10 @@ def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
     if document.get("type") != "run-spec":
         raise SystemExit("run-spec type must be 'run-spec'")
     validate_run_spec_web_search(document)
-    validate_run_spec_evaluation(document)
+    try:
+        reject_evaluation_strategy(document)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     initialization = document.get("initialization", {})
     if not isinstance(initialization, dict):
         raise SystemExit("run spec initialization must be a mapping")
@@ -597,7 +504,6 @@ def find_local_record_path(
         "run-spec": REPO_ROOT / "run-specs",
         "task": REPO_ROOT / "tasks",
         "agent": REPO_ROOT / "agents",
-        "knowledge-base": KNOWLEDGE_BASES_ROOT,
     }
     if record_type in collection_roots:
         matches: list[Path] = []
@@ -1690,7 +1596,7 @@ def transcript_server_command(run_dir: Path) -> str:
     return shlex.join(
         [
             "python3",
-            "watcher/serve_gateway_transcripts.py",
+            "tools/transcripts/serve_gateway_transcripts.py",
             str(target),
         ]
     )
@@ -3044,11 +2950,12 @@ def execute_run(args: argparse.Namespace) -> int:
             f"run already exists: {display_path}\n"
             "Run records are immutable; choose another --run-id."
         )
-    print(
-        ">> live transcript (run in another terminal): "
-        + transcript_server_command(run_dir),
-        flush=True,
-    )
+    if (REPO_ROOT / "tools/transcripts/serve_gateway_transcripts.py").is_file():
+        print(
+            ">> live transcript (run in another terminal): "
+            + transcript_server_command(run_dir),
+            flush=True,
+        )
     print(
         ">> evaluation events (rerun as needed): "
         + evaluation_events_command(run_dir),

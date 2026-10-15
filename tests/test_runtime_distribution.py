@@ -29,7 +29,7 @@ class RuntimeDistributionTests(unittest.TestCase):
             "dungeness", "src/dungeness/compiler.py", "adapters/harbor/command_agent.py",
             "services/gateway/gateway.py", "tasks/projects/dungeness/ecdsa-starter/task.yaml",
             "run-specs/projects/dungeness/ecdsa-starter.yaml", ".env.example",
-            "watcher/render_gateway_transcript.py", "watcher/serve_gateway_transcripts.py",
+            "tools/transcripts/render_gateway_transcript.py", "tools/transcripts/serve_gateway_transcripts.py",
         ):
             self.write(path, f"runtime {path}\n")
         (self.root / "dungeness").chmod(0o755)
@@ -70,7 +70,8 @@ class RuntimeDistributionTests(unittest.TestCase):
         with tarfile.open(output) as archive:
             names = archive.getnames()
             self.assertIn("dungeness-runtime/.env.example", names)
-            self.assertIn("dungeness-runtime/watcher/serve_gateway_transcripts.py", names)
+            self.assertNotIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", names)
+            self.assertFalse(any(name.startswith("dungeness-runtime/tasks/users/") for name in names))
             self.assertEqual(archive.getmember("dungeness-runtime/dungeness").mode, 0o755)
             source = json.load(archive.extractfile("dungeness-runtime/RUNTIME_SOURCE.json"))
             for name, digest in source["files"].items():
@@ -83,6 +84,12 @@ class RuntimeDistributionTests(unittest.TestCase):
             self.assertEqual(source["source_commit"], report["source_commit"])
         with self.assertRaises(FileExistsError):
             exporter.export_runtime(self.root, "HEAD", output)
+
+    def test_optional_transcript_tools_are_included_only_when_requested(self):
+        output = Path(self.temp.name) / "with-tools.tar.gz"
+        exporter.export_runtime(self.root, "HEAD", output, include_transcript_tools=True)
+        with tarfile.open(output) as archive:
+            self.assertIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", archive.getnames())
 
     def test_symlink_and_lfs_runtime_members_are_rejected(self):
         path = self.root / "services/gateway/escape.py"

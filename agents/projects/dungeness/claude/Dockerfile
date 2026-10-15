@@ -11,7 +11,7 @@ FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0
 ARG CLAUDE_VERSION=2.1.259
 
 # python3 runs the web/evaluate clients; git + g++ give parity with the Codex
-# image (git workflow, local C++ compile for world-map). Rust is added below.
+# image (git workflow, local C++ compilation). Rust is added below.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 ca-certificates git g++ \
     && rm -rf /var/lib/apt/lists/* \
