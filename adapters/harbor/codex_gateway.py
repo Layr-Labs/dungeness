@@ -35,67 +35,8 @@ async def prebaked_codex_is_ready(
     return True
 
 
-def research_state_hooks_document() -> str:
-    """Return the user-level hook configuration for controlled Dungeness runs."""
-
-    command = "python3 /usr/local/bin/research-state-hook"
-    return (
-        json.dumps(
-            {
-                "hooks": {
-                    "SessionStart": [
-                        {
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": f"{command} session-start",
-                                    "timeout": 10,
-                                }
-                            ]
-                        }
-                    ],
-                    "PreToolUse": [
-                        {
-                            "matcher": "^Bash$",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": f"{command} pre-tool-use",
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ],
-                    "Stop": [
-                        {
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": f"{command} stop",
-                                    "timeout": 10,
-                                }
-                            ]
-                        }
-                    ],
-                }
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    )
 
 
-def install_research_state_hooks_command(codex_home: str) -> str:
-    """Install Dungeness hooks when ResearchState or the KB is enabled."""
-
-    document = research_state_hooks_document()
-    return (
-        'if [ -n "${DUNGENESS_RESEARCH_STATE_URL:-}" ] || '
-        '[ -n "${DUNGENESS_KNOWLEDGE_BASE_URL:-}" ]; then\n'
-        f"  printf %s {shlex.quote(document)} > "
-        f"{shlex.quote(codex_home)}/hooks.json\n"
-        "fi"
-    )
 
 
 def build_instrumented_codex_command(
@@ -198,12 +139,6 @@ done
 wait "$runner_pid"
 raw_runner_status=$?
 runner_status=$raw_runner_status
-if [ "$raw_runner_status" -eq 0 ] && \
-   [ -n "${{DUNGENESS_RESEARCH_STATE_URL:-}}" ]; then
-  python3 -c \
-    'import os, urllib.request; urllib.request.urlopen(urllib.request.Request(os.environ["DUNGENESS_RESEARCH_STATE_URL"].rstrip("/") + "/finalize", data=b"{{}}", headers={{"content-type": "application/json"}}, method="POST"), timeout=5).read()' \
-    2>> "$event_path" || true
-fi
 if [ "$raw_runner_status" -eq 124 ]; then
   runner_status=0
 fi
@@ -309,9 +244,6 @@ class CodexGateway(Codex):
                 '> "$CODEX_HOME/config.toml"',
                 '>> "$CODEX_HOME/config.toml"',
             )
-        setup_command += "\n" + install_research_state_hooks_command(
-            codex_home
-        )
         await self.exec_as_agent(environment, command=setup_command, env=env)
 
         # The agent profile stores the exact identifier expected by the fixed

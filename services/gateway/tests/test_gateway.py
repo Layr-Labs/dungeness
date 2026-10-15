@@ -53,7 +53,6 @@ from gateway import (
     approve_historical_result,
     extract_usage,
     historical_date_evidence,
-    inject_research_state,
     immutable_historical_url,
     instrumentation_route,
     is_sse_body,
@@ -155,6 +154,40 @@ class ModuleLayoutTests(unittest.TestCase):
 
 
 class SearchPolicyTests(unittest.TestCase):
+    def test_responses_preserve_harness_prompt_without_controller_calls(self) -> None:
+        payload = {
+            "model": "gpt-5.6-sol",
+            "input": [
+                {"role": "developer", "content": "Use my own research strategy."},
+                {"role": "user", "content": "Evaluate when useful, then finish."},
+            ],
+        }
+        requests = []
+
+        async def upstream(request):
+            requests.append(request.url.path)
+            self.assertEqual(request.url.path, "/v1/responses")
+            self.assertEqual(json.loads(request.content), payload)
+            return httpx.Response(200, json={
+                "output": [], "usage": {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+            })
+
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = UsageLedger("no-controller", Path(directory))
+            model_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+            with (
+                patch.object(gateway, "client", model_client),
+                patch.object(gateway, "ledger", ledger),
+                # A stale environment from an older deployment must not mutate prompts.
+                patch.dict(os.environ, {"DUNGENESS_RESEARCH_STATE_URL": "http://retired.invalid"}),
+                TestClient(app) as client,
+            ):
+                response = client.post("/model/openai/v1/responses", json=payload)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(requests, ["/v1/responses"])
+            self.assertEqual(ledger.counts["model_tokens"], 15)
+            self.assertEqual(canonical_event(directory, "model.request")["request"], payload)
+
     def test_kimi_code_provider_uses_responses_adapter(self) -> None:
         provider = MODEL_PROVIDERS["kimi-code"]
         self.assertEqual(provider["routes"], {"responses", "chat/completions"})
@@ -177,57 +210,6 @@ class SearchPolicyTests(unittest.TestCase):
         self.assertEqual(request["model"], "k3")
         self.assertEqual(request["reasoning_effort"], "max")
 
-    def test_research_state_injection_replaces_previous_developer_view(
-        self,
-    ) -> None:
-        old = inject_research_state(
-            {"model": "k3", "input": "test"},
-            {
-                "evaluation": {
-                    "cadence": {"debt": 1},
-                    "qualifying_completed": 0,
-                }
-            },
-        )
-        updated = inject_research_state(
-            old,
-            {
-                "web_search": {
-                    "cadence": {"debt": 2},
-                    "qualifying_completed": 1,
-                },
-                "evaluation": {
-                    "cadence": {"debt": 3},
-                    "qualifying_completed": 2,
-                },
-                "kb_behavior_feedback": {
-                    "uninspired_stall_count": 2,
-                    "latest_feedback": {
-                        "visible_to_agent": True,
-                        "message": "BEHAVIOR FEEDBACK: STICK",
-                    },
-                },
-            },
-        )
-        developer = [
-            item
-            for item in updated["input"]
-            if isinstance(item, dict) and item.get("role") == "developer"
-        ]
-        self.assertEqual(len(developer), 1)
-        text = developer[0]["content"][0]["text"]
-        self.assertIn('"debt": 3', text)
-        self.assertIn("Web research is currently behind", text)
-        self.assertIn("evaluation is currently behind", text)
-        self.assertIn("<behavior_feedback>", text)
-        self.assertIn("BEHAVIOR FEEDBACK: STICK", text)
-
-        request = build_chat_request(updated)
-        self.assertEqual(request["messages"][-1]["role"], "system")
-        self.assertIn(
-            "Current Dungeness research-effort state",
-            request["messages"][-1]["content"],
-        )
 
     def test_exa_date_only_metadata_is_accepted_as_utc(self) -> None:
         self.assertLess(
@@ -1266,82 +1248,6 @@ class UsageTests(unittest.TestCase):
             finally:
                 gateway.ledger = original_ledger
 
-    def test_kimi_route_injects_latest_research_state_on_every_request(
-        self,
-    ) -> None:
-        async def fake_request(
-            payload, *, api_base: str, api_key: str, trace
-        ):
-            developer = [
-                item
-                for item in payload["input"]
-                if isinstance(item, dict) and item.get("role") == "developer"
-            ]
-            self.assertEqual(len(developer), 1)
-            self.assertIn(
-                '"debt": 2',
-                developer[0]["content"][0]["text"],
-            )
-
-            async def events():
-                yield {
-                    "type": "response.completed",
-                    "response": {
-                        "id": "resp-state",
-                        "object": "response",
-                        "status": "completed",
-                        "output": [],
-                        "usage": {
-                            "input_tokens": 20,
-                            "output_tokens": 5,
-                            "total_tokens": 25,
-                        },
-                    },
-                }
-
-            return events()
-
-        state_view = {
-            "evaluation": {
-                "qualifying_completed": 2,
-                "minimum": 12,
-                "cadence": {
-                    "required_now": 4,
-                    "debt": 2,
-                    "remaining_final_minimum": 10,
-                },
-            }
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            ledger = UsageLedger("kimi-state-test", Path(directory))
-            original_ledger = gateway.ledger
-            gateway.ledger = ledger
-            try:
-                with (
-                    patch.object(
-                        gateway_module,
-                        "request_kimi",
-                        side_effect=fake_request,
-                    ),
-                    patch.object(
-                        gateway,
-                        "research_state_view_for_request",
-                        new=AsyncMock(return_value=state_view),
-                    ) as state_fetch,
-                    TestClient(app) as client,
-                ):
-                    response = client.post(
-                        "/model/kimi-code/v1/responses",
-                        json={
-                            "model": "k3",
-                            "input": "test",
-                            "stream": True,
-                        },
-                    )
-                self.assertEqual(response.status_code, 200)
-                state_fetch.assert_awaited_once()
-            finally:
-                gateway.ledger = original_ledger
 
     def test_openai_usage_is_normalized(self) -> None:
         body = json.dumps(

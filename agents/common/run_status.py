@@ -29,11 +29,6 @@ def main() -> None:
     if scorer:
         document["evaluation"] = fetch_json(scorer.rstrip("/") + "/status")
 
-    research_state = os.environ.get("DUNGENESS_RESEARCH_STATE_URL")
-    if research_state:
-        document["research_state"] = fetch_json(
-            research_state.rstrip("/") + "/model-view"
-        )
 
     deadline = os.environ.get("DUNGENESS_AGENT_DEADLINE_EPOCH")
     if deadline:

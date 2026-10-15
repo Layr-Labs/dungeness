@@ -23,9 +23,6 @@ OPENROUTER_ROUTES = {
 CHATGPT_ROUTES = {"responses", "responses/compact"}
 MOONSHOT_ROUTES = {"responses", "chat/completions"}
 KIMI_CODE_ROUTES = {"responses", "chat/completions"}
-RESEARCH_STATE_CONTEXT_MARKER = (
-    "## Current Dungeness research-effort state (per-request)"
-)
 
 def validate_declared_request(payload, pricing):
     """Keep measured inference on the exact declared model and priced units."""
@@ -134,111 +131,6 @@ def prompt_profile(payload: Any, body: bytes) -> dict[str, Any]:
         "by_role_chars": by_role,
         "tools": {"count": len(tools), "chars": _prompt_text_len(tools)},
     }
-
-
-def research_state_context(view: dict[str, Any]) -> str:
-    """Render the compact authoritative state delivered on every model call."""
-
-    web_search = view.get("web_search")
-    web_cadence = (
-        web_search.get("cadence")
-        if isinstance(web_search, dict)
-        else None
-    )
-    evaluation = view.get("evaluation")
-    evaluation_cadence = (
-        evaluation.get("cadence")
-        if isinstance(evaluation, dict)
-        else None
-    )
-    kb_behavior_feedback = view.get("kb_behavior_feedback")
-    instruction = (
-        "This is the latest authoritative Dungeness state. It replaces earlier "
-        "research-state snapshots. Use it when choosing the next action."
-    )
-    if isinstance(web_cadence, dict) and web_cadence.get("debt", 0) > 0:
-        instruction += (
-            " Web research is currently behind its assigned cadence. Use the "
-            "configured web search tool for enough distinct, useful queries to "
-            "clear the debt before continuing extended local investigation."
-        )
-    if (
-        isinstance(evaluation_cadence, dict)
-        and evaluation_cadence.get("debt", 0) > 0
-    ):
-        instruction += (
-            " Authoritative evaluation is currently behind its assigned cadence. "
-            "Evaluate enough distinct candidate states to clear the debt before "
-            "continuing extended local optimization."
-        )
-    behavior_message = None
-    if isinstance(kb_behavior_feedback, dict):
-        latest = kb_behavior_feedback.get("latest_feedback")
-        if (
-            isinstance(latest, dict)
-            and latest.get("visible_to_agent") is True
-            and isinstance(latest.get("message"), str)
-        ):
-            behavior_message = latest["message"]
-    feedback_block = (
-        ""
-        if behavior_message is None
-        else f"\n\n<behavior_feedback>\n{behavior_message}\n</behavior_feedback>"
-    )
-    return (
-        f"{RESEARCH_STATE_CONTEXT_MARKER}\n\n"
-        f"{instruction}{feedback_block}\n\n"
-        "```json\n"
-        + json.dumps(view, indent=2, sort_keys=True)
-        + "\n```"
-    )
-
-
-def inject_research_state(
-    payload: dict[str, Any],
-    view: dict[str, Any],
-) -> dict[str, Any]:
-    """Add one fresh developer item without retaining older injected views."""
-
-    raw_input = payload.get("input")
-    if isinstance(raw_input, list):
-        items = list(raw_input)
-    elif isinstance(raw_input, str):
-        items = [
-            {
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": raw_input,
-                    }
-                ],
-            }
-        ]
-    else:
-        return payload
-
-    filtered: list[Any] = []
-    for item in items:
-        if isinstance(item, dict) and item.get("role") == "developer":
-            encoded = json.dumps(item, sort_keys=True)
-            if RESEARCH_STATE_CONTEXT_MARKER in encoded:
-                continue
-        filtered.append(item)
-    filtered.append(
-        {
-            "type": "message",
-            "role": "developer",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": research_state_context(view),
-                }
-            ],
-        }
-    )
-    return {**payload, "input": filtered}
 
 
 def capture_prompt(

@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -40,24 +41,11 @@ EVALUATE_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/evaluate.py"
 RESEARCH_WORKER_PATH = REPOSITORY_ROOT / "agents/common/research_worker.py"
 RUN_STATUS_PATH = REPOSITORY_ROOT / "agents/common/run_status.py"
 CANDIDATE_STATE_PATH = REPOSITORY_ROOT / "agents/common/candidate_state.py"
-KNOWLEDGE_BASE_CLIENT_PATH = (
-    REPOSITORY_ROOT / "agents/common/knowledge_base.py"
-)
-RESEARCH_STATE_HOOK_PATH = (
-    REPOSITORY_ROOT / "agents/common/research_state_hook.py"
-)
 NETWORK_POLICY_PATH = REPOSITORY_ROOT / "policies/network/mediated.yaml"
 WEB_POLICY_PATH = REPOSITORY_ROOT / "policies/web/exa.yaml"
 BUDGET_POLICY_PATH = REPOSITORY_ROOT / "policies/budget/default.yaml"
 WEB_SEARCH_PROFILES_ROOT = REPOSITORY_ROOT / "web-search"
 EVALUATION_PROFILES_ROOT = REPOSITORY_ROOT / "evaluation"
-RESEARCH_STATE_PROFILES_ROOT = REPOSITORY_ROOT / "research-state"
-RESEARCH_STATE_SERVICE_ROOT = REPOSITORY_ROOT / "services/research-state"
-KNOWLEDGE_BASE_SERVICE_ROOT = REPOSITORY_ROOT / "services/knowledge-base"
-KNOWLEDGE_BASES_ROOT = REPOSITORY_ROOT / "knowledge-bases"
-KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT = (
-    REPOSITORY_ROOT / "knowledge-base-prompts"
-)
 SCAFFOLDS_ROOT = REPOSITORY_ROOT / "scaffolds"
 ADAPTER_MANIFEST_PATH = REPOSITORY_ROOT / "adapters/harbor/adapter.yaml"
 # The source repo is always mounted at this fixed, task-agnostic path in the
@@ -96,37 +84,6 @@ DEFAULT_WEB_SEARCH_PROFILE = (
 )
 DEFAULT_EVALUATION_PROFILE = (
     "evaluation-profile:system/dungeness/iterative-v1"
-)
-RESEARCH_STATE_MODES = {
-    "observe",
-    "prompt_only",
-    "enforce_minimum",
-}
-RESEARCH_STATE_LEVELS = {
-    "low",
-    "medium",
-    "high",
-}
-DEFAULT_KNOWLEDGE_BASE_OPERATIONS = (
-    "status",
-    "list",
-    "search",
-    "read",
-    "neighbors",
-    "inspire",
-)
-KNOWLEDGE_BASE_READABLE_SUFFIXES = frozenset(
-    {
-        ".bbl",
-        ".bib",
-        ".json",
-        ".md",
-        ".pdf",
-        ".tex",
-        ".txt",
-        ".yaml",
-        ".yml",
-    }
 )
 
 WEB_NOTICE = """\
@@ -385,188 +342,6 @@ def build_eval_notice(
     )
 
 
-def resolve_research_state(
-    value: Any,
-) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any]]:
-    """Resolve the optional run-scoped research-state controller profile."""
-
-    if value is None:
-        return None, None, {"enabled": False}
-    if not isinstance(value, dict):
-        raise ValueError("run spec research_state must be a mapping")
-    unknown = sorted(set(value) - {"profile", "controls"})
-    if unknown:
-        raise ValueError(
-            "unknown run spec research_state fields: " + ", ".join(unknown)
-        )
-    profile_ref = value.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "research-state-profile:"
-    ):
-        raise ValueError(
-            "run spec research_state.profile must be a fully qualified "
-            "research-state-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("research-state-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id)
-    ):
-        raise ValueError(
-            "research-state-profile reference must be "
-            "research-state-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        RESEARCH_STATE_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise ValueError(f"research-state profile does not exist: {profile_ref}")
-    profile = load_yaml(profile_path)
-    if (
-        profile.get("schema_version") != 1
-        or profile.get("type") != "research-state-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-    ):
-        raise ValueError(f"invalid research-state profile identity in {profile_path}")
-    profile_controls = profile.get("controls")
-    safeguards = profile.get("safeguards")
-    if not isinstance(profile_controls, dict) or not isinstance(safeguards, dict):
-        raise ValueError(
-            f"research-state profile is missing controls or safeguards in {profile_path}"
-        )
-    authored_controls = value.get("controls")
-    if not isinstance(authored_controls, dict):
-        raise ValueError("run spec research_state.controls must be a mapping")
-    required_controls = {"web_search", "evaluation"}
-    if set(authored_controls) != required_controls:
-        raise ValueError(
-            "run spec research_state.controls must define exactly "
-            "web_search and evaluation"
-        )
-
-    resolved_controls: dict[str, dict[str, Any]] = {}
-    for control_name in ("web_search", "evaluation"):
-        assignment = authored_controls.get(control_name)
-        if not isinstance(assignment, dict):
-            raise ValueError(
-                f"run spec research_state.controls.{control_name} must be a mapping"
-            )
-        unknown_assignment = sorted(set(assignment) - {"mode", "level"})
-        if unknown_assignment:
-            raise ValueError(
-                f"unknown research_state.controls.{control_name} fields: "
-                + ", ".join(unknown_assignment)
-            )
-        mode = assignment.get("mode")
-        level = assignment.get("level")
-        if mode not in RESEARCH_STATE_MODES:
-            raise ValueError(
-                f"research_state.controls.{control_name}.mode must be one of "
-                + ", ".join(sorted(RESEARCH_STATE_MODES))
-            )
-        if level not in RESEARCH_STATE_LEVELS:
-            raise ValueError(
-                f"research_state.controls.{control_name}.level must be one of "
-                + ", ".join(sorted(RESEARCH_STATE_LEVELS))
-            )
-        levels = profile_controls.get(control_name)
-        selected = levels.get(level) if isinstance(levels, dict) else None
-        if not isinstance(selected, dict):
-            raise ValueError(
-                f"research-state profile has no {control_name}.{level} settings"
-            )
-        expected_fields = {"minimum", "soft_min", "soft_max"}
-        if set(selected) != expected_fields or any(
-            not isinstance(selected[field], int)
-            or isinstance(selected[field], bool)
-            or selected[field] < 0
-            for field in expected_fields
-        ):
-            raise ValueError(
-                f"invalid {control_name}.{level} settings in {profile_path}"
-            )
-        if not (
-            selected["minimum"]
-            <= selected["soft_min"]
-            <= selected["soft_max"]
-        ):
-            raise ValueError(
-                f"invalid {control_name}.{level} range in {profile_path}"
-            )
-        resolved_controls[control_name] = {
-            "mode": mode,
-            "level": level,
-            **selected,
-        }
-
-    required_safeguards = {
-        "max_stop_interventions",
-        "max_stalled_interventions",
-        "finalization_reserve_sec",
-    }
-    if set(safeguards) != required_safeguards or any(
-        not isinstance(safeguards[field], int)
-        or isinstance(safeguards[field], bool)
-        or safeguards[field] < (0 if field == "finalization_reserve_sec" else 1)
-        for field in required_safeguards
-    ):
-        raise ValueError(f"invalid safeguards in {profile_path}")
-    return profile_path, profile, {
-        "enabled": True,
-        "profile": profile_ref,
-        "profile_sha256": hashlib.sha256(profile_path.read_bytes()).hexdigest(),
-        "controls": resolved_controls,
-        "safeguards": dict(safeguards),
-    }
-
-
-def build_research_state_notice(resolved: dict[str, Any]) -> str:
-    """Render identical initial wording for prompt-only and enforced modes."""
-
-    if not resolved.get("enabled"):
-        return ""
-    assignments = []
-    for name, label in (
-        ("web_search", "Web-search"),
-        ("evaluation", "Authoritative-evaluation"),
-    ):
-        control = resolved["controls"][name]
-        if control["mode"] == "observe":
-            continue
-        assignments.append(
-            f"- {label} effort: **{control['level'].upper()}**. Aim for "
-            f"{control['soft_min']}-{control['soft_max']} distinct qualifying "
-            "operations."
-        )
-    assignment_text = (
-        "\n".join(assignments)
-        if assignments
-        else "- This run observes natural search and evaluation behavior."
-    )
-    return f"""
-
----
-
-## Research-effort state
-
-Dungeness maintains compact run-scoped progress from authoritative gateway and
-evaluation observations. `run-status` shows the current state. Codex also
-receives refreshed state at session start and after supported tool calls.
-
-{assignment_text}
-
-Duplicate queries and unchanged candidate submissions are recorded but do not
-count as distinct qualifying operations. Continue following the separately
-selected web-research and evaluation strategy profiles when deciding what work
-is useful.
-"""
-
-
 def build_workspace_notice(
     candidate_rel: str,
     *,
@@ -806,8 +581,6 @@ def build_run_record(
     resume: dict[str, Any] | None,
     configuration: dict[str, Any],
     run_spec_ref: str | None = None,
-    knowledge_base_ref: str | None = None,
-    knowledge_base_initialization: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     agent_namespace = require_namespace(
         agent.get("namespace"), f"agent {agent_id} namespace"
@@ -823,8 +596,6 @@ def build_run_record(
         relations["model_adapter"] = agent["adapter"]
     if run_spec_ref is not None:
         relations["run_spec"] = run_spec_ref
-    if knowledge_base_ref is not None:
-        relations["knowledge_base"] = knowledge_base_ref
     if resume is not None:
         prior_directory = find_run_directory(resume["run_id"])
         prior_record_path = (
@@ -849,8 +620,6 @@ def build_run_record(
         "blank" if fresh_start else "checkpoint"
     )
     initialization = {"mode": resolved_initialization_mode}
-    if knowledge_base_initialization is not None:
-        initialization["knowledge_base"] = knowledge_base_initialization
 
     return {
         "schema_version": 1,
@@ -1417,806 +1186,6 @@ def materialize_scaffold_candidate(scaffold: dict[str, Any], root: Path) -> None
             destination.unlink()
     destination.mkdir(parents=True)
     shutil.copy2(scaffold["candidate_stub"], destination / "mod.rs")
-
-
-def _knowledge_base_files(
-    root: Path,
-    entries: list[str],
-) -> dict[str, Path]:
-    files: dict[str, Path] = {}
-    resolved_root = root.resolve()
-    for raw_entry in entries:
-        relative = require_relative_path(raw_entry, "knowledge-base content path")
-        source = root.joinpath(*relative.parts)
-        if source.is_symlink():
-            raise ValueError(
-                f"knowledge-base content must not be a symlink: {relative}"
-            )
-        if source.is_file():
-            candidates = [source]
-        elif source.is_dir():
-            descendants = list(source.rglob("*"))
-            symlinks = [path for path in descendants if path.is_symlink()]
-            if symlinks:
-                raise ValueError(
-                    "knowledge-base content must not contain symlinks: "
-                    f"{symlinks[0].relative_to(root)}"
-                )
-            candidates = [path for path in descendants if path.is_file()]
-        else:
-            raise ValueError(
-                f"knowledge-base content does not exist: {relative}"
-            )
-        for candidate in candidates:
-            if candidate.is_symlink():
-                raise ValueError(
-                    "knowledge-base content must not contain symlinks: "
-                    f"{candidate.relative_to(root)}"
-                )
-            resolved = candidate.resolve()
-            if not resolved.is_relative_to(resolved_root):
-                raise ValueError(
-                    f"knowledge-base content escapes its root: {candidate}"
-                )
-            child = resolved.relative_to(resolved_root).as_posix()
-            if child == "knowledge-base.yaml":
-                raise ValueError(
-                    "knowledge-base.yaml is generated from the source manifest "
-                    "during preload and must not be listed as content"
-                )
-            files[child] = candidate
-    if not files:
-        raise ValueError("knowledge-base preload selects no files")
-    return dict(sorted(files.items()))
-
-
-def _knowledge_base_digest(files: dict[str, Path]) -> str:
-    digest = hashlib.sha256()
-    for relative, source in sorted(files.items()):
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(source.read_bytes()).digest())
-    return digest.hexdigest()
-
-
-def resolve_knowledge_base_prompt_profile(
-    value: Any,
-) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any] | None]:
-    """Resolve file-backed instructions for using a preloaded knowledge base."""
-
-    if value is None:
-        return None, None, None
-    prefix = "knowledge-base-prompt-profile:"
-    if not isinstance(value, str) or not value.startswith(prefix):
-        raise ValueError(
-            "run spec initialization.knowledge_base.prompt_profile must be a "
-            "fully qualified knowledge-base-prompt-profile reference"
-        )
-    raw_ref = value.removeprefix(prefix)
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id)
-    ):
-        raise ValueError(
-            "knowledge-base prompt profile reference must be "
-            "knowledge-base-prompt-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise ValueError(
-            f"knowledge-base prompt profile does not exist: {value}"
-        )
-    profile = load_yaml(profile_path)
-    if (
-        profile.get("schema_version") != 1
-        or profile.get("type") != "knowledge-base-prompt-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-    ):
-        raise ValueError(
-            f"invalid knowledge-base prompt profile identity in {profile_path}"
-        )
-    mode = profile.get("mode")
-    prompt = profile.get("prompt")
-    if not isinstance(mode, str) or not mode:
-        raise ValueError(
-            f"knowledge-base prompt profile mode is missing in {profile_path}"
-        )
-    if not isinstance(prompt, str):
-        raise ValueError(
-            f"knowledge-base prompt profile prompt must be text in {profile_path}"
-        )
-    placeholders = set(re.findall(r"{([a-z_][a-z0-9_]*)}", prompt))
-    unsupported = placeholders - {
-        "destination",
-        "document_count",
-        "document_read_plan",
-        "entrypoint",
-        "page_count",
-        "source_ref",
-        "total_page_count",
-    }
-    if unsupported:
-        raise ValueError(
-            "unsupported knowledge-base prompt profile placeholders: "
-            + ", ".join(sorted(unsupported))
-        )
-    return profile_path, profile, {"profile": value, "mode": mode}
-
-
-def resolve_knowledge_base_interface(
-    manifest: dict[str, Any],
-    manifest_path: Path,
-) -> dict[str, Any]:
-    """Resolve the sidecar operations exposed by one knowledge-base manifest."""
-
-    value = manifest.get("interface", {})
-    if not isinstance(value, dict):
-        raise ValueError(
-            f"knowledge-base interface must be a mapping: {manifest_path}"
-        )
-    unknown = sorted(set(value) - {"mode", "operations"})
-    if unknown:
-        raise ValueError(
-            f"unknown knowledge-base interface fields in {manifest_path}: "
-            + ", ".join(unknown)
-        )
-    mode = value.get("mode", "curated-corpus")
-    if not isinstance(mode, str) or not mode:
-        raise ValueError(
-            f"knowledge-base interface.mode must be text: {manifest_path}"
-        )
-    operations = value.get(
-        "operations",
-        list(DEFAULT_KNOWLEDGE_BASE_OPERATIONS),
-    )
-    if (
-        not isinstance(operations, list)
-        or not operations
-        or not all(isinstance(operation, str) for operation in operations)
-        or len(set(operations)) != len(operations)
-    ):
-        raise ValueError(
-            "knowledge-base interface.operations must be a non-empty list of "
-            f"unique names: {manifest_path}"
-        )
-    unsupported = sorted(
-        set(operations) - set(DEFAULT_KNOWLEDGE_BASE_OPERATIONS)
-    )
-    if unsupported:
-        raise ValueError(
-            f"unsupported knowledge-base operations in {manifest_path}: "
-            + ", ".join(unsupported)
-        )
-    return {
-        "mode": mode,
-        "operations": list(operations),
-    }
-
-
-def resolve_knowledge_base_documents(
-    manifest: dict[str, Any],
-    manifest_path: Path,
-) -> list[dict[str, Any]]:
-    """Resolve optional raw-document metadata while preserving single-paper KBs."""
-
-    source = manifest.get("source")
-    if not isinstance(source, dict):
-        return []
-    documents_value = source.get("documents")
-    if documents_value is None:
-        entrypoint = manifest.get("entrypoint")
-        pages = source.get("pages")
-        if (
-            isinstance(entrypoint, str)
-            and PurePosixPath(entrypoint).suffix.lower() == ".pdf"
-            and isinstance(pages, int)
-            and not isinstance(pages, bool)
-            and pages >= 1
-        ):
-            document = {
-                "path": entrypoint,
-                "pages": pages,
-            }
-            for field in ("title", "author", "authors", "artifact_sha256"):
-                if field in source:
-                    document[field] = source[field]
-            return [document]
-        return []
-    if not isinstance(documents_value, list) or not documents_value:
-        raise ValueError(
-            f"knowledge-base source.documents must be a non-empty list: "
-            f"{manifest_path}"
-        )
-
-    documents: list[dict[str, Any]] = []
-    seen_paths: set[str] = set()
-    for index, value in enumerate(documents_value, start=1):
-        if not isinstance(value, dict):
-            raise ValueError(
-                f"knowledge-base source document {index} must be a mapping: "
-                f"{manifest_path}"
-            )
-        path_value = value.get("path")
-        pages = value.get("pages")
-        if not isinstance(path_value, str):
-            raise ValueError(
-                f"knowledge-base source document {index}.path must be text: "
-                f"{manifest_path}"
-            )
-        path = require_relative_path(
-            path_value,
-            f"knowledge-base source document {index}.path",
-        ).as_posix()
-        if PurePosixPath(path).suffix.lower() != ".pdf":
-            raise ValueError(
-                f"knowledge-base source document must be a PDF: {path}"
-            )
-        if path in seen_paths:
-            raise ValueError(
-                f"duplicate knowledge-base source document path: {path}"
-            )
-        if (
-            not isinstance(pages, int)
-            or isinstance(pages, bool)
-            or pages < 1
-        ):
-            raise ValueError(
-                f"knowledge-base source document {path} pages must be >= 1"
-            )
-        title = value.get("title")
-        if title is not None and (
-            not isinstance(title, str) or not title.strip()
-        ):
-            raise ValueError(
-                f"knowledge-base source document {path} title must be text"
-            )
-        artifact_sha256 = value.get("artifact_sha256")
-        if artifact_sha256 is not None and (
-            not isinstance(artifact_sha256, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", artifact_sha256)
-        ):
-            raise ValueError(
-                f"knowledge-base source document {path} artifact_sha256 "
-                "must be a lowercase SHA-256 digest"
-            )
-        document = dict(value)
-        document["path"] = path
-        document["pages"] = pages
-        documents.append(document)
-        seen_paths.add(path)
-
-    paper_count = source.get("paper_count")
-    if paper_count is not None and paper_count != len(documents):
-        raise ValueError(
-            f"knowledge-base source.paper_count does not match documents: "
-            f"{manifest_path}"
-        )
-    return documents
-
-
-def resolve_knowledge_base_preload(value: Any) -> dict[str, Any] | None:
-    """Resolve a static, namespaced knowledge-base projection from a run spec."""
-
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError(
-            "run spec initialization.knowledge_base must be a mapping"
-        )
-    unknown = sorted(
-        set(value)
-        - {"ref", "layers", "prompt_profile", "access", "behavior_feedback"}
-    )
-    if unknown:
-        raise ValueError(
-            "unknown run spec initialization.knowledge_base fields: "
-            + ", ".join(unknown)
-        )
-    access = value.get("access", "sidecar")
-    if access != "sidecar":
-        raise ValueError(
-            "run spec initialization.knowledge_base.access must be 'sidecar'"
-        )
-    reference = value.get("ref")
-    if not isinstance(reference, str) or not reference.startswith(
-        "knowledge-base:"
-    ):
-        raise ValueError(
-            "run spec initialization.knowledge_base.ref must be a fully "
-            "qualified knowledge-base reference"
-        )
-    raw_ref = reference.removeprefix("knowledge-base:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", local_id)
-    ):
-        raise ValueError(
-            "knowledge-base reference must be "
-            "knowledge-base:<namespace>/<id>"
-        )
-    manifest_path = (
-        KNOWLEDGE_BASES_ROOT
-        / Path(*namespace_value.split("/"))
-        / local_id
-        / "knowledge-base.yaml"
-    )
-    if not manifest_path.is_file():
-        raise ValueError(f"knowledge base does not exist: {reference}")
-    manifest = load_yaml(manifest_path)
-    if (
-        manifest.get("schema_version") != 1
-        or manifest.get("type") != "knowledge-base"
-        or manifest.get("namespace") != namespace_value
-        or manifest.get("id") != local_id
-    ):
-        raise ValueError(
-            f"invalid knowledge-base identity in {manifest_path}"
-        )
-    interface = resolve_knowledge_base_interface(manifest, manifest_path)
-    preload_settings = manifest.get("preload")
-    if not isinstance(preload_settings, dict):
-        raise ValueError(
-            f"knowledge-base preload settings must be a mapping: {manifest_path}"
-        )
-    unknown_preload = sorted(
-        set(preload_settings)
-        - {
-            "status",
-            "intended_destination",
-            "copy_contents",
-            "core_files",
-        }
-    )
-    if unknown_preload:
-        raise ValueError(
-            f"unknown knowledge-base preload settings in {manifest_path}: "
-            + ", ".join(unknown_preload)
-        )
-    if preload_settings.get("status") != "ready":
-        raise ValueError(
-            f"knowledge base is not ready for preload: {manifest_path}"
-        )
-    if preload_settings.get("copy_contents", True) is not True:
-        raise ValueError(
-            f"knowledge-base preload.copy_contents must be true: "
-            f"{manifest_path}"
-        )
-    destination_value = preload_settings.get("intended_destination")
-    if not isinstance(destination_value, str):
-        raise ValueError(
-            "knowledge-base preload.intended_destination must be text in "
-            f"{manifest_path}"
-        )
-    destination = require_relative_path(
-        destination_value,
-        "knowledge-base destination",
-    )
-    if destination.parts[0] == ".git":
-        raise ValueError("knowledge-base destination must not be under .git")
-
-    content_layers = manifest.get("content_layers")
-    if not isinstance(content_layers, dict) or not content_layers:
-        raise ValueError(
-            f"knowledge-base content_layers must be a non-empty mapping: "
-            f"{manifest_path}"
-        )
-    for layer, entries in content_layers.items():
-        if (
-            not isinstance(layer, str)
-            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", layer)
-            or not isinstance(entries, list)
-            or not entries
-            or not all(isinstance(entry, str) and entry for entry in entries)
-        ):
-            raise ValueError(
-                f"invalid knowledge-base content layer in {manifest_path}: "
-                f"{layer!r}"
-            )
-    requested_layers = value.get("layers")
-    if requested_layers is None:
-        selected_layers = list(content_layers)
-    elif (
-        not isinstance(requested_layers, list)
-        or not requested_layers
-        or not all(
-            isinstance(layer, str) and layer for layer in requested_layers
-        )
-        or len(set(requested_layers)) != len(requested_layers)
-    ):
-        raise ValueError(
-            "run spec initialization.knowledge_base.layers must be a "
-            "non-empty list of unique names"
-        )
-    else:
-        selected_layers = list(requested_layers)
-    missing_layers = sorted(set(selected_layers) - set(content_layers))
-    if missing_layers:
-        raise ValueError(
-            f"unknown knowledge-base layers for {reference}: "
-            + ", ".join(missing_layers)
-        )
-
-    core_files = preload_settings.get("core_files", [])
-    if (
-        not isinstance(core_files, list)
-        or not all(isinstance(entry, str) and entry for entry in core_files)
-    ):
-        raise ValueError(
-            f"knowledge-base preload.core_files must be a list: {manifest_path}"
-        )
-    entries = list(core_files)
-    for layer in selected_layers:
-        entries.extend(content_layers[layer])
-    entrypoint_value = manifest.get("entrypoint")
-    if not isinstance(entrypoint_value, str):
-        raise ValueError(
-            f"knowledge-base entrypoint must be a path: {manifest_path}"
-        )
-    full_projection = set(selected_layers) == set(content_layers)
-    if full_projection:
-        entries.append(entrypoint_value)
-    source_root = manifest_path.parent
-    files = _knowledge_base_files(source_root, entries)
-    documents = resolve_knowledge_base_documents(manifest, manifest_path)
-    for document in documents:
-        relative = document["path"]
-        source = files.get(relative)
-        if source is None:
-            raise ValueError(
-                f"knowledge-base source document is not selected by the "
-                f"active layers: {relative}"
-            )
-        expected_sha256 = document.get("artifact_sha256")
-        if expected_sha256 is not None:
-            actual_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
-            if actual_sha256 != expected_sha256:
-                raise ValueError(
-                    f"knowledge-base source document hash mismatch: {relative}"
-                )
-    source_files = {"knowledge-base.yaml": manifest_path, **files}
-    manifest_feedback = manifest.get("behavior_feedback")
-    if manifest_feedback is None:
-        manifest_feedback = {}
-    if not isinstance(manifest_feedback, dict):
-        raise ValueError(
-            "knowledge-base behavior_feedback settings must be a mapping: "
-            f"{manifest_path}"
-        )
-    authored_feedback = value.get("behavior_feedback")
-    if authored_feedback is None:
-        authored_feedback = {}
-    if not isinstance(authored_feedback, dict):
-        raise ValueError(
-            "run spec initialization.knowledge_base.behavior_feedback must be "
-            "a mapping"
-        )
-    unknown_feedback = sorted(
-        set(authored_feedback)
-        - {
-            "enabled",
-            "mode",
-            "minimum_improvement",
-            "kb_attribution_window_evaluations",
-            "no_progress_evaluations",
-            "expose_pre_stick_counter",
-        }
-    )
-    if unknown_feedback:
-        raise ValueError(
-            "unknown knowledge-base behavior_feedback fields: "
-            + ", ".join(unknown_feedback)
-        )
-    behavior_feedback = {
-        "enabled": True,
-        "mode": "shadow",
-        "minimum_improvement": 0,
-        "kb_attribution_window_evaluations": 1,
-        "no_progress_evaluations": 3,
-        "expose_pre_stick_counter": True,
-        **manifest_feedback,
-        **authored_feedback,
-    }
-    if behavior_feedback["mode"] not in {"off", "shadow", "visible"}:
-        raise ValueError(
-            "knowledge-base behavior feedback mode must be off, shadow, or visible"
-        )
-    minimum_improvement = behavior_feedback["minimum_improvement"]
-    if (
-        not isinstance(minimum_improvement, (int, float))
-        or isinstance(minimum_improvement, bool)
-        or minimum_improvement < 0
-    ):
-        raise ValueError(
-            "knowledge-base behavior_feedback minimum_improvement must be >= 0"
-        )
-    for field in (
-        "kb_attribution_window_evaluations",
-        "no_progress_evaluations",
-    ):
-        if (
-            not isinstance(behavior_feedback[field], int)
-            or isinstance(behavior_feedback[field], bool)
-            or behavior_feedback[field] < 1
-        ):
-            raise ValueError(
-                f"knowledge-base behavior_feedback {field} must be >= 1"
-            )
-    return {
-        "ref": reference,
-        "access_mode": access,
-        "manifest_path": manifest_path,
-        "manifest": manifest,
-        "interface": interface,
-        "documents": documents,
-        "root": source_root,
-        "destination": destination,
-        "layers": selected_layers,
-        "full_projection": full_projection,
-        "files": files,
-        "source_sha256": _knowledge_base_digest(source_files),
-        "behavior_feedback": behavior_feedback,
-    }
-
-
-def _knowledge_base_title(path: Path) -> str:
-    if path.suffix.lower() not in KNOWLEDGE_BASE_READABLE_SUFFIXES - {".pdf"}:
-        return path.stem.replace("-", " ").title()
-    text = path.read_text(encoding="utf-8")
-    if text.startswith("---\n"):
-        _, front_matter, _ = text.split("---\n", 2)
-        metadata = yaml.safe_load(front_matter)
-        if isinstance(metadata, dict) and isinstance(metadata.get("title"), str):
-            return metadata["title"]
-    for line in text.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return path.stem.replace("-", " ").title()
-
-
-def _projected_knowledge_base_index(preload: dict[str, Any]) -> str:
-    pages = []
-    for relative, source in preload["files"].items():
-        if (
-            source.suffix.lower() in KNOWLEDGE_BASE_READABLE_SUFFIXES
-            and relative not in {"index.md", "log.md"}
-        ):
-            pages.append(
-                f"- [{_knowledge_base_title(source)}]({relative})"
-            )
-    layers = "\n".join(f"- `{layer}`" for layer in preload["layers"])
-    page_list = "\n".join(pages)
-    return (
-        "---\n"
-        "title: Preloaded knowledge-base index\n"
-        "kind: index\n"
-        "status: runtime-projection\n"
-        "---\n\n"
-        "# Preloaded Knowledge Base\n\n"
-        f"Source record: `{preload['ref']}`.\n\n"
-        "## Included content layers\n\n"
-        f"{layers}\n\n"
-        "## Pages\n\n"
-        f"{page_list}\n"
-    )
-
-
-def _validate_knowledge_base_links(root: Path) -> None:
-    resolved_root = root.resolve()
-    missing = []
-    for page in root.rglob("*.md"):
-        for target in re.findall(
-            r"\[[^\]]*\]\(([^)]+)\)",
-            page.read_text(encoding="utf-8"),
-        ):
-            if (
-                target.startswith(("#", "http://", "https://", "mailto:"))
-                or re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:", target)
-            ):
-                continue
-            path_text = target.split("#", 1)[0].split("?", 1)[0]
-            if not path_text:
-                continue
-            linked = (page.parent / path_text).resolve()
-            if (
-                not linked.is_relative_to(resolved_root)
-                or not linked.exists()
-            ):
-                missing.append(
-                    f"{page.relative_to(root).as_posix()} -> {target}"
-                )
-    if missing:
-        raise ValueError(
-            "knowledge-base projection has missing or escaping links: "
-            + "; ".join(missing)
-        )
-
-
-def materialize_knowledge_base(
-    preload: dict[str, Any],
-    workspace: Path,
-    candidate_paths: list[PurePosixPath],
-) -> dict[str, Any]:
-    """Copy a validated knowledge-base projection into the agent workspace."""
-
-    destination: PurePosixPath = preload["destination"]
-    for candidate in candidate_paths:
-        if (
-            destination == candidate
-            or destination.is_relative_to(candidate)
-            or candidate.is_relative_to(destination)
-        ):
-            raise ValueError(
-                "knowledge-base destination overlaps an editable candidate "
-                f"path: {destination} and {candidate}"
-            )
-    target = workspace.joinpath(*destination.parts)
-    if target.exists():
-        raise ValueError(
-            f"knowledge-base destination already exists in checkpoint: "
-            f"{destination}"
-        )
-    target.mkdir(parents=True)
-    for relative, source in preload["files"].items():
-        child = target.joinpath(*PurePosixPath(relative).parts)
-        child.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, child)
-
-    runtime_manifest = {
-        **preload["manifest"],
-        "preload": {
-            **preload["manifest"]["preload"],
-            "status": "injected",
-            "source_ref": preload["ref"],
-            "destination": destination.as_posix(),
-            "selected_layers": preload["layers"],
-            "source_sha256": preload["source_sha256"],
-        },
-    }
-    (target / "knowledge-base.yaml").write_text(
-        yaml.safe_dump(
-            runtime_manifest,
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
-    entrypoint = target / str(preload["manifest"]["entrypoint"])
-    if not preload["full_projection"]:
-        entrypoint.parent.mkdir(parents=True, exist_ok=True)
-        entrypoint.write_text(
-            _projected_knowledge_base_index(preload),
-            encoding="utf-8",
-        )
-    if not entrypoint.is_file():
-        raise ValueError(
-            f"knowledge-base entrypoint was not materialized: {entrypoint}"
-        )
-    _validate_knowledge_base_links(target)
-
-    injected_files = {
-        path.relative_to(target).as_posix(): path
-        for path in target.rglob("*")
-        if path.is_file()
-    }
-    injected_sha256 = _knowledge_base_digest(injected_files)
-    metadata_path = target / ".dungeness-knowledge-base.json"
-    metadata_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "source_ref": preload["ref"],
-                "destination": destination.as_posix(),
-                "entrypoint": preload["manifest"]["entrypoint"],
-                "selected_layers": list(preload["layers"]),
-                "interface": preload["interface"],
-                "documents": preload["documents"],
-                "source_sha256": preload["source_sha256"],
-                "injected_sha256": injected_sha256,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    injected_files[metadata_path.relative_to(target).as_posix()] = metadata_path
-    documents = json.loads(json.dumps(preload["documents"]))
-    total_page_count = sum(document["pages"] for document in documents)
-    return {
-        "ref": preload["ref"],
-        "destination": destination.as_posix(),
-        "layers": list(preload["layers"]),
-        "source_sha256": preload["source_sha256"],
-        "injected_sha256": injected_sha256,
-        "files": sorted(injected_files),
-        "entrypoint": preload["manifest"]["entrypoint"],
-        "interface": json.loads(json.dumps(preload["interface"])),
-        "documents": documents,
-        "document_count": len(documents),
-        "total_page_count": total_page_count or None,
-        "page_count": documents[0]["pages"] if len(documents) == 1 else None,
-    }
-
-
-def materialize_knowledge_base_service(
-    preload: dict[str, Any],
-    service_context: Path,
-) -> dict[str, Any]:
-    """Bake a validated knowledge-base projection into its read-only sidecar."""
-
-    service_preload = {
-        **preload,
-        "destination": PurePosixPath("content"),
-    }
-    resolved = materialize_knowledge_base(
-        service_preload,
-        service_context,
-        [],
-    )
-    resolved.pop("destination", None)
-    return {
-        **resolved,
-        "access_mode": "sidecar",
-        "service_url": "http://knowledge-base:8078",
-        "interface": json.loads(json.dumps(preload["interface"])),
-        "behavior_feedback": json.loads(
-            json.dumps(preload["behavior_feedback"])
-        ),
-    }
-
-
-def build_knowledge_base_notice(
-    profile: dict[str, Any] | None,
-    resolved: dict[str, Any] | None,
-) -> str:
-    """Render file-backed knowledge-base guidance for the active preload."""
-
-    if profile is None or resolved is None:
-        return ""
-    document_read_plan = []
-    for index, document in enumerate(resolved.get("documents", []), start=1):
-        path = document["path"]
-        pages = document["pages"]
-        title = document.get("title")
-        heading = f"{index}. `{path}` ({pages} pages)"
-        if isinstance(title, str) and title:
-            heading += f": {title}"
-        commands = [
-            (
-                f"   - `knowledge-base read {path} "
-                f"--pages {first}-{min(first + 4, pages)}`"
-            )
-            for first in range(1, pages + 1, 5)
-        ]
-        document_read_plan.append("\n".join([heading, *commands]))
-    return (
-        profile["prompt"]
-        .replace("{source_ref}", resolved["ref"])
-        .replace("{destination}", "knowledge-base")
-        .replace("{entrypoint}", resolved["entrypoint"])
-        .replace("{page_count}", str(resolved.get("page_count") or "unknown"))
-        .replace(
-            "{document_count}",
-            str(resolved.get("document_count") or 0),
-        )
-        .replace(
-            "{total_page_count}",
-            str(resolved.get("total_page_count") or "unknown"),
-        )
-        .replace(
-            "{document_read_plan}",
-            "\n\n".join(document_read_plan),
-        )
-    )
 
 
 def toml_string(value: str) -> str:
@@ -3225,8 +2194,6 @@ def build_compose(
     max_usd: float | None = None,
     model_pricing: dict[str, Any] | None = None,
     agent_timeout_sec: int | None = None,
-    research_state: dict[str, Any] | None = None,
-    knowledge_base: dict[str, Any] | None = None,
     metric_direction: str = "minimize",
     baseline_score: float | None = None,
     readonly_workspace_paths: list[str] | None = None,
@@ -3240,48 +2207,6 @@ def build_compose(
     usage_mount = f"{resolved_run_dir / 'usage'}:/var/lib/testbed/usage"
     main_depends: dict[str, Any] = {"gateway": {"condition": "service_healthy"}}
     main_environment: dict[str, str] = {"TESTBED_GATEWAY_URL": "http://gateway:8080"}
-    research_state_enabled = bool(
-        isinstance(research_state, dict) and research_state.get("enabled")
-    )
-    research_state_url = "http://research-state:8079"
-    if research_state_enabled:
-        main_depends["research-state"] = {"condition": "service_healthy"}
-        main_environment["DUNGENESS_RESEARCH_STATE_URL"] = research_state_url
-    knowledge_base_enabled = isinstance(knowledge_base, dict)
-    knowledge_base_url = "http://knowledge-base:8078"
-    knowledge_base_behavior_feedback = (
-        {
-            "enabled": True,
-            "mode": "shadow",
-            "minimum_improvement": 0,
-            "kb_attribution_window_evaluations": 1,
-            "no_progress_evaluations": 3,
-            "expose_pre_stick_counter": True,
-            "baseline_score": baseline_score,
-            **(
-                knowledge_base.get("behavior_feedback", {})
-                if isinstance(knowledge_base, dict)
-                and isinstance(
-                    knowledge_base.get("behavior_feedback"), dict
-                )
-                else {}
-            ),
-        }
-        if knowledge_base_enabled
-        else {}
-    )
-    if knowledge_base_enabled:
-        main_depends["knowledge-base"] = {"condition": "service_healthy"}
-        main_environment["DUNGENESS_KNOWLEDGE_BASE_URL"] = knowledge_base_url
-        interface = knowledge_base.get("interface")
-        if isinstance(interface, dict):
-            operations = interface.get("operations")
-            if isinstance(operations, list) and all(
-                isinstance(operation, str) for operation in operations
-            ):
-                main_environment[
-                    "DUNGENESS_KNOWLEDGE_BASE_OPERATIONS"
-                ] = ",".join(operations)
     if agent_timeout_sec is not None:
         main_environment["DUNGENESS_AGENT_TIMEOUT_SEC"] = str(agent_timeout_sec)
     main_volumes: list[str] = []
@@ -3320,8 +2245,8 @@ def build_compose(
                 "HTTP_PROXY": proxy_url,
                 "HTTPS_PROXY": proxy_url,
                 "NO_PROXY": (
-                    "gateway,dev-scorer,eval-sidecar,knowledge-base,"
-                    "research-state,localhost,127.0.0.1"
+                    "gateway,dev-scorer,eval-sidecar,"
+                    "localhost,127.0.0.1"
                 ),
             }
         )
@@ -3399,11 +2324,6 @@ def build_compose(
                     # request body for prompt-bias debugging. Default off.
                     "TESTBED_CAPTURE_PROMPTS": "${TESTBED_CAPTURE_PROMPTS:-}",
                     "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
-                    **(
-                        {"DUNGENESS_RESEARCH_STATE_URL": research_state_url}
-                        if research_state_enabled
-                        else {}
-                    ),
                 },
                 "healthcheck": {
                     "test": [
@@ -3475,7 +2395,10 @@ def build_compose(
             if api_provider in providers:
                 gateway_environment[key] = "${TESTBED_" + key + ":?provider access required}"
         if "openai-chatgpt" in providers:
-            # Short-lived access is mounted only into the trusted gateway.
+            # Run the trusted gateway as the invoking host user so a private
+            # 0600 credential remains readable through its read-only bind mount.
+            # The submitted agent receives neither this mount nor the credential.
+            document["services"]["gateway"]["user"] = f"{os.geteuid()}:{os.getegid()}"
             gateway_environment["DUNGENESS_CHATGPT_AUTH_FILE"] = "/run/dungeness/auth.json"
             document["services"]["gateway"]["volumes"].append(
                 "${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:/run/dungeness/auth.json:ro")
@@ -3512,121 +2435,6 @@ def build_compose(
             },
             "networks": ["agent_internal", "external_egress"],
         }
-    if research_state_enabled:
-        if agent_timeout_sec is None:
-            raise ValueError(
-                "agent_timeout_sec is required when research state is enabled"
-            )
-        controls = json.loads(json.dumps(research_state["controls"]))
-        controls["web_search"]["global_limit"] = budget["web"]["searches"]
-        evaluation_limit = (
-            dev_scorer["submissions"]
-            if dev_scorer is not None
-            else budget.get("evaluation", {}).get("submissions", 0)
-        )
-        if not isinstance(evaluation_limit, int) or evaluation_limit < 1:
-            raise ValueError(
-                "an evaluation submission budget is required when research state "
-                "is enabled"
-            )
-        controls["evaluation"]["global_limit"] = evaluation_limit
-        controller_config = {
-            "run_id": run_id,
-            "profile": research_state["profile"],
-            "profile_sha256": research_state["profile_sha256"],
-            "controls": controls,
-            "safeguards": research_state["safeguards"],
-            "metric_direction": metric_direction,
-            "agent_timeout_sec": agent_timeout_sec,
-            "model_budget": {
-                "total_tokens": budget["model"]["total_tokens"],
-                "normalized_usd": max_usd,
-            },
-            "kb_behavior_feedback": (
-                knowledge_base_behavior_feedback
-                if knowledge_base_enabled
-                else {"enabled": False, "mode": "off"}
-            ),
-        }
-        document["services"]["research-state"] = {
-            "build": {"context": "./research-state"},
-            "depends_on": {
-                "gateway": {"condition": "service_healthy"},
-            },
-            "environment": {
-                "TESTBED_RUN_ID": run_id,
-                "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
-                "DUNGENESS_EVENT_URL": "http://gateway:8080/internal/events",
-                "RESEARCH_STATE_CONFIG_JSON": json.dumps(
-                    controller_config,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            },
-            "healthcheck": {
-                "test": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    (
-                        "import urllib.request; "
-                        "urllib.request.urlopen("
-                        "'http://localhost:8079/healthz', timeout=2)"
-                    ),
-                ],
-                "interval": "2s",
-                "timeout": "5s",
-                "retries": 15,
-                "start_period": "2s",
-            },
-            "networks": ["agent_internal"],
-            "volumes": [usage_mount],
-        }
-    if knowledge_base_enabled:
-        knowledge_base_depends: dict[str, Any] = {
-            "gateway": {"condition": "service_healthy"},
-        }
-        if research_state_enabled:
-            knowledge_base_depends["research-state"] = {
-                "condition": "service_healthy"
-            }
-        document["services"]["knowledge-base"] = {
-            "build": {"context": "./knowledge-base"},
-            "depends_on": knowledge_base_depends,
-            "environment": {
-                "TESTBED_RUN_ID": run_id,
-                "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
-                "DUNGENESS_EVENT_URL": "http://gateway:8080/internal/events",
-                "KNOWLEDGE_BASE_BEHAVIOR_FEEDBACK_CONFIG_JSON": json.dumps(
-                    knowledge_base_behavior_feedback,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                **(
-                    {"DUNGENESS_RESEARCH_STATE_URL": research_state_url}
-                    if research_state_enabled
-                    else {}
-                ),
-            },
-            "healthcheck": {
-                "test": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    (
-                        "import urllib.request; "
-                        "urllib.request.urlopen("
-                        "'http://localhost:8078/healthz', timeout=2)"
-                    ),
-                ],
-                "interval": "2s",
-                "timeout": "5s",
-                "retries": 15,
-                "start_period": "2s",
-            },
-            "networks": ["agent_internal"],
-            "volumes": [usage_mount],
-        }
     if dev_scorer is not None:
         # The grader image in serve mode, on the internal network only (no
         # egress). world-map's holds only the dev slice; ecdsa-fail's runs the
@@ -3637,11 +2445,6 @@ def build_compose(
             "DEV_SCORER_PORT": str(dev_scorer["port"]),
             "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
             "DUNGENESS_EVENT_URL": "http://gateway:8080/internal/events",
-            **(
-                {"DUNGENESS_RESEARCH_STATE_URL": research_state_url}
-                if research_state_enabled
-                else {}
-            ),
         }
         if dev_scorer.get("score_cases"):
             environment["SCORE_CASES"] = dev_scorer["score_cases"]
@@ -3961,11 +2764,6 @@ def build_task(
     run_spec_path = None
     run_spec_manifest = None
     run_spec_ref = None
-    knowledge_base_preload = None
-    resolved_knowledge_base = None
-    knowledge_base_prompt_profile_path = None
-    knowledge_base_prompt_profile = None
-    resolved_knowledge_base_prompt_profile = None
     scaffold = None
     (
         web_search_profile_path,
@@ -3977,11 +2775,6 @@ def build_task(
         evaluation_profile,
         resolved_evaluation_profile,
     ) = resolve_evaluation_profile(None)
-    (
-        research_state_profile_path,
-        research_state_profile,
-        resolved_research_state,
-    ) = resolve_research_state(None)
     continuation_policy = {
         "max_resumes": 0,
         "min_remaining_sec": 600,
@@ -4082,29 +2875,21 @@ def build_task(
         ) = resolve_evaluation_profile(
             run_spec_manifest.get("evaluation")
         )
-        (
-            research_state_profile_path,
-            research_state_profile,
-            resolved_research_state,
-        ) = resolve_research_state(
-            run_spec_manifest.get("research_state")
-        )
+        if "research_state" in run_spec_manifest:
+            raise ValueError(
+                "research_state has been removed; put research strategy in the harness. "
+                "Replay historical experiments at their original revision."
+            )
         authored_initialization = run_spec_manifest.get("initialization", {})
         if not isinstance(authored_initialization, dict):
             raise ValueError(
                 f"run spec initialization must be a mapping in {run_spec_path}"
             )
-        authored_knowledge_base = authored_initialization.get("knowledge_base")
-        knowledge_base_preload = resolve_knowledge_base_preload(
-            authored_knowledge_base
-        )
-        if isinstance(authored_knowledge_base, dict):
-            (
-                knowledge_base_prompt_profile_path,
-                knowledge_base_prompt_profile,
-                resolved_knowledge_base_prompt_profile,
-            ) = resolve_knowledge_base_prompt_profile(
-                authored_knowledge_base.get("prompt_profile")
+        if "knowledge_base" in authored_initialization:
+            raise ValueError(
+                "initialization.knowledge_base has been removed; bundle knowledge, "
+                "retrieval tools and prompts in the agent image. Replay historical "
+                "runs at their original revision."
             )
         authored_timeout = authored_runtime.get("agent_timeout_sec")
         if authored_timeout is not None and (
@@ -4499,16 +3284,6 @@ def build_task(
                         destination.unlink()
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_text("")
-        if knowledge_base_preload is not None:
-            knowledge_base_context = task_root / "environment/knowledge-base"
-            shutil.copytree(
-                KNOWLEDGE_BASE_SERVICE_ROOT,
-                knowledge_base_context,
-            )
-            resolved_knowledge_base = materialize_knowledge_base_service(
-                knowledge_base_preload,
-                knowledge_base_context,
-            )
         instruction = task_dir.joinpath(*instruction_name.parts).read_text(
             encoding="utf-8"
         )
@@ -4528,32 +3303,6 @@ def build_task(
         evaluation_available = (
             eval_materials is not None or sidecar_mode == "full-benchmark"
         )
-        if resolved_research_state.get("enabled"):
-            evaluation_control = resolved_research_state["controls"]["evaluation"]
-            if (
-                evaluation_control["mode"] != "observe"
-                and not evaluation_available
-            ):
-                raise ValueError(
-                    "research-state evaluation control requires an evaluation "
-                    "sidecar"
-                )
-            harbor_configuration = agent.get("harbor")
-            is_codex = (
-                isinstance(harbor_configuration, dict)
-                and harbor_configuration.get("agent") == "codex"
-            )
-            if (
-                not is_codex
-                and any(
-                    control["mode"] == "enforce_minimum"
-                    for control in resolved_research_state["controls"].values()
-                )
-            ):
-                raise ValueError(
-                    "research-state enforce_minimum currently requires a Codex "
-                    "agent with Stop-hook support"
-                )
         runtime_notice = (
             continuation_notice
             + build_workspace_notice(
@@ -4566,10 +3315,6 @@ def build_task(
                 if resolved_web_search["mode"] == "disabled"
                 else build_web_tool_notice(web_cutoff)
             )
-            + build_knowledge_base_notice(
-                knowledge_base_prompt_profile,
-                resolved_knowledge_base,
-            )
         )
         # Render evaluation as its own profile-backed prompt section whenever an
         # eval sidecar will be running.
@@ -4581,9 +3326,6 @@ def build_task(
                 direction,
             )
         runtime_notice += build_timebox_notice(agent_res["timeout_sec"])
-        runtime_notice += build_research_state_notice(
-            resolved_research_state
-        )
         if resolved_web_search["mode"] != "disabled":
             runtime_notice += build_experimental_web_notice(web_search_profile)
         rendered_instruction = instruction.rstrip() + runtime_notice
@@ -4606,26 +3348,13 @@ def build_task(
             CANDIDATE_STATE_PATH,
             task_root / "environment/candidate_state.py",
         )
-        shutil.copy2(
-            KNOWLEDGE_BASE_CLIENT_PATH,
-            task_root / "environment/knowledge_base.py",
-        )
         harbor_agent = agent.get("harbor")
         if isinstance(harbor_agent, dict) and harbor_agent.get("agent") == "codex":
-            shutil.copy2(
-                RESEARCH_STATE_HOOK_PATH,
-                task_root / "environment/research_state_hook.py",
-            )
             shutil.copy2(
                 RESEARCH_WORKER_PATH,
                 task_root / "environment/research_worker.py",
             )
         shutil.copytree(GATEWAY_ROOT, task_root / "environment/gateway")
-        if resolved_research_state.get("enabled"):
-            shutil.copytree(
-                RESEARCH_STATE_SERVICE_ROOT,
-                task_root / "environment/research-state",
-            )
         if agent_provider(agent) == "openai-chatgpt":
             shutil.copytree(
                 CODEX_SUBSCRIPTION_PROXY_ROOT,
@@ -4689,8 +3418,6 @@ def build_task(
             command_policy=({**agent["model_access"], "models": command_models(agent)}
                             if command_execution(agent) is not None else None),
             agent_timeout_sec=agent_res["timeout_sec"],
-            research_state=resolved_research_state,
-            knowledge_base=resolved_knowledge_base,
             problem_service=problem_service,
             metric_direction=direction,
             baseline_score=checkpoint_reference_score,
@@ -4936,7 +3663,6 @@ def build_task(
                     "mode": initialization_mode
                 },
                 "web_search": resolved_web_search,
-                "research_state": resolved_research_state,
                 "resume": resume_meta,
                 "limits": {
                     "max_usd": effective_max_usd,
@@ -4976,55 +3702,6 @@ def build_task(
                 ),
                 "progressive_validation_shots": list(scaffold["shots"]),
             }
-        if (
-            knowledge_base_preload is not None
-            and resolved_knowledge_base is not None
-        ):
-            configuration["sources"]["knowledge_base"] = {
-                "ref": knowledge_base_preload["ref"],
-                "manifest": source_snapshot(
-                    knowledge_base_preload["manifest_path"],
-                    knowledge_base_preload["manifest"],
-                ),
-                "source_sha256": knowledge_base_preload["source_sha256"],
-                "files": {
-                    relative: file_snapshot(path)
-                    for relative, path in knowledge_base_preload["files"].items()
-                },
-                "service": source_snapshot(
-                    KNOWLEDGE_BASE_SERVICE_ROOT / "service.yaml",
-                    load_yaml(KNOWLEDGE_BASE_SERVICE_ROOT / "service.yaml"),
-                ),
-                "tool": file_snapshot(KNOWLEDGE_BASE_CLIENT_PATH),
-            }
-            configuration["resolved"]["initialization"]["knowledge_base"] = (
-                {
-                    **resolved_knowledge_base,
-                    "prompt_profile": resolved_knowledge_base_prompt_profile,
-                }
-            )
-        if (
-            knowledge_base_prompt_profile_path is not None
-            and knowledge_base_prompt_profile is not None
-        ):
-            configuration["sources"]["knowledge_base_prompt_profile"] = (
-                source_snapshot(
-                    knowledge_base_prompt_profile_path,
-                    knowledge_base_prompt_profile,
-                )
-            )
-        if (
-            research_state_profile_path is not None
-            and research_state_profile is not None
-        ):
-            configuration["sources"]["research_state_profile"] = source_snapshot(
-                research_state_profile_path,
-                research_state_profile,
-            )
-            configuration["sources"]["research_state_service"] = source_snapshot(
-                RESEARCH_STATE_SERVICE_ROOT / "service.yaml",
-                load_yaml(RESEARCH_STATE_SERVICE_ROOT / "service.yaml"),
-            )
         if model_adapter is not None:
             adapter_path, adapter_manifest, implementation_path = model_adapter
             configuration["sources"]["model_adapter"] = {
@@ -5066,35 +3743,6 @@ def build_task(
             resume=resume,
             configuration=configuration,
             run_spec_ref=run_spec_ref,
-            knowledge_base_ref=(
-                resolved_knowledge_base["ref"]
-                if resolved_knowledge_base is not None
-                else None
-            ),
-            knowledge_base_initialization=(
-                {
-                    "access_mode": resolved_knowledge_base["access_mode"],
-                    "service_url": resolved_knowledge_base["service_url"],
-                    "layers": resolved_knowledge_base["layers"],
-                    "entrypoint": resolved_knowledge_base["entrypoint"],
-                    "page_count": resolved_knowledge_base.get("page_count"),
-                    "documents": resolved_knowledge_base.get("documents", []),
-                    "document_count": resolved_knowledge_base.get(
-                        "document_count"
-                    ),
-                    "total_page_count": resolved_knowledge_base.get(
-                        "total_page_count"
-                    ),
-                    "interface": resolved_knowledge_base["interface"],
-                    "prompt_profile": resolved_knowledge_base_prompt_profile,
-                    "source_sha256": resolved_knowledge_base["source_sha256"],
-                    "injected_sha256": resolved_knowledge_base[
-                        "injected_sha256"
-                    ],
-                }
-                if resolved_knowledge_base is not None
-                else None
-            ),
         )
         (task_root / "resolved-run.json").write_text(
             json.dumps(resolved_record, indent=2, sort_keys=True) + "\n",

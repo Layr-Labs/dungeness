@@ -36,7 +36,8 @@ class RuntimeDistributionTests(unittest.TestCase):
         # Even accidentally committed private/research files cannot enter this bundle.
         for path in (
             ".env", "services/gateway/.env", "runs/users/test/result.json",
-            "knowledge-bases/users/test/paper.pdf", "run-specs/users/test/run.yaml",
+            "knowledge-bases/users/test/paper.pdf", "knowledge-base-prompts/system/test.yaml",
+            "run-specs/users/test/run.yaml",
             "tasks/users/test/task.yaml", "experiments/users/test/result.md",
         ):
             self.write(path, "synthetic-private-data\n")

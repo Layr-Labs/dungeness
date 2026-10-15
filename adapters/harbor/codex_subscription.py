@@ -14,7 +14,6 @@ from harbor.models.trial.paths import EnvironmentPaths
 
 from codex_gateway import (
     build_instrumented_codex_command,
-    install_research_state_hooks_command,
     prebaked_codex_is_ready,
 )
 
@@ -116,9 +115,6 @@ class CodexSubscription(Codex):
                 '> "$CODEX_HOME/config.toml"',
                 '>> "$CODEX_HOME/config.toml"',
             )
-        setup_command += "\n" + install_research_state_hooks_command(
-            codex_home
-        )
         await self.exec_as_agent(environment, command=setup_command, env=env)
 
         model = self.model_name.split("/")[-1]

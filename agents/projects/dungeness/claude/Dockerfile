@@ -35,14 +35,12 @@ COPY web_client.py /usr/local/bin/web
 COPY evaluate.py /usr/local/bin/evaluate
 COPY run_status.py /usr/local/bin/run-status
 COPY candidate_state.py /usr/local/bin/candidate-state
-COPY knowledge_base.py /usr/local/bin/knowledge-base
 
 # Pre-fetch crate deps if the workspace is a cargo project (ecdsa), so the agent
 # can `cargo build --offline` at runtime; make CARGO_HOME writable for the agent.
 RUN chmod 0555 /usr/local/bin/web /usr/local/bin/evaluate \
       /usr/local/bin/run-status \
       /usr/local/bin/candidate-state \
-      /usr/local/bin/knowledge-base \
     && if [ -f /workspace/repo/Cargo.toml ]; then \
          (cd /workspace/repo && CARGO_NET_OFFLINE=false cargo fetch) \
          && chmod -R a+rwX /usr/local/cargo; \

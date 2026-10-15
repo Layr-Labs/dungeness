@@ -24,7 +24,6 @@ from gateway_models import (
     extract_reasoning_summaries,
     extract_usage,
     extract_visible_reasoning_events,
-    inject_research_state,
     is_sse_body,
     prompt_profile,
     provider_auth_headers,
@@ -105,113 +104,6 @@ class Gateway:
             timeout=httpx.Timeout(600.0, connect=30.0)
         )
 
-    async def notify_research_state(
-        self,
-        path: str,
-        event: dict[str, Any],
-    ) -> None:
-        """Deliver one authoritative event without breaking the tool result."""
-
-        base = os.environ.get("DUNGENESS_RESEARCH_STATE_URL")
-        if not base:
-            return
-        delivery_status = "error"
-        error_type = None
-        try:
-            response = await self.client.post(
-                base.rstrip("/") + path,
-                json=event,
-                timeout=5,
-            )
-            response.raise_for_status()
-            delivery_status = "success"
-        except (httpx.HTTPError, ValueError) as error:
-            error_type = type(error).__name__
-            log_event(
-                "research_state_delivery_failed",
-                run_id=self.run_id,
-                path=path,
-                event_id=event.get("event_id"),
-                error_type=error_type,
-            )
-        finally:
-            self.ledger.append(
-                "research-state-delivery",
-                {
-                    "path": path,
-                    "event_id": event.get("event_id"),
-                    "status": delivery_status,
-                    "error_type": error_type,
-                },
-            )
-
-    def model_usage_event(self, event_id: str) -> dict[str, Any]:
-        status = self.ledger.status()
-        usage = status["usage"]
-        return {
-            "event_id": event_id,
-            "model_requests": usage["model_requests"],
-            "model_tokens": usage["model_tokens"],
-            "normalized_usd": usage["normalized_usd"],
-        }
-
-    def schedule_model_usage_notification(self, request_id: str) -> None:
-        if not os.environ.get("DUNGENESS_RESEARCH_STATE_URL"):
-            return
-        task = asyncio.ensure_future(
-            self.notify_research_state(
-                "/events/model-usage",
-                self.model_usage_event(f"model-usage:after:{request_id}"),
-            )
-        )
-        BACKGROUND_TASKS.add(task)
-        task.add_done_callback(BACKGROUND_TASKS.discard)
-
-    async def research_state_view_for_request(
-        self,
-        request_id: str,
-    ) -> dict[str, Any] | None:
-        """Refresh usage and fetch the state injected into this model call."""
-
-        base = os.environ.get("DUNGENESS_RESEARCH_STATE_URL")
-        if not base:
-            return None
-        await self.notify_research_state(
-            "/events/model-usage",
-            self.model_usage_event(f"model-usage:before:{request_id}"),
-        )
-        delivery_status = "error"
-        error_type = None
-        try:
-            response = await self.client.get(
-                base.rstrip("/") + "/model-view",
-                timeout=5,
-            )
-            response.raise_for_status()
-            view = response.json()
-            if not isinstance(view, dict):
-                raise ValueError("research-state model view must be an object")
-            delivery_status = "success"
-            return view
-        except (httpx.HTTPError, ValueError) as error:
-            error_type = type(error).__name__
-            log_event(
-                "research_state_view_failed",
-                run_id=self.run_id,
-                request_id=request_id,
-                error_type=error_type,
-            )
-            return None
-        finally:
-            self.ledger.append(
-                "research-state-delivery",
-                {
-                    "path": "/model-view",
-                    "request_id": request_id,
-                    "status": delivery_status,
-                    "error_type": error_type,
-                },
-            )
 
     async def search(
         self,
@@ -335,14 +227,6 @@ class Gateway:
                     "query": bounded_text(query),
                     "duration_ms": duration_ms,
                     "status": status,
-                },
-            )
-            await self.notify_research_state(
-                "/events/web-search",
-                {
-                    "event_id": f"web-search:{request_id}",
-                    "query": bounded_text(query),
-                    "status": "success" if status == "success" else "failed",
                 },
             )
             if provider_called:
@@ -563,7 +447,6 @@ class Gateway:
                 normalized_usd=usd,
                 billed_usd=billed_usd,
             )
-            self.schedule_model_usage_notification(request_id)
             response_documents = decode_response_documents(
                 response_body, content_type
             )
@@ -706,12 +589,6 @@ class Gateway:
                     # OpenRouter returns provider-visible reasoning by default,
                     # but make that invariant explicit for research traces.
                     reasoning["exclude"] = False
-            if normalized == "responses":
-                state_view = await self.research_state_view_for_request(
-                    request_id
-                )
-                if state_view is not None:
-                    payload = inject_research_state(payload, state_view)
             body = json.dumps(payload, separators=(",", ":")).encode()
             # Record how this agent composed the prompt (profile always; full
             # body only under TESTBED_CAPTURE_PROMPTS) -- lets us measure
@@ -914,7 +791,6 @@ class Gateway:
                 normalized_usd=usd,
                 billed_usd=billed_usd,
             )
-            self.schedule_model_usage_notification(request_id)
             duration_ms = round((time.monotonic() - started) * 1000)
             response_documents = decode_response_documents(
                 bytes(response_body), content_type
@@ -1011,10 +887,6 @@ class Gateway:
             payload = parsed_payload
             model = bounded_model_name(payload.get("model"))
             request_pricing = pricing_for_request(provider, model)
-            state_view = await self.research_state_view_for_request(request_id)
-            if state_view is not None:
-                payload = inject_research_state(payload, state_view)
-                body = json.dumps(payload, separators=(",", ":")).encode()
             capture_prompt(request_id, provider, normalized, model, body, payload)
             self.ledger.timeline(
                 {

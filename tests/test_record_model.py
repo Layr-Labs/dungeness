@@ -1432,16 +1432,8 @@ class RecordModelTests(unittest.TestCase):
             'base_url = "http://gateway:8080/model/kimi-code/v1"',
             config,
         )
-        hooks = codex_gateway.research_state_hooks_document()
-        self.assertIn('"PreToolUse"', hooks)
-        self.assertIn('"matcher": "^Bash$"', hooks)
-        self.assertIn("pre-tool-use", hooks)
-        install = codex_gateway.install_research_state_hooks_command(
-            "/tmp/codex-home"
-        )
-        self.assertIn("DUNGENESS_KNOWLEDGE_BASE_URL", install)
 
-    def test_ecdsa_fail_v2_has_number_only_known_result(self) -> None:
+    def test_ecdsa_fail_v2_statement_preserves_reviewed_contract(self) -> None:
         task_path = (
             REPOSITORY_ROOT / "tasks/users/bx/ecdsa-fail-v2/task.yaml"
         )
@@ -1454,8 +1446,9 @@ class RecordModelTests(unittest.TestCase):
         statement = (task_path.parent / task["instruction"]).read_text(
             encoding="utf-8"
         )
-        self.assertIn("1,480,849,785", statement)
-        self.assertIn("No implementation details are provided", statement)
+        self.assertNotIn("1,480,849,785", statement)
+        self.assertIn("point_add::build()", statement)
+        self.assertIn("9024", statement)
         self.assertNotIn("Kaliski", statement)
         self.assertNotIn("Karatsuba", statement)
 
@@ -2411,6 +2404,21 @@ class RecordModelTests(unittest.TestCase):
             )
             self.assertEqual(len(applied[0]["file"]["sha256"]), 64)
 
+    def test_retired_research_state_specs_fail_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.yaml"
+            write_run_spec(path)
+            path.write_text(path.read_text() + "research_state: {}\n")
+            with self.assertRaisesRegex(SystemExit, "research_state has been removed"):
+                cli.load_run_spec(str(path))
+            with patch.object(build, "checkout") as checkout:
+                with self.assertRaisesRegex(ValueError, "research_state has been removed"):
+                    build.build_task(
+                        "ecdsa-fail", "legacy-spec", namespace="users/bx",
+                        run_spec=str(path),
+                    )
+                checkout.assert_not_called()
+
     def test_renderer_embeds_complete_configuration_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2419,22 +2427,6 @@ class RecordModelTests(unittest.TestCase):
             rendered_path = None
             run_spec_path = root / "run-spec.yaml"
             write_run_spec(run_spec_path)
-            run_spec_path.write_text(
-                run_spec_path.read_text(encoding="utf-8").replace(
-                    "initialization:\n  mode: checkpoint\n",
-                    "initialization:\n"
-                    "  mode: checkpoint\n"
-                    "  knowledge_base:\n"
-                    "    ref: knowledge-base:users/bx/contaminated/ecdsa-paper-kb-v1\n"
-                    "    prompt_profile: "
-                    "knowledge-base-prompt-profile:"
-                    "system/dungeness/ecdsa-paper-v1\n"
-                    "    layers:\n"
-                    "      - paper_knowledge_base\n",
-                ),
-                encoding="utf-8",
-            )
-
             def fake_checkout(_url: str, _commit: str, destination: Path) -> None:
                 destination.mkdir(parents=True)
                 if destination.name == "start":
@@ -2517,39 +2509,6 @@ class RecordModelTests(unittest.TestCase):
                     "run-spec:users/bx/ecdsa-fail-claude-1usd",
                 )
                 self.assertEqual(
-                    record["relations"]["knowledge_base"],
-                    "knowledge-base:users/bx/contaminated/ecdsa-paper-kb-v1",
-                )
-                self.assertEqual(
-                    record["data"]["initialization"]["knowledge_base"]["layers"],
-                    ["paper_knowledge_base"],
-                )
-                self.assertEqual(
-                    configuration["resolved"]["initialization"][
-                        "knowledge_base"
-                    ]["access_mode"],
-                    "sidecar",
-                )
-                self.assertEqual(
-                    configuration["resolved"]["initialization"][
-                        "knowledge_base"
-                    ]["prompt_profile"]["profile"],
-                    "knowledge-base-prompt-profile:"
-                    "system/dungeness/ecdsa-paper-v1",
-                )
-                self.assertEqual(
-                    configuration["sources"]["knowledge_base"]["manifest"][
-                        "document"
-                    ]["type"],
-                    "knowledge-base",
-                )
-                self.assertEqual(
-                    configuration["sources"]["knowledge_base_prompt_profile"][
-                        "document"
-                    ]["type"],
-                    "knowledge-base-prompt-profile",
-                )
-                self.assertEqual(
                     configuration["resolved"]["resources"]["agent"]["memory_mb"],
                     4096,
                 )
@@ -2594,37 +2553,11 @@ class RecordModelTests(unittest.TestCase):
                     ),
                     1,
                 )
-                self.assertEqual(
-                    main_environment["DUNGENESS_KNOWLEDGE_BASE_URL"],
-                    "http://knowledge-base:8078",
-                )
                 self.assertTrue(
                     (rendered_path / "environment/run_status.py").is_file()
                 )
                 self.assertTrue(
                     (rendered_path / "environment/candidate_state.py").is_file()
-                )
-                self.assertTrue(
-                    (rendered_path / "environment/knowledge_base.py").is_file()
-                )
-                self.assertTrue(
-                    (
-                        rendered_path
-                        / "environment/knowledge-base/content/index.md"
-                    ).is_file()
-                )
-                self.assertTrue(
-                    (
-                        rendered_path
-                        / "environment/knowledge-base/content/"
-                        ".dungeness-knowledge-base.json"
-                    ).is_file()
-                )
-                self.assertFalse(
-                    (
-                        rendered_path
-                        / "environment/workspace/knowledge-base"
-                    ).exists()
                 )
                 usage_volume = (
                     configuration["generated"]["docker_compose"]["services"]
@@ -2635,6 +2568,12 @@ class RecordModelTests(unittest.TestCase):
                     "/runs/users/bx/configuration-test/usage:",
                     usage_volume,
                 )
+                self.assertNotIn("knowledge_base", record["relations"])
+                self.assertNotIn("knowledge_base", configuration["sources"])
+                self.assertNotIn("knowledge-base", configuration["generated"]["docker_compose"]["services"])
+                self.assertNotIn("DUNGENESS_KNOWLEDGE_BASE_URL", main_environment)
+                self.assertFalse((rendered_path / "environment/knowledge_base.py").exists())
+                self.assertNotIn("knowledge-base read", configuration["generated"]["instruction"])
                 self.assertIn(
                     "## Stable workspace and operating rules",
                     configuration["generated"]["instruction"],
@@ -2643,15 +2582,7 @@ class RecordModelTests(unittest.TestCase):
                     "## Stable web-tool contract",
                     configuration["generated"]["instruction"],
                 )
-                self.assertIn(
-                    "`knowledge-base read index.md`",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
-                    "## ECDSA paper knowledge-base inspiration",
-                    configuration["generated"]["instruction"],
-                )
-                self.assertIn(
+                self.assertNotIn(
                     "three consecutive valid",
                     configuration["generated"]["instruction"],
                 )

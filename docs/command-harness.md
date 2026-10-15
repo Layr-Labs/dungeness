@@ -3,7 +3,9 @@
 `dungeness-command-v1` runs arbitrary installed software inside Harbor's
 container through a trusted adapter. The harness does not choose a host Python
 import, and need not identify as Codex, Claude Code, Pi, or another built-in agent.
-Existing agent descriptors retain their original behavior.
+Research strategy, memory and completion decisions belong to the harness.
+The former `research_state` controller is removed; old specs that request it
+fail explicitly. Historical experiments must use their original revision.
 
 An agent descriptor has the ordinary identity fields, `execution_mode: installed`,
 a Dockerfile, and:
@@ -16,6 +18,13 @@ execution:
 
 The Dockerfile needs Python 3 for the runner. Install all dependencies at build
 time; the execution container has no direct internet route.
+
+Bundle papers, local databases, indexes and retrieval software in the harness
+image, using any layout or file format your agent supports. Dungeness does not
+create a knowledge service, inject retrieval instructions or intercept file
+reads. Child processes can provide the agent's own local services. Remove the
+old `initialization.knowledge_base` option; see the
+[migration guide](../doc/knowledge-base-preload.md).
 
 The run-spec selects access independently of the harness:
 

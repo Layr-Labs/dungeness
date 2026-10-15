@@ -17,14 +17,14 @@ FILES = {
     "dungeness", "README.md", "DESIGN.md", ".env.example", ".gitignore",
     ".gitattributes", "LICENSE", "LICENSE.md",
     "docs/command-harness.md", "docs/runtime-distribution.md", "docs/cli-reference.md",
-    "script/export_runtime.py",
+    "script/export_runtime.py", "doc/knowledge-base-preload.md",
     "watcher/render_gateway_transcript.py", "watcher/serve_gateway_transcripts.py",
 }
 PREFIXES = (
     "src/", "adapters/", "agents/common/", "agents/projects/dungeness/",
     "services/", "policies/", "checkpoints/", "problems/", "verifiers/",
-    "evaluation/", "web-search/", "research-state/", "scaffolds/",
-    "knowledge-base-prompts/", "tasks/projects/dungeness/",
+    "evaluation/", "web-search/", "scaffolds/",
+    "tasks/projects/dungeness/",
     "run-specs/projects/dungeness/", "assets/",
 )
 

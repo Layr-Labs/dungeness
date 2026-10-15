@@ -155,7 +155,7 @@ has a schema version, source, event kind, run-local sequence number,
 - web-search queries and returned results; and
 - web-fetch URLs and returned contents;
 - evaluator scores with the cumulative normalized USD at that point; and
-- knowledge-base and research-state events.
+- retained historical knowledge-base and research-state records, when present.
 
 Trusted sidecars submit events to the gateway's authenticated internal
 collector; the agent container cannot read the collector token. `summary.json`
@@ -707,43 +707,17 @@ and captured in run provenance. It controls how the agent is instructed to use
 `evaluate`; the task still determines whether an evaluation sidecar exists,
 which benchmark it runs, and the evaluation budget.
 
-An optional run-scoped research-state controller can expose and enforce
-independent web-search and authoritative-evaluation effort assignments:
+Research strategy and evaluation cadence belong to the harness. The former
+`research_state` run-spec option has been removed; new runs reject it with a
+migration message. The gateway does not inject research-effort prompts, and
+Codex completion is not gated on minimum search or evaluation counts. Replay
+historical experiments using their original revision rather than dropping an
+experimental policy silently.
 
-```yaml
-research_state:
-  profile: research-state-profile:system/dungeness/two-knob-v1
-  controls:
-    web_search:
-      mode: prompt_only
-      level: medium
-    evaluation:
-      mode: enforce_minimum
-      level: high
-```
-
-Supported modes are `observe`, `prompt_only`, and `enforce_minimum`. Prompt-only
-and enforced runs render the same initial assignment; enforced Codex runs also
-use a generated Stop hook to continue an early completion attempt. A separate
-no-egress Python service maintains authoritative distinct-query and
-distinct-candidate counts in memory, writes an append-only event audit and a
-stable summary under the run's `usage/` directory, and extends `run-status`
-with the compact model view. Omitting `research_state` preserves existing run
-behavior and does not create the service or hooks.
-
-Runs with `initialization.knowledge_base.access: sidecar` also receive an
-isolated, no-egress knowledge-base service. Existing curated-corpus manifests
-default to search, read, traversal, and concrete inspiration recording. A
-manifest may instead declare a restricted `interface.operations` list.
-Raw-paper treatments expose only `knowledge-base read <paper.pdf>`; each
-original PDF is copied unchanged and converted to layout-preserving text only
-when read. Single-paper and multi-paper manifests can provide page counts so a
-prompt profile renders deterministic PDF windows covering the complete source
-set. These windows avoid shell-output truncation without creating semantic
-chunks, an index, or companion material. The client advertises only the
-configured operations, the sidecar enforces the same allowlist, and usage
-events still flow to the gateway. The corpus is not copied into the candidate
-workspace, and KB use is not a completion quota.
+Knowledge, memory and retrieval belong to the agent image. The knowledge-base
+service, command, prompt profiles and Codex hooks have been removed. New run
+specs reject `initialization.knowledge_base`; move its files and retrieval code
+into the harness. See [migration](../doc/knowledge-base-preload.md).
 
 When a run spec omits `namespace`, its identity namespace is inferred from the
 configured default. The resulting run namespace is resolved independently

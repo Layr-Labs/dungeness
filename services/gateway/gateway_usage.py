@@ -25,10 +25,6 @@ EVENT_TOKEN_FILENAME = ".event-token"
 MAX_INTERNAL_EVENT_BYTES = 1024 * 1024
 INTERNAL_EVENT_KINDS = {
     "evaluator": {"evaluation.completed", "evaluation.delivery"},
-    "knowledge-base": {
-        "knowledge_base.request",
-        "knowledge_base.inspiration",
-    },
 }
 _ACTIVE_LEDGER: Any = None
 
@@ -570,7 +566,6 @@ class UsageLedger:
 
     def append(self, stream: str, event: dict[str, Any]) -> None:
         kinds = {
-            "research-state-delivery": "research_state.delivery",
             "web-rejections": "web.rejection",
         }
         if stream not in kinds:

@@ -55,6 +55,56 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await runtime.client.aclose()
 
+    async def test_chatgpt_gateway_private_auth_stream_and_transport_error(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+            "TESTBED_USAGE_DIR": temp,
+            "DUNGENESS_ALLOWED_MODELS": '[["openai-chatgpt","gpt-6-astra"]]',
+            "MAX_MODEL_REQUESTS": "20", "MAX_MODEL_TOKENS": "100000",
+            "DUNGENESS_CHATGPT_AUTH_FILE": str(Path(temp) / "auth.json"),
+        }):
+            auth = Path(temp) / "auth.json"
+            auth.write_text(json.dumps({"tokens": {"access_token": "private-test-token",
+                                                  "account_id": "private-account"}}))
+            auth.chmod(0o600)
+            runtime = Gateway()
+            await runtime.client.aclose()
+            calls = []
+
+            def upstream(request):
+                calls.append(request)
+                self.assertEqual(request.headers["authorization"], "Bearer private-test-token")
+                self.assertEqual(request.headers["chatgpt-account-id"], "private-account")
+                if len(calls) == 2:
+                    raise httpx.ConnectError("offline provider", request=request)
+                response = {"type": "response.completed", "response": {
+                    "usage": {"input_tokens": 100, "output_tokens": 10}, "output": []}}
+                class Stream(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        yield ("data: " + json.dumps(response) + "\n\n").encode()
+                # ChatGPT's backend labels its SSE as JSON.
+                return httpx.Response(200, stream=Stream(), headers={"content-type": "application/json"})
+
+            runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+            try:
+                with patch.object(gateway, "gateway", runtime):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app),
+                                                 base_url="http://gateway") as client:
+                        payload = {"model": "gpt-6-astra", "input": "solve", "stream": True}
+                        for expected in (200, 502, 429):
+                            reply = await client.post("/model/chatgpt/v1/responses", json=payload,
+                                headers={"authorization": "Bearer testbed", "chatgpt-account-id": "untrusted"})
+                            self.assertEqual(reply.status_code, expected, reply.text)
+                self.assertEqual(len(calls), 2)
+                receipts = [json.loads(line)["data"] for line in (Path(temp) / "events.jsonl").read_text().splitlines()
+                            if json.loads(line)["kind"] == "model.accounting"]
+                self.assertEqual(receipts[0]["accounting_method"], "gateway")
+                self.assertGreater(receipts[0]["normalized_usd"], 0)
+                self.assertIsNone(receipts[0]["billed_usd"])
+                self.assertEqual(receipts[1]["accounting_method"], "unavailable")
+                self.assertNotIn("private-test-token", (Path(temp) / "events.jsonl").read_text())
+            finally:
+                await runtime.client.aclose()
+
     def test_ambiguous_errors_never_become_zero_cost_receipts(self):
         from gateway_runtime import rejected_before_generation
         error = {"error": {"type": "invalid_request_error", "message": "invalid"}}

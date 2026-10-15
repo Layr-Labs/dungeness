@@ -690,8 +690,7 @@ Environment-file contents and real provider credentials are never recorded.
 sequence number. Every record includes its source, kind, observed and recorded
 timestamps, and event-specific data. The trusted gateway writes model inputs,
 provider-visible reasoning, model outputs, tool calls, web activity, evaluator
-scores, knowledge-base activity, research-state transitions, and operational
-events into this stream. Evaluator events also carry the cumulative normalized
+scores and operational events into this stream. Evaluator events also carry the cumulative normalized
 USD snapshot needed to plot score against cost without joining separate logs.
 `usage/summary.json` is an atomically refreshed derived cache, not another raw
 event stream.

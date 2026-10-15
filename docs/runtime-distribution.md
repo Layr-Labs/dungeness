@@ -68,3 +68,13 @@ historical runs and reports are retained in the separate private research archiv
 Authorized operators can recover an earlier run from that archive at its original
 revision, including any required LFS objects. Do not merge or push archive branches
 into this repository: doing so would reintroduce their historical records.
+
+## Retired research-state experiments
+
+The experimental research-state profiles, controller, prompt injection and
+completion gates have been removed. Their recipes are no longer active run
+specs. Recover them from the original source revision in the private research
+archive; the cleanup also retained an external backup of the removed files.
+The CLI and transcript viewer can still read historical records, but cannot
+launch the removed controller. Knowledge-base retrieval and its direct-read
+hook remain independent of that controller.

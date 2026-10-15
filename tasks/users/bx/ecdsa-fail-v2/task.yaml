@@ -32,13 +32,12 @@ policies:
   budget: policies/budget/default.yaml
 
 metadata:
-  description: "ecdsa-fail v2: minimize avg_Toffoli x peak_qubits with a known-achievable score"
+  description: "ecdsa-fail v2: minimize avg_Toffoli x peak_qubits; upstream statement reviewed 2026-10-14"
   keywords:
     - ecdsa-fail
     - quantum
     - reversible-circuit
     - optimization
-    - known-achievable-score
 
 evaluation:
   mode: full-benchmark

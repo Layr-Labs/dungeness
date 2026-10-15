@@ -51,7 +51,6 @@ RUN_SPEC_FIELDS = {
     "initialization",
     "web_search",
     "evaluation",
-    "research_state",
     "runtime",
 }
 LOCAL_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
@@ -71,9 +70,7 @@ CODEX_REASONING_SUMMARIES = {
 }
 WEB_SEARCH_PROFILES_ROOT = REPO_ROOT / "web-search"
 EVALUATION_PROFILES_ROOT = REPO_ROOT / "evaluation"
-RESEARCH_STATE_PROFILES_ROOT = REPO_ROOT / "research-state"
 KNOWLEDGE_BASES_ROOT = REPO_ROOT / "knowledge-bases"
-KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT = REPO_ROOT / "knowledge-base-prompts"
 
 
 def utc_now() -> str:
@@ -434,310 +431,6 @@ def validate_run_spec_evaluation(document: dict[str, object]) -> None:
         raise SystemExit(f"invalid evaluation profile: {profile_ref}")
 
 
-def validate_run_spec_research_state(document: dict[str, object]) -> None:
-    if "research_state" not in document:
-        return
-    research_state = document["research_state"]
-    if not isinstance(research_state, dict):
-        raise SystemExit("run spec research_state must be a mapping")
-    unknown = sorted(set(research_state) - {"profile", "controls"})
-    if unknown:
-        raise SystemExit(
-            "unknown run spec research_state fields: " + ", ".join(unknown)
-        )
-    profile_ref = research_state.get("profile")
-    if not isinstance(profile_ref, str) or not profile_ref.startswith(
-        "research-state-profile:"
-    ):
-        raise SystemExit(
-            "run spec research_state.profile must be a fully qualified "
-            "research-state-profile reference"
-        )
-    raw_ref = profile_ref.removeprefix("research-state-profile:")
-    namespace_value, separator, local_id = raw_ref.rpartition("/")
-    if (
-        not separator
-        or not NAMESPACE_RE.fullmatch(namespace_value)
-        or not LOCAL_ID_RE.fullmatch(local_id)
-    ):
-        raise SystemExit(
-            "research-state-profile reference must be "
-            "research-state-profile:<namespace>/<id>"
-        )
-    profile_path = (
-        RESEARCH_STATE_PROFILES_ROOT
-        / Path(*namespace_value.split("/"))
-        / f"{local_id}.yaml"
-    )
-    if not profile_path.is_file():
-        raise SystemExit(f"research-state profile does not exist: {profile_ref}")
-    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(profile, dict)
-        or profile.get("schema_version") != 1
-        or profile.get("type") != "research-state-profile"
-        or profile.get("namespace") != namespace_value
-        or profile.get("id") != local_id
-        or not isinstance(profile.get("controls"), dict)
-        or not isinstance(profile.get("safeguards"), dict)
-    ):
-        raise SystemExit(f"invalid research-state profile: {profile_ref}")
-    controls = research_state.get("controls")
-    required_controls = {"web_search", "evaluation"}
-    allowed_controls = required_controls
-    if not isinstance(controls, dict):
-        raise SystemExit(
-            "run spec research_state.controls must be a mapping"
-        )
-    missing_controls = sorted(required_controls - set(controls))
-    unknown_controls = sorted(set(controls) - allowed_controls)
-    if missing_controls:
-        raise SystemExit(
-            "run spec research_state.controls must define "
-            + ", ".join(missing_controls)
-        )
-    if unknown_controls:
-        raise SystemExit(
-            "unknown run spec research_state controls: "
-            + ", ".join(unknown_controls)
-        )
-    for name, assignment in controls.items():
-        if not isinstance(assignment, dict):
-            raise SystemExit(
-                f"run spec research_state.controls.{name} must be a mapping"
-            )
-        unknown_assignment = sorted(set(assignment) - {"mode", "level"})
-        if unknown_assignment:
-            raise SystemExit(
-                f"unknown research_state.controls.{name} fields: "
-                + ", ".join(unknown_assignment)
-            )
-        if assignment.get("mode") not in {
-            "observe",
-            "prompt_only",
-            "enforce_minimum",
-        }:
-            raise SystemExit(
-                f"invalid research_state.controls.{name}.mode"
-            )
-        if assignment.get("level") not in {"low", "medium", "high"}:
-            raise SystemExit(
-                f"invalid research_state.controls.{name}.level"
-            )
-
-
-def validate_run_spec_knowledge_base(document: dict[str, object]) -> None:
-    initialization = document.get("initialization", {})
-    if not isinstance(initialization, dict):
-        raise SystemExit("run spec initialization must be a mapping")
-    value = initialization.get("knowledge_base")
-    if value is None:
-        return
-    if not isinstance(value, dict):
-        raise SystemExit(
-            "run spec initialization.knowledge_base must be a mapping"
-        )
-    unknown = sorted(
-        set(value)
-        - {"ref", "layers", "prompt_profile", "access", "behavior_feedback"}
-    )
-    if unknown:
-        raise SystemExit(
-            "unknown run spec initialization.knowledge_base fields: "
-            + ", ".join(unknown)
-        )
-    access = value.get("access", "sidecar")
-    if access != "sidecar":
-        raise SystemExit(
-            "run spec initialization.knowledge_base.access must be 'sidecar'"
-        )
-    reference = value.get("ref")
-    if not isinstance(reference, str):
-        raise SystemExit(
-            "run spec initialization.knowledge_base.ref must be a fully "
-            "qualified knowledge-base reference"
-        )
-    namespace, local_id = resolve_record_reference(
-        reference,
-        "knowledge-base",
-        qualified=True,
-    )
-    assert namespace is not None
-    validate_local_record_reference("knowledge-base", namespace, local_id)
-    path, manifest = load_qualified_record(reference, "knowledge-base")
-    interface = manifest.get("interface", {})
-    if not isinstance(interface, dict):
-        raise SystemExit(
-            f"knowledge-base interface must be a mapping: {path}"
-        )
-    unknown_interface = sorted(set(interface) - {"mode", "operations"})
-    if unknown_interface:
-        raise SystemExit(
-            f"unknown knowledge-base interface fields in {path}: "
-            + ", ".join(unknown_interface)
-        )
-    interface_mode = interface.get("mode", "curated-corpus")
-    if not isinstance(interface_mode, str) or not interface_mode:
-        raise SystemExit(
-            f"knowledge-base interface.mode must be text: {path}"
-        )
-    interface_operations = interface.get(
-        "operations",
-        ["status", "list", "search", "read", "neighbors", "inspire"],
-    )
-    allowed_operations = {
-        "status",
-        "list",
-        "search",
-        "read",
-        "neighbors",
-        "inspire",
-    }
-    if (
-        not isinstance(interface_operations, list)
-        or not interface_operations
-        or not all(
-            isinstance(operation, str)
-            for operation in interface_operations
-        )
-        or len(set(interface_operations)) != len(interface_operations)
-    ):
-        raise SystemExit(
-            "knowledge-base interface.operations must be a non-empty list of "
-            f"unique names: {path}"
-        )
-    unsupported_operations = sorted(
-        set(interface_operations) - allowed_operations
-    )
-    if unsupported_operations:
-        raise SystemExit(
-            f"unsupported knowledge-base operations in {path}: "
-            + ", ".join(unsupported_operations)
-        )
-    feedback = value.get("behavior_feedback")
-    if feedback is not None:
-        if not isinstance(feedback, dict):
-            raise SystemExit(
-                "run spec initialization.knowledge_base.behavior_feedback must "
-                "be a mapping"
-            )
-        unknown_feedback = sorted(
-            set(feedback)
-            - {
-                "enabled",
-                "mode",
-                "minimum_improvement",
-                "kb_attribution_window_evaluations",
-                "no_progress_evaluations",
-                "expose_pre_stick_counter",
-            }
-        )
-        if unknown_feedback:
-            raise SystemExit(
-                "unknown knowledge-base behavior_feedback fields: "
-                + ", ".join(unknown_feedback)
-            )
-        if feedback.get("mode", "shadow") not in {
-            "off",
-            "shadow",
-            "visible",
-        }:
-            raise SystemExit(
-                "knowledge-base behavior feedback mode must be off, shadow, or visible"
-            )
-        minimum_improvement = feedback.get("minimum_improvement", 0)
-        if (
-            not isinstance(minimum_improvement, (int, float))
-            or isinstance(minimum_improvement, bool)
-            or minimum_improvement < 0
-        ):
-            raise SystemExit(
-                "knowledge-base behavior_feedback minimum_improvement must be >= 0"
-            )
-        for field in (
-            "kb_attribution_window_evaluations",
-            "no_progress_evaluations",
-        ):
-            count = feedback.get(field, 1 if field.startswith("kb_") else 3)
-            if (
-                not isinstance(count, int)
-                or isinstance(count, bool)
-                or count < 1
-            ):
-                raise SystemExit(
-                    f"knowledge-base behavior_feedback {field} must be >= 1"
-                )
-    prompt_profile_ref = value.get("prompt_profile")
-    if prompt_profile_ref is not None:
-        prefix = "knowledge-base-prompt-profile:"
-        if (
-            not isinstance(prompt_profile_ref, str)
-            or not prompt_profile_ref.startswith(prefix)
-        ):
-            raise SystemExit(
-                "run spec initialization.knowledge_base.prompt_profile must "
-                "be a fully qualified knowledge-base-prompt-profile reference"
-            )
-        raw_profile_ref = prompt_profile_ref.removeprefix(prefix)
-        profile_namespace, separator, profile_id = raw_profile_ref.rpartition(
-            "/"
-        )
-        if (
-            not separator
-            or not NAMESPACE_RE.fullmatch(profile_namespace)
-            or not LOCAL_ID_RE.fullmatch(profile_id)
-        ):
-            raise SystemExit(
-                "knowledge-base prompt profile reference must be "
-                "knowledge-base-prompt-profile:<namespace>/<id>"
-            )
-        profile_path = (
-            KNOWLEDGE_BASE_PROMPT_PROFILES_ROOT
-            / Path(*profile_namespace.split("/"))
-            / f"{profile_id}.yaml"
-        )
-        if not profile_path.is_file():
-            raise SystemExit(
-                "knowledge-base prompt profile does not exist: "
-                f"{prompt_profile_ref}"
-            )
-        profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(profile, dict)
-            or profile.get("schema_version") != 1
-            or profile.get("type") != "knowledge-base-prompt-profile"
-            or profile.get("namespace") != profile_namespace
-            or profile.get("id") != profile_id
-            or not isinstance(profile.get("mode"), str)
-            or not isinstance(profile.get("prompt"), str)
-        ):
-            raise SystemExit(
-                f"invalid knowledge-base prompt profile: {prompt_profile_ref}"
-            )
-    layers = value.get("layers")
-    if layers is None:
-        return
-    if (
-        not isinstance(layers, list)
-        or not layers
-        or not all(isinstance(layer, str) and layer for layer in layers)
-        or len(set(layers)) != len(layers)
-    ):
-        raise SystemExit(
-            "run spec initialization.knowledge_base.layers must be a "
-            "non-empty list of unique names"
-        )
-    available = manifest.get("content_layers")
-    if not isinstance(available, dict):
-        raise SystemExit(
-            f"knowledge-base content_layers must be a mapping: {path}"
-        )
-    missing = sorted(set(layers) - set(available))
-    if missing:
-        raise SystemExit(
-            "unknown knowledge-base layers for "
-            f"{reference}: {', '.join(missing)}"
-        )
 
 
 def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
@@ -769,6 +462,11 @@ def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
         raise SystemExit(f"invalid run-spec YAML in {candidate}: {error}") from error
     if not isinstance(document, dict):
         raise SystemExit(f"run spec must be a mapping: {candidate}")
+    if "research_state" in document:
+        raise SystemExit(
+            "research_state has been removed; put research strategy in the harness. "
+            "Replay historical experiments at their original revision."
+        )
     unknown = sorted(set(document) - RUN_SPEC_FIELDS)
     if unknown:
         raise SystemExit(f"unknown run-spec fields: {', '.join(unknown)}")
@@ -778,8 +476,15 @@ def load_run_spec(target: str) -> tuple[Path | None, dict[str, object]]:
         raise SystemExit("run-spec type must be 'run-spec'")
     validate_run_spec_web_search(document)
     validate_run_spec_evaluation(document)
-    validate_run_spec_research_state(document)
-    validate_run_spec_knowledge_base(document)
+    initialization = document.get("initialization", {})
+    if not isinstance(initialization, dict):
+        raise SystemExit("run spec initialization must be a mapping")
+    if "knowledge_base" in initialization:
+        raise SystemExit(
+            "initialization.knowledge_base has been removed; bundle knowledge, "
+            "retrieval tools and prompts in the agent image. Replay historical "
+            "runs at their original revision."
+        )
     return candidate.resolve(), document
 
 
@@ -1663,7 +1368,7 @@ def resolve_run_spec_arguments(args: argparse.Namespace) -> argparse.Namespace:
     initialization = require_config_mapping(
         config,
         "initialization",
-        {"mode", "resume_from", "knowledge_base"},
+        {"mode", "resume_from"},
     )
     runtime = require_config_mapping(
         config,
@@ -2607,6 +2312,7 @@ def finalize_run_record(
         ):
             data["metrics"] = {metric["name"]: best_score}
 
+    # Read-only compatibility for retained historical runs; no controller is launched.
     research_state_summary = read_json(
         run_dir / "usage" / "research-state-summary.json"
     )

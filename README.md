@@ -6,8 +6,12 @@ and independently verifies candidate solutions. A run retains its configuration,
 usage events, intermediate scores and final artifacts.
 
 **Any installed harness can run as a command.** Its source, knowledge and tools
-can live in its image; optional knowledge-base sidecars are also supported.
+live in its image. Dungeness does not provide a knowledge-base service or
+choose how an agent retrieves or processes its own files.
 Model access and trusted prices are configured separately.
+Research strategy, memory, evaluation cadence and completion decisions belong to
+the harness. The runtime does not inject research-state prompts or enforce
+experimental search/evaluation quotas.
 See [command harnesses](docs/command-harness.md). Existing Codex, Claude Code and
 other maintained adapters remain supported.
 

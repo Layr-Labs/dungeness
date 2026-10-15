@@ -19,7 +19,6 @@ import time
 from typing import Any
 
 import httpx
-
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -37,7 +36,6 @@ from gateway_models import (
     MOONSHOT_ROUTES,
     OPENAI_ROUTES,
     OPENROUTER_ROUTES,
-    RESEARCH_STATE_CONTEXT_MARKER,
     capture_prompt,
     decode_body,
     decode_response_documents,
@@ -46,11 +44,9 @@ from gateway_models import (
     extract_usage,
     extract_visible_reasoning,
     extract_visible_reasoning_events,
-    inject_research_state,
     is_sse_body,
     prompt_profile,
     provider_auth_headers,
-    research_state_context,
     usage_extractor,
 )
 from gateway_pricing import (
@@ -264,10 +260,7 @@ def validate_internal_event(document: Any) -> dict[str, Any]:
         raise ValueError("event must be a JSON object")
     source = document.get("source")
     kind = document.get("kind")
-    if source == "research-state":
-        if not isinstance(kind, str) or not kind.startswith("research_state."):
-            raise ValueError("unsupported research-state event kind")
-    elif source in INTERNAL_EVENT_KINDS:
+    if source in INTERNAL_EVENT_KINDS:
         if kind not in INTERNAL_EVENT_KINDS[source]:
             raise ValueError("unsupported internal event kind")
     else:
@@ -325,14 +318,6 @@ async def web_search(request: Request) -> Response:
             )
         )
     except BudgetExceeded as error:
-        await gateway.notify_research_state(
-            "/events/web-search",
-            {
-                "event_id": f"web-search:{request.state.request_id}",
-                "query": bounded_text(payload.get("query")),
-                "status": "budget_rejected",
-            },
-        )
         return budget_rejected(request, "web.search", error)
     except (ValueError, TypeError, KeyError) as error:
         return JSONResponse({"error": str(error)}, status_code=400)

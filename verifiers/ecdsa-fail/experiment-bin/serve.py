@@ -138,34 +138,10 @@ def _emit_usage_event(kind: str, data: dict, event_id: str) -> None:
         pass
 
 
-def _notify_research_state(event: dict) -> None:
-    base = os.environ.get("DUNGENESS_RESEARCH_STATE_URL")
-    if not base:
-        return
-    request = urllib.request.Request(
-        base.rstrip("/") + "/events/evaluation",
-        data=json.dumps(event).encode("utf-8"),
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5):
-            pass
-    except (OSError, urllib.error.URLError):
-        _record(
-            {
-                "operation": "research_state_delivery",
-                "status": "error",
-                "related_event_id": event.get("event_id"),
-            }
-        )
-
-
 def _record(event: dict) -> None:
     """Append one submission event to the canonical run log (best-effort)."""
     payload = dict(event)
     event_id = str(payload.pop("event_id", f"evaluation:{time.time_ns()}"))
-    operation = payload.get("operation")
     payload.update(
         {
             "submissions_used": _submissions,
@@ -176,11 +152,7 @@ def _record(event: dict) -> None:
     try:
         USAGE_DIR.mkdir(parents=True, exist_ok=True)
         _emit_usage_event(
-            (
-                "evaluation.delivery"
-                if operation == "research_state_delivery"
-                else "evaluation.completed"
-            ),
+            "evaluation.completed",
             payload,
             event_id,
         )
@@ -240,14 +212,6 @@ class Handler(BaseHTTPRequestHandler):
                     "status": "budget_rejected",
                     "source_sha256": digest,
                 })
-                _notify_research_state(
-                    {
-                        "event_id": event_id,
-                        "candidate_sha256": None,
-                        "status": "budget_rejected",
-                        "score": None,
-                    }
-                )
                 self._reply(429, {"error": "submission budget exhausted"})
                 return
             _submissions += 1
@@ -269,14 +233,6 @@ class Handler(BaseHTTPRequestHandler):
                     "status": "error",
                     "source_sha256": digest,
                 })
-                _notify_research_state(
-                    {
-                        "event_id": event_id,
-                        "candidate_sha256": digest,
-                        "status": "failed",
-                        "score": None,
-                    }
-                )
                 self._reply(500, {"error": "scoring failed"})
                 return
 
@@ -297,14 +253,6 @@ class Handler(BaseHTTPRequestHandler):
                 "source_sha256": digest,
                 "candidate_sha256": digest,
             })
-            _notify_research_state(
-                {
-                    "event_id": event_id,
-                    "candidate_sha256": digest,
-                    "status": "valid" if status == "ok" else "invalid",
-                    "score": score,
-                }
-            )
 
         payload = {
             "status": status,

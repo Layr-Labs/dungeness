@@ -32,6 +32,43 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_command_topology_needs_only_gateway_and_verifier(self):
+        compose = yaml.safe_load(compiler.build_compose(
+            "generic-run",
+            {"historical_cutoff": {"end_published_date": "2026-05-28T23:59:59Z"},
+             "search": {"max_results": 25}},
+            {"web": {"searches": 0, "fetches": 0},
+             "model": {"requests": 10, "total_tokens": 10000}},
+            dev_scorer={"submissions": 10, "port": 8081, "context": "verifier"},
+            provider="openai", max_usd=1,
+        ))
+        self.assertEqual(set(compose["services"]), {"main", "gateway", "dev-scorer"})
+        self.assertTrue(compose["networks"]["agent_internal"]["internal"])
+        self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
+        self.assertEqual(compose["services"]["gateway"]["environment"]["MAX_MODEL_USD"], "1")
+        self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
+        self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
+        self.assertNotIn("DUNGENESS_KNOWLEDGE_BASE", json.dumps(compose))
+
+    def test_chatgpt_gateway_can_read_private_host_credentials(self):
+        with patch.object(compiler.os, "geteuid", return_value=1234), patch.object(
+                compiler.os, "getegid", return_value=5678):
+            compose = yaml.safe_load(compiler.build_compose(
+                "private-chatgpt",
+                {"historical_cutoff": {"end_published_date": "2026-05-28T23:59:59Z"},
+                 "search": {"max_results": 25}},
+                {"web": {"searches": 0, "fetches": 0},
+                 "model": {"requests": 10, "total_tokens": 10000}},
+                provider="openai", max_usd=1,
+                command_policy={"models": [{**MODEL,
+                    "base_url": "http://gateway:8080/model/chatgpt/v1"}]}))
+        gateway_service = compose["services"]["gateway"]
+        self.assertEqual(gateway_service["user"], "1234:5678")
+        self.assertIn("${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:"
+                      "/run/dungeness/auth.json:ro", gateway_service["volumes"])
+        self.assertNotIn("auth.json", json.dumps(compose["services"]["main"]))
+        self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
+
     def test_verifier_results_are_readable_after_container_download(self):
         grade = load("command_grade_contract", "verifiers/ecdsa-fail/benchmark-sh/grade.py")
         with tempfile.TemporaryDirectory() as temp:
