@@ -3180,6 +3180,38 @@ def apply_web_search_mode_to_budget(
     }
 
 
+def problem_service_binding(value):
+    """A trusted task may assign one immutable internal problem service."""
+    if not isinstance(value, dict) or set(value) != {"context", "sha256"}:
+        raise ValueError("problem_service requires context and sha256")
+    require_relative_path(value["context"], "problem_service.context")
+    if not isinstance(value["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"]):
+        raise ValueError("problem_service.sha256 must be a SHA-256 digest")
+    return dict(value)
+
+
+def resolve_problem_service(task_dir, value, destination):
+    if value is None:
+        return None
+    binding = problem_service_binding(value)
+    context = task_dir / binding["context"]
+    if not context.resolve().is_relative_to(task_dir.resolve()):
+        raise ValueError("Problem service context escapes the trusted task")
+    expected = {"Dockerfile", "server.py", "task.json"}
+    if not context.is_dir() or {p.name for p in context.iterdir()} != expected:
+        raise ValueError("Problem service context must contain only its recipe, server and document")
+    for path in context.iterdir():
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 256 * 1024:
+            raise ValueError("Invalid problem service file")
+    document = json.loads((context / "task.json").read_text())
+    encoded = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode()
+    if hashlib.sha256(encoded).hexdigest() != binding["sha256"]:
+        raise ValueError("Problem service document differs from its pinned digest")
+    shutil.copytree(context, destination)
+    return {"context": "problem-service", "sha256": binding["sha256"]}
+
+
 def build_compose(
     run_id: str,
     web: dict[str, Any],
@@ -3199,6 +3231,7 @@ def build_compose(
     baseline_score: float | None = None,
     readonly_workspace_paths: list[str] | None = None,
     command_policy: dict[str, Any] | None = None,
+    problem_service: dict[str, Any] | None = None,
 ) -> str:
     """Build the per-run agent/gateway topology consumed by Harbor Docker."""
 
@@ -3397,6 +3430,31 @@ def build_compose(
             "external_egress": {},
         },
     }
+    if problem_service is not None:
+        binding = problem_service_binding(problem_service)
+        document["networks"]["problem_internal"] = {"internal": True}
+        document["services"]["problem"] = {
+            "build": {"context": "./" + binding["context"]},
+            "environment": {"TASK_SHA256": binding["sha256"], "TASK_DOCUMENT": "/data/task.json"},
+            "volumes": ["./" + binding["context"] + "/task.json:/data/task.json:ro"],
+            "networks": ["problem_internal"],
+            "read_only": True,
+            "user": "65532:65532",
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "pids_limit": 32,
+            "mem_limit": "64m",
+            "healthcheck": {
+                "test": ["CMD", "python3", "-c",
+                         "import urllib.request; urllib.request.urlopen('http://localhost:8091/healthz', timeout=2)"],
+                "interval": "2s", "timeout": "3s", "retries": 15,
+            },
+        }
+        assigned_gateway = document["services"]["gateway"]
+        assigned_gateway["networks"].append("problem_internal")
+        assigned_gateway["depends_on"] = {"problem": {"condition": "service_healthy"}}
+        assigned_gateway["environment"]["DUNGENESS_TASK_SHA256"] = binding["sha256"]
+        main_environment["DUNGENESS_PROBLEM_URL"] = "http://gateway:8080/task"
     if command_policy is not None:
         models = command_policy["models"]
         providers = {model["provider"] for model in models}
@@ -4613,6 +4671,9 @@ def build_task(
                 resolved_web_search["mode"],
             )
         )
+        problem_service = resolve_problem_service(
+            task_dir, task.get("problem_service"), task_root / "environment/problem-service",
+        )
         compose_text = build_compose(
             run_id,
             web_policy,
@@ -4630,6 +4691,7 @@ def build_task(
             agent_timeout_sec=agent_res["timeout_sec"],
             research_state=resolved_research_state,
             knowledge_base=resolved_knowledge_base,
+            problem_service=problem_service,
             metric_direction=direction,
             baseline_score=checkpoint_reference_score,
             readonly_workspace_paths=(

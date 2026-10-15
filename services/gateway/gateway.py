@@ -11,10 +11,14 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 import hmac
+import hashlib
+import re
 import json
 import os
 import time
 from typing import Any
+
+import httpx
 
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -138,6 +142,7 @@ def instrumentation_route(path: str) -> str:
     if path in {
         "/healthz",
         "/status",
+        "/task",
         "/metrics",
         "/internal/events",
         "/web/search",
@@ -211,6 +216,37 @@ def budget_rejected(request: Request, operation: str, error: BudgetExceeded) -> 
 
 async def health(_request: Request) -> Response:
     return JSONResponse({"status": "ok", "run_id": gateway.run_id})
+
+
+async def assigned_task(request: Request) -> Response:
+    """Read only the task assigned by the trusted Compose configuration."""
+    expected = os.environ.get("DUNGENESS_TASK_SHA256")
+    if not expected:
+        return JSONResponse({"error": "No problem service assigned."}, status_code=404)
+    if request.url.query or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return JSONResponse({"error": "Invalid task request or assignment."}, status_code=400)
+    try:
+        # Never use client-supplied URLs, forward auth headers or follow redirects.
+        async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=5) as client:
+            async with client.stream("GET", "http://problem:8091/task") as upstream:
+                if upstream.status_code != 200:
+                    raise ValueError("Task service unavailable")
+                raw = bytearray()
+                async for chunk in upstream.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 256 * 1024:
+                        raise ValueError("Task document too large")
+        document = json.loads(raw)
+        if not isinstance(document, dict) or document.get("schema_version") != 1:
+            raise ValueError("Invalid task document")
+        encoded = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode()
+        if hashlib.sha256(encoded).hexdigest() != expected:
+            raise ValueError("Task document changed")
+        return Response(encoded, media_type="application/json",
+                        headers={"X-Task-SHA256": expected, "Cache-Control": "no-store"})
+    except (httpx.HTTPError, ValueError, TypeError, OverflowError, RecursionError):
+        return JSONResponse({"error": "Assigned problem unavailable or mismatched."}, status_code=502)
 
 
 async def status(_request: Request) -> Response:
@@ -509,6 +545,7 @@ app = Starlette(
     routes=[
         Route("/healthz", health, methods=["GET"]),
         Route("/status", status, methods=["GET"]),
+        Route("/task", assigned_task, methods=["GET"]),
         Route("/metrics", metrics, methods=["GET"]),
         Route("/internal/events", internal_event, methods=["POST"]),
         Route("/web/search", web_search, methods=["POST"]),
