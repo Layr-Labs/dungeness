@@ -717,7 +717,7 @@ experimental policy silently.
 Knowledge, memory and retrieval belong to the agent image. The knowledge-base
 service, command, prompt profiles and Codex hooks have been removed. New run
 specs reject `initialization.knowledge_base`; move its files and retrieval code
-into the harness. See [migration](../doc/knowledge-base-preload.md).
+into the harness. See [command harnesses](command-harness.md).
 
 When a run spec omits `namespace`, its identity namespace is inferred from the
 configured default. The resulting run namespace is resolved independently

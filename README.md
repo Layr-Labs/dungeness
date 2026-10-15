@@ -104,7 +104,6 @@ the watcher and cleanup commands still work on retained local outputs.
 | `run-specs/projects/dungeness/` | Small maintained run examples |
 | `verifiers/`, `checkpoints/`, `problems/` | Grading and pinned task identities |
 | `*/users/`, `experiments/` | Research inputs and validation utilities; not runtime dependencies |
-| `doc/` | Implementation notes |
 | `runs/` | Generated local output; not committed |
 
 The [runtime exporter](docs/runtime-distribution.md) creates a reproducible source
@@ -121,7 +120,6 @@ archive.
 - [Runtime distribution and artifact retention](docs/runtime-distribution.md)
 - [Record and configuration model](DESIGN.md)
 - [Gateway architecture](services/DESIGN.md)
-- [Implementation notes](doc/README.md) (full repository only)
 
 No-model-call regression checks from a full source checkout, using a Python
 environment with the gateway's pinned requirements installed:

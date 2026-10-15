@@ -23,8 +23,7 @@ Bundle papers, local databases, indexes and retrieval software in the harness
 image, using any layout or file format your agent supports. Dungeness does not
 create a knowledge service, inject retrieval instructions or intercept file
 reads. Child processes can provide the agent's own local services. Remove the
-old `initialization.knowledge_base` option; see the
-[migration guide](../doc/knowledge-base-preload.md).
+old `initialization.knowledge_base` option.
 
 The run-spec selects access independently of the harness:
 
