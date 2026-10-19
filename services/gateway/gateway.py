@@ -15,6 +15,7 @@ import hashlib
 import re
 import json
 import os
+import tempfile
 import time
 from typing import Any
 
@@ -22,7 +23,8 @@ import httpx
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.routing import Route
 import uvicorn
 
@@ -123,6 +125,8 @@ gateway = Gateway(
 def instrumentation_route(path: str) -> str:
     """Return a bounded route label; never use an arbitrary URL path as a label."""
 
+    if path.startswith("/task/files/"):
+        return "/task/files/{name}"
     if path.startswith("/model/openai/v1/"):
         return "/model/openai/v1/{operation}"
     if path.startswith("/model/anthropic/v1/"):
@@ -243,6 +247,62 @@ async def assigned_task(request: Request) -> Response:
                         headers={"X-Task-SHA256": expected, "Cache-Control": "no-store"})
     except (httpx.HTTPError, ValueError, TypeError, OverflowError, RecursionError):
         return JSONResponse({"error": "Assigned problem unavailable or mismatched."}, status_code=502)
+
+
+TASK_FILE_SLOTS = asyncio.Semaphore(4)
+
+
+async def assigned_file(request: Request) -> Response:
+    """Serve only a file declared by this run's pinned task, with verified bytes."""
+    task = await assigned_task(request)
+    if task.status_code != 200:
+        return task
+    name = request.path_params["name"]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
+        return JSONResponse({"error": "Unknown task file."}, status_code=404)
+    entries = json.loads(task.body).get("attachments", [])
+    entry = next((item for item in entries if item.get("name") == name), None)
+    if entry is None:
+        return JSONResponse({"error": "Unknown task file."}, status_code=404)
+    if (type(entry.get("bytes")) is not int or not 0 < entry["bytes"] <= 32 * 1024 * 1024
+            or entry.get("media_type") not in {"application/pdf", "application/json"}):
+        return JSONResponse({"error": "Invalid task file assignment."}, status_code=502)
+    # Spill large PDFs to disk, and verify the complete digest before sending any
+    # bytes to the agent. Never forward client credentials or select an upstream URL.
+    output = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
+    try:
+        async with TASK_FILE_SLOTS:
+            async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=30) as client:
+                async with client.stream("GET", "http://problem:8091/task/files/" + name) as upstream:
+                    if upstream.status_code != 200:
+                        raise ValueError("Task file unavailable")
+                    digest = hashlib.sha256()
+                    size = 0
+                    async for chunk in upstream.aiter_bytes(chunk_size=65536):
+                        size += len(chunk)
+                        if size > entry["bytes"]:
+                            raise ValueError("Task file exceeds pinned size")
+                        digest.update(chunk)
+                        output.write(chunk)
+                    if size != entry["bytes"] or digest.hexdigest() != entry.get("sha256"):
+                        raise ValueError("Task file changed")
+        output.seek(0)
+        def chunks():
+            try:
+                while chunk := output.read(65536):
+                    yield chunk
+            finally:
+                output.close()
+        return StreamingResponse(chunks(), media_type=entry["media_type"],
+                                 headers={"Content-Length": str(size), "X-Content-SHA256": entry["sha256"],
+                                          "X-Content-Type-Options": "nosniff"},
+                                 background=BackgroundTask(output.close))
+    except (httpx.HTTPError, ValueError, OSError):
+        output.close()
+        return JSONResponse({"error": "Assigned task file unavailable or mismatched."}, status_code=502)
+    except BaseException:
+        output.close()
+        raise
 
 
 async def status(_request: Request) -> Response:
@@ -531,6 +591,7 @@ app = Starlette(
         Route("/healthz", health, methods=["GET"]),
         Route("/status", status, methods=["GET"]),
         Route("/task", assigned_task, methods=["GET"]),
+        Route("/task/files/{name}", assigned_file, methods=["GET"]),
         Route("/metrics", metrics, methods=["GET"]),
         Route("/internal/events", internal_event, methods=["POST"]),
         Route("/web/search", web_search, methods=["POST"]),

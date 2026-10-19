@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import importlib.machinery
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from adapters.harbor import build
 
@@ -74,9 +76,14 @@ fn main() {
             path.write_text((REPOSITORY_ROOT / "run-specs/projects/dungeness/ecdsa-starter.yaml")
                             .read_text().replace("mode: checkpoint", "mode: scaffold"))
             args = cli.run_arguments_for_spec(path, namespace="users/test", env_file=None, labels=[])
-            resolved = cli.resolve_run_spec_arguments(args)
+            with patch.dict(os.environ, {
+                "DUNGENESS_NAMESPACE": "",
+                "DUNGENESS_CONFIG": str(Path(temporary) / "missing-config.toml"),
+            }):
+                resolved = cli.resolve_run_spec_arguments(args)
             self.assertTrue(resolved.scaffold_start)
             self.assertFalse(resolved.fresh_start)
+            self.assertEqual(resolved.run_spec_ref, "run-spec:users/test/ecdsa-starter")
             _, run_spec = cli.load_run_spec(resolved.target)
             self.assertEqual(run_spec["web_search"], {"mode": "disabled"})
 

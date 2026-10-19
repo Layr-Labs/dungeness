@@ -1887,9 +1887,12 @@ def resolve_problem_service(task_dir, value, destination):
     if not context.resolve().is_relative_to(task_dir.resolve()):
         raise ValueError("Problem service context escapes the trusted task")
     expected = {"Dockerfile", "server.py", "task.json"}
-    if not context.is_dir() or {p.name for p in context.iterdir()} != expected:
+    if not context.is_dir() or context.is_symlink():
+        raise ValueError("Invalid problem service context")
+    names = {p.name for p in context.iterdir()}
+    if names not in (expected, expected | {"files"}):
         raise ValueError("Problem service context must contain only its recipe, server and document")
-    for path in context.iterdir():
+    for path in (context / name for name in expected):
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 256 * 1024:
             raise ValueError("Invalid problem service file")
     document = json.loads((context / "task.json").read_text())
@@ -1897,6 +1900,34 @@ def resolve_problem_service(task_dir, value, destination):
                          ensure_ascii=False, allow_nan=False).encode()
     if hashlib.sha256(encoded).hexdigest() != binding["sha256"]:
         raise ValueError("Problem service document differs from its pinned digest")
+    entries = document.get("attachments", [])
+    if not isinstance(entries, list) or len(entries) > 64:
+        raise ValueError("Invalid problem service attachments")
+    files = context / "files"
+    declared = set()
+    total = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid problem service attachment")
+        name = entry.get("name", "")
+        if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name)
+                or name in declared or type(entry.get("bytes")) is not int
+                or not 0 < entry["bytes"] <= 32 * 1024 * 1024
+                or entry.get("media_type") not in {"application/json", "application/pdf"}):
+            raise ValueError("Invalid problem service attachment")
+        path = files / name
+        if (files.is_symlink() or path.is_symlink() or not path.is_file()
+                or path.stat().st_size != entry["bytes"]):
+            raise ValueError("Missing or invalid problem service attachment")
+        with path.open("rb") as source:
+            if hashlib.file_digest(source, "sha256").hexdigest() != entry.get("sha256"):
+                raise ValueError("Problem service attachment differs from pinned digest")
+        declared.add(name)
+        total += entry["bytes"]
+    if total > 256 * 1024 * 1024:
+        raise ValueError("Problem service attachments exceed size limit")
+    if ("files" in names) != bool(entries) or (entries and {p.name for p in files.iterdir()} != declared):
+        raise ValueError("Problem service attachment set differs from declaration")
     shutil.copytree(context, destination)
     return {"context": "problem-service", "sha256": binding["sha256"]}
 
@@ -2079,7 +2110,7 @@ def build_compose(
         document["services"]["problem"] = {
             "build": {"context": "./" + binding["context"]},
             "environment": {"TASK_SHA256": binding["sha256"], "TASK_DOCUMENT": "/data/task.json"},
-            "volumes": ["./" + binding["context"] + "/task.json:/data/task.json:ro"],
+            "volumes": ["./" + binding["context"] + ":/data:ro"],
             "networks": ["problem_internal"],
             "read_only": True,
             "user": "65532:65532",

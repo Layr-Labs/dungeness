@@ -15,6 +15,42 @@ spec.loader.exec_module(compiler)
 
 
 class ProblemServiceRuntimeTests(unittest.TestCase):
+    def test_attachment_bytes_paths_symlinks_and_undeclared_files_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            context = root / "source"
+            (context / "files").mkdir(parents=True)
+            (context / "Dockerfile").write_text("FROM trusted")
+            (context / "server.py").write_text("pass")
+            raw = b"%PDF-fixture"
+            paper = context / "files/paper.pdf"
+            paper.write_bytes(raw)
+            entry = {"name": "paper.pdf", "bytes": len(raw), "media_type": "application/pdf",
+                     "sha256": hashlib.sha256(raw).hexdigest()}
+            def binding(attachments):
+                payload = json.dumps({"schema_version": 1, "attachments": attachments},
+                                     sort_keys=True, separators=(",", ":")).encode()
+                (context / "task.json").write_bytes(payload)
+                return {"context": "source", "sha256": hashlib.sha256(payload).hexdigest()}
+            pin = binding([entry])
+            compiler.resolve_problem_service(root, pin, root / "ok")
+            paper.write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                compiler.resolve_problem_service(root, pin, root / "bad")
+            paper.unlink()
+            paper.symlink_to(root / "ok/files/paper.pdf")
+            with self.assertRaises(ValueError):
+                compiler.resolve_problem_service(root, pin, root / "symlink")
+            paper.unlink()
+            paper.write_bytes(raw)
+            for entries in ([{**entry, "name": "../paper.pdf"}], [entry, entry], []):
+                with self.assertRaises(ValueError):
+                    compiler.resolve_problem_service(root, binding(entries), root / "unsafe")
+            pin = binding([entry])
+            (context / "files/secret.txt").write_text("not declared")
+            with self.assertRaises(ValueError):
+                compiler.resolve_problem_service(root, pin, root / "extra")
+
     def test_problem_service_is_read_only_and_reachable_only_through_gateway(self):
         compose = yaml.safe_load(compiler.build_compose(
             "test-run",
