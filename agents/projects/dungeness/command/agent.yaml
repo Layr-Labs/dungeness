@@ -1,0 +1,11 @@
+schema_version: 1
+type: agent
+namespace: projects/dungeness
+id: command
+execution_mode: installed
+
+# A no-model smoke command, not a research solver. Replace this image and
+# entrypoint with your harness; select model access in the run spec.
+execution:
+  interface: dungeness-command-v1
+  entrypoint: ["python3", "-c", "import os,json; print(json.load(open(os.environ['DUNGENESS_TASK']))['instruction'])"]

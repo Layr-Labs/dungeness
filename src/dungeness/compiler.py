@@ -37,9 +37,6 @@ RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
 sys.path.insert(0, str(GATEWAY_ROOT))
 from provider_profiles import PROFILES as CONFIGURED_PROVIDERS
-CODEX_SUBSCRIPTION_PROXY_ROOT = (
-    REPOSITORY_ROOT / "services/codex-subscription-proxy"
-)
 PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
@@ -67,20 +64,6 @@ RESERVED_LABEL_KEYS = {
     "namespace",
     "created_at",
     "published_at",
-}
-CODEX_REASONING_EFFORTS = {
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "max",
-    "xhigh",
-}
-CODEX_REASONING_SUMMARIES = {
-    "auto",
-    "concise",
-    "detailed",
-    "none",
 }
 WEB_NOTICE = """\
 
@@ -342,8 +325,6 @@ def build_run_record(
         "checkpoint": checkpoint_spec["ref"],
         "agent": record_id("agent", agent_namespace, agent_id),
     }
-    if isinstance(agent.get("adapter"), str):
-        relations["model_adapter"] = agent["adapter"]
     if run_spec_ref is not None:
         relations["run_spec"] = run_spec_ref
     if resume is not None:
@@ -1144,6 +1125,7 @@ def load_agent_record(
     ):
         raise ValueError(f"invalid installed agent descriptor: {agent_id}")
     require_namespace(descriptor.get("namespace"), f"agent {agent_id} namespace")
+    command_execution(descriptor)
     resolve_agent_dockerfile(descriptor_path, descriptor)
     return descriptor_path, descriptor
 
@@ -1179,31 +1161,10 @@ def resolve_agent_dockerfile(
     return base_dockerfile
 
 
-def render_agent_dockerfile(
-    dockerfile: Path,
-    agent: dict[str, Any],
-) -> str:
-    """Pin the agent package version into its pre-baked runtime image."""
-
-    document = dockerfile.read_text(encoding="utf-8")
-    harbor = agent.get("harbor")
-    if not isinstance(harbor, dict) or harbor.get("agent") != "codex":
-        return document
-    package = agent.get("package")
-    version = package.get("version") if isinstance(package, dict) else None
-    if not isinstance(version, str) or not version:
-        raise ValueError("Codex agent package.version is required")
-    rendered, replacements = re.subn(
-        r"(?m)^ARG CODEX_VERSION=[^\n]+$",
-        f"ARG CODEX_VERSION={version}",
-        document,
-        count=1,
-    )
-    if replacements != 1:
-        raise ValueError(
-            "Codex agent Dockerfile must declare exactly one CODEX_VERSION ARG"
-        )
-    return rendered
+def render_agent_dockerfile(dockerfile: Path, agent: dict[str, Any]) -> str:
+    """The submitted image owns its agent dependencies and versions."""
+    command_execution(agent)
+    return dockerfile.read_text(encoding="utf-8")
 
 
 def load_agent(
@@ -1233,10 +1194,12 @@ def load_task_record(
     )
 
 
-def command_execution(agent: dict[str, Any]) -> dict[str, Any] | None:
+def command_execution(agent: dict[str, Any]) -> dict[str, Any]:
     execution = agent.get("execution")
     if execution is None:
-        return None
+        raise ValueError("Bundled agents are retired. Supply a Dockerfile and "
+                         "execution.interface: dungeness-command-v1 with an entrypoint; "
+                         "select models in run-spec model_access.")
     if (not isinstance(execution, dict)
             or execution.get("interface") != "dungeness-command-v1"
             or set(execution) - {"interface", "entrypoint", "resume_entrypoint"}):
@@ -1248,8 +1211,9 @@ def command_execution(agent: dict[str, Any]) -> dict[str, Any] | None:
         if (not isinstance(value, list) or not value
                 or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in value)):
             raise ValueError(f"execution.{key} must be a non-empty argv list")
-    if "harbor" in agent:
-        raise ValueError("command harnesses cannot select host Harbor adapters")
+    if any(key in agent for key in ("harbor", "adapter", "authentication", "environment")):
+        raise ValueError("Command harnesses cannot select host adapters, native authentication, "
+                         "or agent environment; configure these inside the submitted harness.")
     return execution
 
 
@@ -1277,7 +1241,7 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def agent_model(agent: dict[str, Any]) -> dict[str, Any]:
-    """Return the model/route configuration bundled into an agent profile."""
+    """Return the model/route configuration selected by the trusted run policy."""
 
     model = agent.get("model")
     if not isinstance(model, dict):
@@ -1289,70 +1253,7 @@ def agent_model(agent: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "agent model.name_format must be request or provider/request"
         )
-    supported_efforts = model.get("supported_reasoning_efforts")
-    if supported_efforts is not None and (
-        not isinstance(supported_efforts, list)
-        or not supported_efforts
-        or any(
-            not isinstance(value, str)
-            or value not in CODEX_REASONING_EFFORTS
-            for value in supported_efforts
-        )
-        or len(set(supported_efforts)) != len(supported_efforts)
-    ):
-        raise ValueError(
-            "agent model.supported_reasoning_efforts must be a non-empty "
-            "list of supported Codex effort values"
-        )
-    context_window = model.get("context_window")
-    if context_window is not None and (
-        not isinstance(context_window, int)
-        or isinstance(context_window, bool)
-        or context_window < 1
-    ):
-        raise ValueError("agent model.context_window must be a positive integer")
-    adapter = agent.get("adapter")
-    if adapter is not None and (
-        not isinstance(adapter, str)
-        or not adapter.startswith("adapter:system/dungeness/")
-    ):
-        raise ValueError(
-            "agent adapter must be a trusted adapter:system/dungeness reference"
-        )
     return model
-
-
-def resolve_agent_adapter(
-    agent: dict[str, Any],
-) -> tuple[Path, dict[str, Any], Path] | None:
-    """Resolve an editable agent's adapter reference to trusted system code."""
-
-    reference = agent.get("adapter")
-    if reference is None:
-        return None
-    prefix = "adapter:system/dungeness/"
-    if not isinstance(reference, str) or not reference.startswith(prefix):
-        raise ValueError(
-            "agent adapter must be a trusted adapter:system/dungeness reference"
-        )
-    local_id = reference.removeprefix(prefix)
-    path, manifest = find_namespaced_manifest(
-        ADAPTERS_ROOT,
-        "adapter",
-        local_id,
-        "system/dungeness",
-        "adapter.yaml",
-    )
-    data = manifest.get("data")
-    implementation = data.get("implementation") if isinstance(data, dict) else None
-    if not isinstance(implementation, str) or not implementation:
-        raise ValueError(f"trusted adapter has no implementation: {reference}")
-    implementation_path = REPOSITORY_ROOT / implementation
-    if not implementation_path.is_file():
-        raise ValueError(
-            f"trusted adapter implementation does not exist: {implementation}"
-        )
-    return path, manifest, implementation_path
 
 
 def agent_provider(agent: dict[str, Any]) -> str:
@@ -1380,66 +1281,12 @@ def agent_model_name(agent: dict[str, Any]) -> str:
     return request_model
 
 
-def resolve_agent_options(
-    agent: dict[str, Any],
-    overrides: dict[str, Any] | None = None,
-) -> dict[str, str]:
-    """Resolve run-level options without mutating the reusable agent manifest."""
-
-    if command_execution(agent) is not None:
-        defaults = agent_model(agent).get("defaults", {})
-        return {**defaults, **(overrides or {})}
-    harbor = agent.get("harbor")
-    if not isinstance(harbor, dict):
-        raise ValueError("agent harbor configuration must be a mapping")
-    model = agent_model(agent)
-    defaults = model.get("defaults") or {}
-    if not isinstance(defaults, dict):
-        raise ValueError("agent model.defaults must be a mapping")
-
-    resolved: dict[str, str] = {}
-    if harbor.get("agent") == "codex":
-        resolved = {
-            "reasoning_effort": str(defaults.get("reasoning_effort", "high")),
-            "reasoning_summary": str(defaults.get("reasoning_summary", "auto")),
-        }
-
-    overrides = overrides or {}
-    unknown = sorted(set(overrides) - {"reasoning_effort", "reasoning_summary"})
-    if unknown:
-        raise ValueError(f"unsupported agent options: {', '.join(unknown)}")
-    if overrides and harbor.get("agent") != "codex":
-        raise ValueError("reasoning agent options are supported only for Codex")
-
-    effort = overrides.get("reasoning_effort")
-    if effort is not None:
-        if effort not in CODEX_REASONING_EFFORTS:
-            raise ValueError(
-                "reasoning_effort must be one of: "
-                + ", ".join(sorted(CODEX_REASONING_EFFORTS))
-            )
-        resolved["reasoning_effort"] = effort
-    summary = overrides.get("reasoning_summary")
-    if summary is not None:
-        if summary not in CODEX_REASONING_SUMMARIES:
-            raise ValueError(
-                "reasoning_summary must be one of: "
-                + ", ".join(sorted(CODEX_REASONING_SUMMARIES))
-            )
-        resolved["reasoning_summary"] = summary
-
-    supported_efforts = model.get("supported_reasoning_efforts")
-    resolved_effort = resolved.get("reasoning_effort")
-    if (
-        isinstance(supported_efforts, list)
-        and resolved_effort not in supported_efforts
-    ):
-        raise ValueError(
-            f"reasoning_effort {resolved_effort!r} is not supported by "
-            f"agent {agent.get('id')!r}; choose one of: "
-            + ", ".join(supported_efforts)
-        )
-    return resolved
+def resolve_agent_options(agent: dict[str, Any], overrides=None) -> dict[str, str]:
+    """Agent-specific options belong to the submitted command."""
+    command_execution(agent)
+    if overrides:
+        raise ValueError("Native agent options are retired; configure options inside the harness.")
+    return {}
 
 
 def resolve_model_pricing(
@@ -1547,186 +1394,22 @@ def build_harbor_job(
     """Build a one-trial Harbor job without putting provider keys in it."""
 
     execution = command_execution(agent)
-    if execution is not None:
-        models = command_models(agent)
-        if continuation and continuation.get("max_resumes", 0) and not execution.get("resume_entrypoint"):
-            raise ValueError("command continuation requires execution.resume_entrypoint")
-        kwargs = {"execution": execution, "models": models,
-                  "task_input": agent.get("task_input", {})}
-        if continuation:
-            kwargs.update({f"continuation_{key}": value for key, value in continuation.items()})
-        return yaml.safe_dump({
-            "job_name": run_id, "jobs_dir": str(((run_dir or RUNS_ROOT / run_id) / "harbor").resolve()),
-            "n_attempts": 1, "n_concurrent_trials": 1,
-            "agents": [{"import_path": "command_agent:CommandAgent",
-                        "model_name": models[0]["request_model"], "kwargs": kwargs,
-                        "env": {}}],
-            "tasks": [{"path": str(task_path.resolve())}],
-        }, sort_keys=False)
-    package = agent.get("package")
-    harbor = agent.get("harbor")
-    environment = agent.get("environment")
-    if not all(
-        isinstance(value, dict)
-        for value in (package, harbor, environment)
-    ):
-        raise ValueError("agent package, harbor, and environment must be mappings")
-    version = package.get("version")
-    model = agent_model(agent)
-    model_name = agent_model_name(agent)
-    agent_name = harbor.get("agent")
-    if not all(
-        isinstance(value, str) and value
-        for value in (version, model_name, agent_name)
-    ):
-        raise ValueError("agent version, model name, and Harbor agent are required")
-    kwargs = dict(harbor.get("kwargs") or {})
-    kwargs["version"] = version
-    context_window = model.get("context_window")
-    if agent_name == "codex" and isinstance(context_window, int):
-        kwargs["model_context_window"] = context_window
-    resolved_options = resolve_agent_options(agent, agent_options)
-    provider = agent_provider(agent)
-    authentication = agent.get("authentication")
-    if authentication is not None and not isinstance(authentication, dict):
-        raise ValueError("agent authentication must be a mapping")
-    if provider == "openai-chatgpt":
-        if agent_name != "codex":
-            raise ValueError("ChatGPT subscription authentication is supported only for Codex")
-        if (authentication or {}).get("mode") != "chatgpt-subscription":
-            raise ValueError(
-                "openai-chatgpt agents must declare authentication.mode "
-                "chatgpt-subscription"
-            )
-        if environment:
-            raise ValueError(
-                "subscription Codex must not declare provider credentials or base URLs"
-            )
-        if kwargs.get("web_search") != "disabled":
-            raise ValueError("Codex host-side web search must be disabled")
-        kwargs.update(resolved_options)
-    elif provider == "anthropic":
-        # Anthropic gateway route. The agent holds only the placeholder key; the
-        # gateway injects the real one. (ANTHROPIC_BASE_URL is exported to the
-        # control plane by `dungeness run` for claude_code; pi reads its base
-        # URL from a baked models.json instead.)
-        if environment.get("ANTHROPIC_API_KEY") != "testbed":
-            raise ValueError("installed agent must use the non-secret gateway placeholder")
-        # Other Anthropic-route agents (e.g. pi) have no built-in web tools, so
-        # there is nothing to disable: the no-egress network plus a gateway-only
-        # models.json already force all web access through the `web` command.
-    elif provider == "openrouter" and model.get("api") == "anthropic-messages":
-        # Claude Code through OpenRouter's Anthropic-compatible Messages API.
-        # The agent speaks the Anthropic protocol, so it carries the Anthropic
-        # placeholder credential, but the gateway's OpenRouter route bills it.
-        if agent_name != "claude-code":
-            raise ValueError(
-                "anthropic-messages through OpenRouter is supported only for Claude Code"
-            )
-        if environment.get("ANTHROPIC_API_KEY") != "testbed":
-            raise ValueError("installed agent must use the non-secret gateway placeholder")
-        if environment.get("ANTHROPIC_BASE_URL") != "http://gateway:8080/model/openrouter":
-            raise ValueError("installed agent must route model calls through the gateway")
-        if "/" not in str(model.get("request_model")):
-            raise ValueError(
-                "OpenRouter Claude agents must request a vendor-prefixed model id"
-            )
-    elif provider in CONFIGURED_PROVIDERS or provider in {"openrouter", "moonshot", "kimi-code"}:
-        # OpenRouter gateway route (OpenAI-compatible). SDK-facing credential
-        # names are independent from the upstream provider: Codex expects an
-        # OPENAI_API_KEY while pi/prime-agent expect OPENROUTER_API_KEY. Moonshot
-        # uses the same Codex-facing placeholder but is adapted by the gateway.
-        if not any(
-            environment.get(key) == "testbed"
-            for key in ("OPENAI_API_KEY", "OPENROUTER_API_KEY")
-        ):
-            raise ValueError("installed agent must use the non-secret gateway placeholder")
-        if model.get("api") == "openai-responses" and agent_name == "codex":
-            expected_route = {**{name: f'http://gateway:8080/model/{name}/v1' for name in CONFIGURED_PROVIDERS}, **{
-                "kimi-code": "http://gateway:8080/model/kimi-code/v1",
-                "moonshot": "http://gateway:8080/model/moonshot/v1",
-                "openrouter": "http://gateway:8080/model/openrouter/v1",
-            }}[provider]
-            if (
-                environment.get("OPENAI_BASE_URL")
-                != expected_route
-            ):
-                raise ValueError("installed agent must route model calls through the gateway")
-            kwargs.update(resolved_options)
-            if kwargs.get("web_search") != "disabled":
-                raise ValueError("Codex host-side web search must be disabled")
-    else:
-        # Direct OpenAI gateway route for custom OpenAI-compatible agents.
-        if environment.get("OPENAI_API_KEY") != "testbed":
-            raise ValueError("installed agent must use the non-secret gateway placeholder")
-        if agent_name == "codex":
-            # Codex specifics: it reads OPENAI_BASE_URL from its env, takes a
-            # reasoning_effort kwarg, and must have host-side web search disabled.
-            if environment.get("OPENAI_BASE_URL") != "http://gateway:8080/model/openai/v1":
-                raise ValueError("installed agent must route model calls through the gateway")
-            kwargs.update(resolved_options)
-            if kwargs.get("web_search") != "disabled":
-                raise ValueError("Codex host-side web search must be disabled")
-        # Other OpenAI-route agents (e.g. prime-agent) get the base URL from
-        # models.json and have no web_search/reasoning_effort kwargs.
-
-    if agent_name == "claude-code":
-        # Claude Code ships built-in WebSearch/WebFetch tools that would bypass
-        # the gateway on any route; they must be disabled so research is forced
-        # through the gateway `web` command.
-        disallowed = set(str(kwargs.get("disallowed_tools", "")).replace(",", " ").split())
-        if not {"WebSearch", "WebFetch"} <= disallowed:
-            raise ValueError("Claude agent must disable WebSearch and WebFetch")
-        if not environment.get("ANTHROPIC_BASE_URL", "").startswith("http://gateway:8080/model/"):
-            raise ValueError("installed agent must route model calls through the gateway")
-
-    try:
-        configured_task_path = task_path.relative_to(REPOSITORY_ROOT).as_posix()
-    except ValueError:
-        configured_task_path = str(task_path.resolve())
-    # An agent definition may pin a custom Harbor agent class via `harbor.import_path`
-    # ('module:ClassName') -- e.g. pi, whose stock adapter's network install
-    # must be overridden for the no-egress sandbox. Harbor's
-    # create_agent_from_config prefers a registered `name` over `import_path`,
-    # so when an import_path is given we emit it INSTEAD of `name` (leaving name
-    # unset routes Harbor to create_agent_from_import_path). The module must be
-    # importable, so run harbor with PYTHONPATH including adapters/harbor.
-    import_path = harbor.get("import_path")
-    if continuation and continuation.get("max_resumes", 0) > 0:
-        if import_path not in {
-            "codex_gateway:CodexGateway",
-            "codex_subscription:CodexSubscription",
-        }:
-            raise ValueError(
-                "runtime continuation currently requires a supported "
-                "Dungeness Codex adapter"
-            )
-        kwargs.update(
-            {
-                "continuation_max_resumes": continuation["max_resumes"],
-                "continuation_min_remaining_sec": continuation[
-                    "min_remaining_sec"
-                ],
-                "continuation_timeout_sec": continuation["timeout_sec"],
-            }
-        )
-    agent_entry: dict[str, Any] = {"model_name": model_name, "kwargs": kwargs}
-    if isinstance(import_path, str) and import_path:
-        if ":" not in import_path:
-            raise ValueError("harbor.import_path must be 'module:ClassName'")
-        agent_entry["import_path"] = import_path
-    else:
-        agent_entry["name"] = agent_name
-    agent_entry["env"] = dict(environment)
-    document = {
-        "job_name": run_id,
-        "jobs_dir": str(((run_dir or (RUNS_ROOT / run_id)) / "harbor").resolve()),
-        "n_attempts": 1,
-        "n_concurrent_trials": 1,
-        "agents": [agent_entry],
-        "tasks": [{"path": configured_task_path}],
-    }
-    return yaml.safe_dump(document, sort_keys=False)
+    resolve_agent_options(agent, agent_options)
+    models = command_models(agent)
+    if continuation and continuation.get("max_resumes", 0) and not execution.get("resume_entrypoint"):
+        raise ValueError("command continuation requires execution.resume_entrypoint")
+    kwargs = {"execution": execution, "models": models,
+              "task_input": agent.get("task_input", {})}
+    if continuation:
+        kwargs.update({f"continuation_{key}": value for key, value in continuation.items()})
+    return yaml.safe_dump({
+        "job_name": run_id, "jobs_dir": str(((run_dir or RUNS_ROOT / run_id) / "harbor").resolve()),
+        "n_attempts": 1, "n_concurrent_trials": 1,
+        "agents": [{"import_path": "command_agent:CommandAgent",
+                    "model_name": models[0]["request_model"], "kwargs": kwargs,
+                    "env": {}}],
+        "tasks": [{"path": str(task_path.resolve())}],
+    }, sort_keys=False)
 
 
 def resolve_continuation_policy(runtime: dict[str, Any]) -> dict[str, int]:
@@ -1983,31 +1666,7 @@ def build_compose(
     # via a differently named host variable so Harbor's agent adapter can never
     # receive it as the agent's own key.
     if provider == "openai-chatgpt" and command_policy is None:
-        provider_secret_env = {
-            "CHATGPT_UPSTREAM_BASE_URL": (
-                "${CHATGPT_UPSTREAM_BASE_URL:-"
-                "https://chatgpt.com/backend-api/codex}"
-            ),
-        }
-        main_depends["codex-subscription-proxy"] = {
-            "condition": "service_healthy"
-        }
-        proxy_url = "http://codex-subscription-proxy:8081"
-        main_environment.update(
-            {
-                "HTTP_PROXY": proxy_url,
-                "HTTPS_PROXY": proxy_url,
-                "NO_PROXY": (
-                    "gateway,dev-scorer,eval-sidecar,"
-                    "localhost,127.0.0.1"
-                ),
-            }
-        )
-        main_volumes.append(
-            "${DUNGENESS_CODEX_AUTH_DIR:?"
-            "DUNGENESS_CODEX_AUTH_DIR is required}:"
-            "/run/dungeness/codex-auth:ro"
-        )
+        raise ValueError("ChatGPT access requires command model_access; native subscription agents are retired.")
     elif provider in CONFIGURED_PROVIDERS:
         profile = CONFIGURED_PROVIDERS[provider]
         key = profile['credential_env']
@@ -2184,33 +1843,6 @@ def build_compose(
         if "anthropic" in providers:
             main_environment["ANTHROPIC_API_KEY"] = "testbed"
             main_environment["ANTHROPIC_BASE_URL"] = "http://gateway:8080/model/anthropic"
-    if provider == "openai-chatgpt" and command_policy is None:
-        document["services"]["codex-subscription-proxy"] = {
-            "build": {"context": "./codex-subscription-proxy"},
-            "environment": {
-                "CODEX_ALLOWED_HOSTS": (
-                    "auth.openai.com"
-                ),
-                "PORT": "8081",
-            },
-            "healthcheck": {
-                "test": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    (
-                        "import socket; "
-                        "s=socket.create_connection(('localhost',8081),2); "
-                        "s.close()"
-                    ),
-                ],
-                "interval": "2s",
-                "timeout": "5s",
-                "retries": 15,
-                "start_period": "2s",
-            },
-            "networks": ["agent_internal", "external_egress"],
-        }
     if dev_scorer is not None:
         # The grader image in serve mode, on the internal network only (no
         # egress). The sidecar runs the full trusted benchmark and returns
@@ -2261,12 +1893,8 @@ def resolve_resume_source(
 ) -> dict[str, Any]:
     """Locate a prior run's persisted result for a warm-start resume.
 
-    Harbor 0.18.0's codex agent hardcodes `codex exec ... -- <prompt>` (a fresh
-    session) and only copies the session out afterward, so native `codex exec
-    resume` is not reachable through it. Instead we resume by state: seed the new
-    workspace with the prior run's final candidate file(s) and tell the agent it
-    is continuing (see build_continuation_notice). This is agent-agnostic --
-    the same path lets a different agent take over a prior agent's result.
+    Seed a new workspace with a prior run's verified candidate files.
+    Agent session memory and continuation logic remain inside the harness.
 
     Returns the prior candidate files (keyed by allowed path), the prior best
     score, and the prior search queries (so the agent need not repeat research).
@@ -2387,47 +2015,19 @@ def resolve_resume_source(
                 best = score
                 score_history.append(float(score))
 
-    # Distilled memory: the prior agent's OWN progress commentary (agent_message
-    # entries in its rollout). This is what warm-start otherwise loses -- what was
-    # tried and what worked. Best-effort; older runs may lack a persisted rollout.
-    notes: list[str] = []
-    rollouts = sorted(prior_dir.glob("harbor/*/*/agent/sessions/**/rollout-*.jsonl"))
-    if rollouts:
-        messages: list[str] = []
-        for line in rollouts[0].read_text(encoding="utf-8").splitlines():
-            try:
-                payload = json.loads(line).get("payload", {})
-            except json.JSONDecodeError:
-                continue
-            if payload.get("type") == "agent_message":
-                text = (payload.get("message") or "").strip()
-                if text:
-                    messages.append(text)
-        # Keep the opening approach + the most recent progress (bounded, deduped).
-        picked = messages[:1] + messages[-8:] if len(messages) > 9 else messages
-        seen: set[str] = set()
-        for message in picked:
-            if message not in seen:
-                seen.add(message)
-                notes.append(message[:300])
-
     return {
         "run_id": prior_run_id,
         "candidate_files": candidate_files,
         "best_score": best_score,
         "queries": queries,
         "score_history": score_history,
-        "notes": notes,
     }
 
 
 def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direction: str) -> str:
     """Preamble telling the agent it is continuing prior work, not starting cold.
 
-    This is the only channel through which a warm-started agent learns anything
-    the prior agent knew: the score to beat, the improvement history, the
-    prior agent's own notes, and the research already done. (Native transcript
-    context is not preserved -- see resolve_resume_source.)
+    Include recorded scores and queries. Session memory belongs to the harness.
     """
     best_score = resume["best_score"]
     better = "lower" if direction == "minimize" else "higher"
@@ -2443,7 +2043,7 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
         f"You are continuing from a previous run. `{candidate_rel}` in your "
         "workspace is NOT the original baseline -- it is the best solution reached "
         f"so far. {score_line} You do NOT have the prior session's memory, so treat "
-        "the notes below as retained context. The harness chooses how to use it.\n"
+        "the evidence below as retained context. The harness chooses how to use it.\n"
     )
     score_history = resume.get("score_history") or []
     if len(score_history) >= 2:
@@ -2455,11 +2055,6 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
             + " -> ".join(points)
             + ".\n"
         )
-    notes = resume.get("notes") or []
-    if notes:
-        notice += "\nThe prior agent's own progress notes (approaches tried and their effect):\n"
-        for note in notes:
-            notice += f"- {note}\n"
     queries = resume.get("queries") or []
     if queries:
         shown = "; ".join(f'"{q}"' for q in queries[:12])
@@ -2572,25 +2167,8 @@ def build_task(
                     f"run spec {relation_type} must be fully qualified in "
                     f"{run_spec_path}"
                 )
-        authored_agent_options = run_spec_manifest.get("agent_options", {})
-        if not isinstance(authored_agent_options, dict):
-            raise ValueError(
-                f"run spec agent_options must be a mapping in {run_spec_path}"
-            )
-        for field, supplied in (
-            ("reasoning_effort", reasoning_effort),
-            ("reasoning_summary", reasoning_summary),
-        ):
-            authored = authored_agent_options.get(field)
-            if authored is not None and supplied is not None and authored != supplied:
-                raise ValueError(
-                    f"resolved {field} does not match the authored run spec"
-                )
-            if supplied is None and isinstance(authored, str):
-                if field == "reasoning_effort":
-                    reasoning_effort = authored
-                else:
-                    reasoning_summary = authored
+        if run_spec_manifest.get("agent_options"):
+            raise ValueError("Native agent_options are retired; configure options inside the harness.")
         authored_runtime = run_spec_manifest.get("runtime", {})
         if not isinstance(authored_runtime, dict):
             raise ValueError(
@@ -2651,22 +2229,22 @@ def build_task(
         raise ValueError("an agent is required: pass --agent <id> (see agents/)")
     agent_path, agent = load_agent_record(agent_id, agent_namespace)
     agent_root = agent_path.parent
-    if command_execution(agent) is not None:
-        policy = (run_spec_manifest or {}).get("model_access")
-        if not isinstance(policy, dict) or set(policy) - {
-            "models", "max_parallel_requests", "request_reservation_usd",
-        }:
-            raise ValueError("command harnesses require run-spec model_access")
-        if not isinstance(policy.get("models"), list) or not policy["models"]:
-            raise ValueError("model_access.models must not be empty")
-        agent = {**agent, "model": policy["models"][0], "model_access": policy}
-        parallel = policy.get("max_parallel_requests", 4)
-        reservation = policy.get("request_reservation_usd", min(max_usd or 1, 1))
-        if type(parallel) is not int or not 1 <= parallel <= 16:
-            raise ValueError("max_parallel_requests must be 1..16")
-        if (type(reservation) not in (int, float) or not 0 < reservation < float("inf")):
-            raise ValueError("request_reservation_usd must be positive and finite")
-        command_models(agent)
+    command_execution(agent)
+    policy = (run_spec_manifest or {}).get("model_access")
+    if not isinstance(policy, dict) or set(policy) - {
+        "models", "max_parallel_requests", "request_reservation_usd",
+    }:
+        raise ValueError("command harnesses require run-spec model_access")
+    if not isinstance(policy.get("models"), list) or not policy["models"]:
+        raise ValueError("model_access.models must not be empty")
+    agent = {**agent, "model": policy["models"][0], "model_access": policy}
+    parallel = policy.get("max_parallel_requests", 4)
+    reservation = policy.get("request_reservation_usd", min(max_usd or 1, 1))
+    if type(parallel) is not int or not 1 <= parallel <= 16:
+        raise ValueError("max_parallel_requests must be 1..16")
+    if (type(reservation) not in (int, float) or not 0 < reservation < float("inf")):
+        raise ValueError("request_reservation_usd must be positive and finite")
+    command_models(agent)
     model = agent_model(agent)
     agent_option_overrides = {
         key: value
@@ -2677,7 +2255,6 @@ def build_task(
         if value is not None
     }
     effective_agent_options = resolve_agent_options(agent, agent_option_overrides)
-    model_adapter = resolve_agent_adapter(agent)
     model_pricing = resolve_model_pricing(agent)
     task_path, task = load_task_record(task_id, task_namespace)
     task_dir = task_path.parent
@@ -3036,11 +2613,6 @@ def build_task(
             task_root / "environment/candidate_state.py",
         )
         shutil.copytree(GATEWAY_ROOT, task_root / "environment/gateway")
-        if agent_provider(agent) == "openai-chatgpt":
-            shutil.copytree(
-                CODEX_SUBSCRIPTION_PROXY_ROOT,
-                task_root / "environment/codex-subscription-proxy",
-            )
         submissions = budget_policy.get("evaluation", {}).get("submissions", 200)
         dev_scorer_cfg = None
         if sidecar_mode == "full-benchmark":
@@ -3079,8 +2651,7 @@ def build_task(
             run_dir=resolved_run_dir,
             max_usd=effective_max_usd,
             model_pricing=model_pricing,
-            command_policy=({**agent["model_access"], "models": command_models(agent)}
-                            if command_execution(agent) is not None else None),
+            command_policy={**agent["model_access"], "models": command_models(agent)},
             agent_timeout_sec=agent_res["timeout_sec"],
             problem_service=problem_service,
             metric_direction=direction,
@@ -3309,17 +2880,6 @@ def build_task(
                 ),
                 "progressive_validation_shots": list(scaffold["shots"]),
             }
-        if model_adapter is not None:
-            adapter_path, adapter_manifest, implementation_path = model_adapter
-            configuration["sources"]["model_adapter"] = {
-                "manifest": source_snapshot(adapter_path, adapter_manifest),
-                "implementation": file_snapshot(implementation_path),
-            }
-        if agent_provider(agent) == "openai-chatgpt":
-            configuration["sources"]["codex_subscription_proxy"] = source_snapshot(
-                CODEX_SUBSCRIPTION_PROXY_ROOT / "service.yaml",
-                load_yaml(CODEX_SUBSCRIPTION_PROXY_ROOT / "service.yaml"),
-            )
         resolved_record = build_run_record(
             run_id=run_id,
             run_namespace=run_namespace,
@@ -3453,13 +3013,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--reasoning-effort",
-        choices=sorted(CODEX_REASONING_EFFORTS),
-        help="resolved Codex reasoning effort for this run",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--reasoning-summary",
-        choices=sorted(CODEX_REASONING_SUMMARIES),
-        help="resolved Codex reasoning summary detail for this run",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
     # Run id (the IDENTITY / directory name): explicit --run-id, else a descriptive

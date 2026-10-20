@@ -39,7 +39,7 @@ class HarnessStrategyTests(unittest.TestCase):
                     with patch.object(build, "checkout") as checkout:
                         with self.assertRaises(ValueError):
                             build.build_task("ecdsa-starter", "invalid-strategy",
-                                             agent_id="claude", checkpoint="62ae3d0",
+                                             agent_id="command", checkpoint="62ae3d0",
                                              namespace="users/bx", run_spec=str(path))
                         checkout.assert_not_called()
 
@@ -52,11 +52,13 @@ class HarnessStrategyTests(unittest.TestCase):
                 document["evaluation"] = {"mode": "split", "dev_cases": [1], "holdout_cases": [2]}
             return document
 
-        with patch.object(build, "load_yaml", side_effect=split_task), \
+        with tempfile.TemporaryDirectory() as directory, patch.object(build, "load_yaml", side_effect=split_task), \
                 patch.object(build, "checkout") as checkout:
+            path = Path(directory) / "run.yaml"
+            write_run_spec(path)
             with self.assertRaisesRegex(ValueError, "split evaluator has been retired"):
                 build.build_task("ecdsa-starter", "invalid-split",
-                                 agent_id="claude", checkpoint="62ae3d0", namespace="users/bx")
+                                 agent_id="command", checkpoint="62ae3d0", namespace="users/bx", run_spec=str(path))
             checkout.assert_not_called()
 
     def test_runtime_discloses_tools_and_limits_without_selecting_strategy(self):

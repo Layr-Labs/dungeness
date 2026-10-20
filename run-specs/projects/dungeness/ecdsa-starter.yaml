@@ -4,12 +4,18 @@ id: ecdsa-starter
 
 # Copy to your own namespace before editing; run ownership comes from `init`.
 task: task:projects/dungeness/ecdsa-starter
-agent: agent:projects/dungeness/codex-astra-subscription
+agent: agent:projects/dungeness/command
 checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
 
-agent_options:
-  reasoning_effort: high
-  reasoning_summary: detailed
+# The command example prints the task without making model calls. Replace it
+# with your own command harness to perform research.
+model_access:
+  models:
+    - provider: openai
+      upstream_id: openai/gpt-6-astra
+      request_model: gpt-6-astra
+      api: openai-responses
+      name_format: request
 
 budget:
   max_usd: 1

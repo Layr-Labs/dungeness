@@ -12,8 +12,9 @@ Model access and trusted prices are configured separately.
 Research strategy, memory, evaluation cadence and completion decisions belong to
 the harness. The runtime does not inject research-state prompts or enforce
 experimental search/evaluation quotas.
-See [command harnesses](docs/command-harness.md). Existing Codex, Claude Code and
-other maintained adapters remain supported.
+See [command harnesses](docs/command-harness.md). This is the only execution
+interface. Solvers may package any coding agent, including Codex or Claude Code,
+inside their submitted image; Dungeness does not install or configure it.
 
 The source is public and can be used for local development and controlled agent
 runs. Catalyst solvers can also submit source and authorized temporary model
@@ -35,21 +36,18 @@ and build overhead.
 ./dungeness init --namespace users/alice
 ```
 
-Choose your own namespace. For the starter's ChatGPT subscription route, install
-Codex and sign in locally:
-
-```sh
-./dungeness auth login codex
-./dungeness auth status codex
-```
+Choose your own namespace. Configure the selected provider's dedicated key in
+`.env` (for example, `TESTBED_OPENAI_API_KEY`). For a command harness using
+ChatGPT access, the caller supplies a private `DUNGENESS_CODEX_AUTH_FILE` to the
+gateway. Dungeness does not perform login or refresh; see
+[gateway authentication](docs/gateway-authentication.md).
 
 **Model calls consume your API credits or subscription allowance.** A normalized
 USD cap is an experimental comparison budget, not a guaranteed cash-billing
 limit. Actual usage is retained, including any final-response overshoot.
 Credentials stay outside committed inputs. API-backed providers use `.env`;
 command harnesses receive gateway access rather than your upstream credentials.
-Native subscription adapters have a different credential boundary; see the
-[authentication reference](docs/cli-reference.md#auth).
+All supported harnesses use this same credential boundary.
 
 ### 2. Prepare a committed run
 
@@ -58,9 +56,10 @@ cp run-specs/projects/dungeness/ecdsa-starter.yaml run-specs/users/alice/ecdsa-s
 ```
 
 Edit this copy to choose your agent, provider/model, normalized spending cap,
-token cap and time limit. The maintained starter uses Codex with GPT-6 Astra,
-high effort, a $1 cap and no web access. Other providers and arbitrary harnesses
-use the same metering/verification boundary. Agent-owned tools must be installed
+token cap and time limit. The maintained starter uses a no-model smoke command
+that prints the task. Replace its agent reference with your own
+[command harness](docs/command-harness.md) for research. The example declares
+OpenAI access, a $1 cap and no web access. Agent-owned tools must be installed
 before execution; the research container cannot download dependencies.
 
 Commit the intended inputs before running, on your own experiment branch:
@@ -100,11 +99,10 @@ the optional transcript tools and cleanup commands still work on retained local 
 | --- | --- |
 | `dungeness`, `src/dungeness/` | CLI, run compiler and provenance |
 | `adapters/`, `services/`, `policies/` | Trusted execution, metering and isolation |
-| `agents/projects/dungeness/`, `tasks/projects/dungeness/` | Maintained adapters and starter task |
+| `agents/projects/dungeness/`, `tasks/projects/dungeness/` | Command example and starter task |
 | `run-specs/projects/dungeness/` | Small maintained run examples |
 | `verifiers/`, `checkpoints/`, `problems/` | Grading and pinned task identities |
 | `tools/transcripts/` | Optional local transcript viewer; excluded from default runtime bundles |
-| `doc/` | Implementation notes |
 | `runs/` | Generated local output; not committed |
 
 The [runtime exporter](docs/runtime-distribution.md) creates a reproducible source
@@ -122,7 +120,6 @@ archive.
 - [Runtime distribution and artifact retention](docs/runtime-distribution.md)
 - [Record and configuration model](DESIGN.md)
 - [Gateway architecture](services/DESIGN.md)
-- [Implementation notes](doc/README.md) (full repository only)
 
 No-model-call regression checks from a full source checkout, using a Python
 environment with the gateway's pinned requirements installed:

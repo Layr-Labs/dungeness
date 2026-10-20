@@ -2,7 +2,7 @@
 
 `dungeness-command-v1` runs arbitrary installed software inside Harbor's
 container through a trusted adapter. The harness does not choose a host Python
-import, and need not identify as Codex, Claude Code, Pi, or another built-in agent.
+import, and cannot select a built-in agent. This is the only supported execution path.
 Research strategy, memory and completion decisions belong to the harness.
 The former `research_state` controller is removed; old specs that request it
 fail explicitly, as do run-spec evaluation and web-research strategy profiles.
@@ -66,8 +66,8 @@ Command runs reject undeclared model fallbacks, asynchronous background
 inference, paid provider tools and service-tier overrides whose costs cannot
 be established by the request's token ledger. Harness-executed function and
 custom tools remain available. The
-[gateway request policy](gateway-request-policy.md) applies equally to command
-harnesses and legacy agents: only reviewed request fields and harness-executed
+[gateway request policy](gateway-request-policy.md) applies to every command
+harness: only reviewed request fields and harness-executed
 tools are accepted, independently of the run's web-access setting. OpenRouter
 additionally requires the trusted operator to disable account-default server
 tools/plugins and set `TESTBED_OPENROUTER_INFERENCE_ONLY=1`.
@@ -94,3 +94,17 @@ provider billing limits. Calls can cost more than their allowance; actual usage
 controls subsequent admission, and missing usage stops it. A consuming benchmark
 must reject over-cap or incomplete evidence. Strict dollar caps require further
 provider-specific request bounds or provider-side limits.
+
+## Migrating bundled agents
+
+The bundled Codex, Claude Code, Pi and Prime Agent presets, native launchers,
+CLI login helper and OAuth refresh proxy are removed. Package your preferred
+agent in the submitted Docker image and launch it from `execution.entrypoint`.
+Set CLI options, reasoning settings and protocol compatibility inside the harness;
+run-level native `agent_options` are rejected. To resume, implement
+`execution.resume_entrypoint` and retain session state inside the container.
+
+Catalyst's `catalyst-exec-v1` submission contract is unchanged. Its public CLI
+accepts a Dockerfile and entrypoint and installs the trusted command adapter.
+The `agents/projects/dungeness/command` example is only a no-model smoke command.
+Historical bundled-agent experiments require their original runtime revision.

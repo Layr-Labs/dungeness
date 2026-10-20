@@ -20,8 +20,6 @@ class CommandAgent(BaseInstalledAgent):
         self.max_resumes = continuation_max_resumes
         self.min_remaining = continuation_min_remaining_sec
         self.timeout = continuation_timeout_sec
-        for key in ("reasoning_effort", "reasoning_summary", "model_context_window", "web_search"):
-            kwargs.pop(key, None)
         super().__init__(*args, **kwargs)
 
     @staticmethod

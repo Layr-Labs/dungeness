@@ -25,93 +25,18 @@ framework's generated files as the source of truth.
 
 ## Quick Start
 
-Prerequisites: `uv`, `uvx`, Docker, the host Codex CLI for ChatGPT
-subscription authentication, and enough Docker memory for the selected task.
+Follow the [runtime quick start](../README.md#quick-start-for-operators).
+Create a `dungeness-command-v1` descriptor and Dockerfile for your harness,
+then select its model policy independently in `model_access` in the run spec.
+The bundled `command` example only prints its task and makes no model calls.
+Catalyst solvers normally use the public Catalyst CLI to build or submit a
+`catalyst-exec-v1` harness; Catalyst creates this descriptor automatically.
 
-1. Check prerequisites and create `.env`:
-
-   ```bash
-   ./dungeness setup
-   ```
-
-2. If the run enables gateway web search, add the Exa key to `.env`. Runs with
-   zero search and fetch budgets do not need it. Then authenticate with the
-   host Codex CLI; ChatGPT subscription runs do not need a model API key:
-
-   ```dotenv
-   EXA_API_KEY=...
-   ```
-
-   ```bash
-   ./dungeness auth login codex
-   ./dungeness auth status codex
-   ```
-
-3. Configure the namespace for runs you create:
-
-   ```bash
-   ./dungeness init --namespace users/<name>
-   ```
-
-4. Create `ecdsa-starter-codex-subscription.yaml` under the configured
-   namespace's run-spec directory, for example
-   `run-specs/users/bx/ecdsa-starter-codex-subscription.yaml`. The
-   run-spec namespace is inferred from the default configured in step 3:
-
-   ```yaml
-   schema_version: 1
-   type: run-spec
-   id: ecdsa-starter-codex-subscription-1usd
-
-   task: task:projects/dungeness/ecdsa-starter
-   agent: agent:projects/dungeness/codex-subscription
-   checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
-
-   agent_options:
-     reasoning_effort: xhigh
-     reasoning_summary: detailed
-
-   budget:
-     max_usd: 1
-     max_model_tokens: 1000000
-
-   initialization:
-     mode: checkpoint
-
-   labels:
-     # Searchable metadata for filtering and comparing runs; labels do not
-     # change run identity or execution behavior.
-     purpose: baseline
-
-   runtime:
-     env_file: .env
-     keep_render: false
-     keep_images: false
-     # Optional run-level override of the task's default agent deadline.
-     agent_timeout_sec: 2700
-   ```
-
-5. Launch the run. For subscription agents, `max_usd` is a normalized
-   experimental budget rather than the amount billed by the provider:
-
-   ```bash
-   ./dungeness run ecdsa-starter-codex-subscription.yaml
-   ```
-
-Kimi Code and Moonshot require a solver-provided command harness that sends
-native Chat Completions. The legacy bundled Codex/Kimi presets and gateway
-protocol translation have been removed. See [command harnesses](command-harness.md).
-
-Dungeness prints the generated run ID. Persistent output is written under:
-
-```text
-runs/users/<name>/<run-id>/
-  record.json
-  harbor/
-  usage/
-    events.jsonl
-    summary.json
-```
+Bundled Codex, Claude Code, Pi and Prime Agent launchers have been retired,
+along with Dungeness's login command, native reasoning flags and refresh proxy.
+Historical native-agent runs require their pinned older runtime. Their recorded
+results remain readable. For new runs, install and configure your agent inside
+the harness image, including any CLI flags or session-resume behavior.
 
 ### Commit before every run
 
@@ -200,176 +125,30 @@ needed:
 ./dungeness setup
 ```
 
-### `auth`
+### Model access
 
-Codex can use an existing ChatGPT subscription. Log in with the host Codex CLI,
-or verify the current login:
-
-```bash
-./dungeness auth login codex
-./dungeness auth status codex
-```
-
-The default credential is `~/.codex/auth.json`. Set
-`DUNGENESS_CODEX_AUTH_FILE` to use another file. Credentials are never copied
-into the repository or `record.json`.
-
-Select the ChatGPT subscription profile in a run spec:
-
-```yaml
-agent: agent:projects/dungeness/codex-subscription
-```
-
-This profile runs `gpt-5.6-sol`. To use GPT-6 Astra through the same ChatGPT
-subscription credential, select:
-
-```yaml
-agent: agent:projects/dungeness/codex-astra-subscription
-```
-
-Subscription runs retain the agent's internal-only network. Codex sends model
-requests to the same Dungeness gateway used by API-backed profiles. A narrow
-allowlisted proxy exists only for OAuth token refresh; it cannot reach the
-ChatGPT model endpoint. The gateway reads provider-reported usage and applies
-trusted reference prices to enforce the normalized USD limit between
-responses. `billed_usd` remains unknown because a ChatGPT subscription is not
-billed per API token.
-
-The credential is supplied as a read-only per-run temporary copy. It is still
-readable inside the Codex container, so subscription runs have weaker
-credential isolation than gateway API runs.
-
-Native command harnesses can use the `kimi-code` and `moonshot` gateway
-routes with `TESTBED_KIMI_CODE_API_KEY` and `TESTBED_MOONSHOT_API_KEY`,
-respectively. Credentials stay in the gateway; usage is metered against trusted
-prices. The harness must speak Chat Completions or supply its own adapter.
-Kimi Code accounting retains normalized usage; `billed_usd` remains unknown.
-
-### Supported models and routes
-
-The maintained Codex profiles currently support GPT-6 Astra, GPT-5.6-sol,
-Kimi K3, Claude Opus 5, and Claude Fable 5.1; the Claude Code profiles support
-Claude Opus 5 and Claude Fable 5.1:
-
-| Agent | Model | Access route | Host credential |
-|---|---|---|---|
-| `agent:projects/dungeness/codex-subscription` | GPT-5.6-sol | ChatGPT subscription | `./dungeness auth login codex` |
-| `agent:projects/dungeness/codex-astra-subscription` | GPT-6 Astra | ChatGPT subscription | `./dungeness auth login codex` |
-| `agent:projects/dungeness/codex-astra-openai` | GPT-6 Astra | OpenAI Responses API | `TESTBED_OPENAI_API_KEY` |
-| `agent:projects/dungeness/codex-openai` | GPT-5.6-sol | OpenAI Responses API | `TESTBED_OPENAI_API_KEY` |
-| `agent:projects/dungeness/codex-openrouter` | GPT-5.6-sol | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/codex-kimi-openrouter` | Kimi K3 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/codex-claude-openrouter` | Claude Opus 5 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/codex-fable-openrouter` | Claude Fable 5.1 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/claude-openrouter` | Claude Opus 5 (Claude Code) | OpenRouter Anthropic-compatible Messages API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/claude-fable-openrouter` | Claude Fable 5.1 (Claude Code) | OpenRouter Anthropic-compatible Messages API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/claude` | Claude Opus 5 (Claude Code) | Anthropic Messages API | `TESTBED_ANTHROPIC_API_KEY` |
-
-The model and provider route are pinned by the agent manifest. Run specs select
-an agent profile and may override supported reasoning options; they do not
-supply an arbitrary model name.
-
-GPT-6 Astra normally uses the `codex-astra-subscription` profile so Codex-plan
-access is kept separate from API billing. `codex-astra-openai` remains
-available for direct API-key runs. Both routes use Codex 0.153.3 and gateway
-accounting that separates ordinary input, cache reads, and cache writes, and
-selects the full-request long-context pricing tier when reported input exceeds
-272,000 tokens. Reasoning tokens are included in output tokens and are not
-double counted.
-
-For the existing OpenRouter Responses path, select:
-
-```yaml
-agent: agent:projects/dungeness/codex-kimi-openrouter
-```
-
-This profile needs `TESTBED_OPENROUTER_API_KEY` and the operator's
-[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults).
-OpenRouter's Responses
-API serves `moonshotai/kimi-k3` directly. The harness chooses reasoning settings;
-Dungeness records any returned visible reasoning and response events in
-`usage/events.jsonl` without forcing reasoning disclosure.
-Kimi K3 accepts `low`, `high`, and `max` reasoning effort; Dungeness rejects
-other effort overrides before starting Harbor.
-
-The repository includes a one-dollar smoke run:
-
-```bash
-./dungeness run ecdsa-kimi-k3-openrouter-smoke.yaml
-```
-
-### Codex with Claude Opus 5
-
-To hold the Codex harness fixed and vary only the model, select:
-
-```yaml
-agent: agent:projects/dungeness/codex-claude-openrouter
-```
-
-This profile needs `TESTBED_OPENROUTER_API_KEY`, the operator's
-[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults), and reuses the
-`codex-openrouter` image. OpenRouter's Responses API serves
-`anthropic/claude-opus-5` with function calling, maps Codex's
-`reasoning_effort` (`low`, `medium`, `high`, `xhigh`) onto Anthropic thinking
-budgets, and returns provider-visible reasoning items, which the gateway records
-in `usage/events.jsonl`. The profile defaults to
-`reasoning_summary: none` because Anthropic reasoning arrives as content rather
-than an OpenAI-style summary. Pricing follows the trusted policy entry for
-Opus 5 through OpenRouter.
-
-### Claude Code
-
-Claude Code runs as a second research agent beside Codex. The simplest route
-is OpenRouter, which serves the Anthropic Messages API that Claude Code speaks:
-
-```yaml
-agent: agent:projects/dungeness/claude-openrouter
-```
-
-This profile needs `TESTBED_OPENROUTER_API_KEY` and the operator's
-[inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults).
-It reuses the pinned
-Claude Code image from `agents/projects/dungeness/claude`, disables Claude
-Code's built-in `WebSearch` and `WebFetch` tools so research goes through the
-gateway `web` command, and bills `anthropic/claude-opus-5` from the trusted
-pricing policy at the same schedule as the direct Anthropic route. Claude Code
-does not take Codex-style `agent_options`; extended thinking is capped by the
-profile's `MAX_THINKING_TOKENS`.
-
-Harbor's Claude Code launcher reads `ANTHROPIC_BASE_URL` from its own process
-environment to decide how to pass the model name, so `dungeness run` exports
-the selected profile's gateway route before starting Harbor and records it
-under `configuration.launcher.control_plane_environment`. Do not set
-`ANTHROPIC_BASE_URL` in `.env`: Harbor loads `.env` with override, and a
-conflicting value makes `dungeness run` refuse to start.
-
-The direct Anthropic profile `agent:projects/dungeness/claude` uses
-`TESTBED_ANTHROPIC_API_KEY` instead.
+Use the [command model-access contract](command-harness.md) and
+[gateway authentication configuration](gateway-authentication.md). Provider keys
+are passed only to the gateway. Agent images receive a placeholder token and
+allowed model URLs; they never receive native credentials or a refresh proxy.
 
 ### `run`
 
 The preferred input is an authored run specification:
 
 ```bash
-./dungeness run ecdsa-starter-codex-subscription.yaml
+./dungeness run ecdsa-starter.yaml
 ```
 
 CLI options override values in the YAML:
 
 ```bash
-./dungeness run ecdsa-starter-codex-subscription.yaml \
+./dungeness run ecdsa-starter.yaml \
   --max-usd 2 \
   --label purpose=comparison
 ```
 
-The equivalent flag-only form remains available:
-
-```bash
-./dungeness run ecdsa-starter \
-  --agent codex-subscription \
-  --checkpoint 62ae3d0 \
-  --max-usd 1
-```
+A run spec with `model_access` is required for command execution.
 
 Common run options:
 
@@ -403,7 +182,7 @@ copied into the agent workspace.
 Find every canonical run produced from a run spec:
 
 ```bash
-./dungeness runs ecdsa-starter-codex-subscription.yaml
+./dungeness runs ecdsa-starter.yaml
 ```
 
 The result includes status, reasoning effort, score, and run ID. Repeated and
@@ -447,8 +226,13 @@ design:
 
   controls:
     task: task:projects/dungeness/ecdsa-starter
-    agent_options:
-      reasoning_summary: detailed
+    model_access:
+      models:
+        - provider: openai
+          upstream_id: openai/gpt-6-astra
+          request_model: gpt-6-astra
+          api: openai-responses
+          name_format: request
     budget:
       max_usd: 1
       max_model_tokens: 1000000
@@ -462,17 +246,12 @@ design:
 
   axes:
     agents:
-      - ref: agent:projects/dungeness/codex-subscription
+      - ref: agent:projects/dungeness/command
     checkpoints:
       - ref: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
-    reasoning_efforts:
-      - low
-      - medium
-      - high
-      - xhigh
 
 run_labels:
-  purpose: reasoning-effort-comparison
+  purpose: harness-comparison
 
 run_refs: []
 artifact_refs: []
@@ -602,7 +381,7 @@ canonical run record. Use `--yes` to skip confirmation in automation.
 ## Run Specifications
 
 A run spec is a namespaced, reviewable configuration for one execution. The
-Quick Start contains a complete one-dollar Codex example. Optional fields
+starter run spec declares a one-dollar budget and an independent model policy. Optional fields
 include `budget.max_model_tokens`, `initialization.resume_from`, and additional
 labels.
 
@@ -621,12 +400,12 @@ profile references are accepted as access-only compatibility aliases. They do
 not select or constrain the harness architecture. The mandatory
 [gateway request policy](gateway-request-policy.md) blocks provider-hosted search
 and accepts only reviewed inference fields and locally executed tools in either
-mode, including for legacy agents.
+mode.
 
 Strategy profiles, run-spec `evaluation`, `research_state`, and
 `initialization.knowledge_base` are rejected with migration messages. Bundle
 research instructions, documents, retrieval code and subagents into the harness.
-See [command harnesses](command-harness.md) and [knowledge migration](../doc/knowledge-base-preload.md).
+See [command harnesses](command-harness.md).
 The task still selects the trusted evaluator and its resource limits. Runtime
 instructions describe candidate paths, tools, accounting and the deadline;
 they do not prescribe evaluation frequency or researcher topology.
@@ -653,7 +432,7 @@ Experiment-generated run-spec IDs already include the experiment and matrix
 cell identity. A run directory such as:
 
 ```text
-ecdsa-effort-sweep-codex-subscription-c6f6d2c-low-20260821T190000Z-a1b2c3d4
+ecdsa-harness-sweep-command-c6f6d2c-r1-20260821T190000Z-a1b2c3d4
 ```
 
 can therefore be associated with its run spec and experiment without opening
@@ -665,19 +444,14 @@ search and retrieve. Access will go through the trusted gateway rather than a
 direct run-directory mount, and the resolved view will be recorded with the
 run.
 
-An agent manifest is a complete runnable profile: it pins the agent runtime,
-model, provider route or subscription authentication, API protocol, and any
-trusted protocol-adapter reference. For example, Codex through OpenRouter,
-Codex through a ChatGPT subscription, and Codex through Kimi are separate agent
-records. Run specs select one agent rather than assembling those components
-independently.
+An agent manifest declares a Docker image and `dungeness-command-v1`
+entrypoint. It cannot select a host adapter, native authentication or host
+launcher configuration. Choose providers and models independently in
+`model_access`. The harness owns its coding-agent installation and options.
 
-Agent manifests do not define prices, credentials, provider endpoints, or
-adapter implementations. Those remain trusted system configuration. Accounting
-lives in `services/gateway/pricing.yaml` under `system/dungeness`; unpriced
-provider/model combinations are rejected before reaching the provider. An
-optional `adapter` field may only reference an implementation under
-`adapter:system/dungeness/...`.
+Prices, credentials and upstream endpoints remain trusted gateway configuration.
+Accounting uses `services/gateway/pricing.yaml`; unpriced combinations are
+rejected before reaching the provider.
 
 > Whether access to another agent's artifacts is appropriate is a decision for
 > the run-spec author. Dungeness will enforce and record the declared policy; it
@@ -697,8 +471,8 @@ Examples:
 ```text
 problem:public/ecdsafail-challenge/ecdsa-fail
 task:projects/dungeness/ecdsa-starter
-agent:projects/dungeness/codex-openrouter
-run-spec:users/bx/ecdsa-fail-codex-openrouter-1usd
+agent:projects/dungeness/command
+run-spec:users/bx/ecdsa-starter-1usd
 run:users/bx/<run-id>
 ```
 
@@ -749,9 +523,9 @@ agents/users/bx/<agent>/agent.yaml
 
 `dungeness init` creates the namespace directories. Unqualified task and agent
 names first resolve in the configured namespace, then fall back to a unique
-shared definition. Thus a user-created `agents/users/bx/codex-openrouter/`
-takes precedence over the project definition for `--agent codex-openrouter`;
-use `agent:projects/dungeness/codex-openrouter` when the shared definition
+shared definition. Thus a user-created `agents/users/bx/command/`
+takes precedence over the project definition for `--agent command`;
+use `agent:projects/dungeness/command` when the shared definition
 must be selected explicitly.
 
 See [DESIGN.md](../DESIGN.md) for the complete model and conventions.
@@ -812,8 +586,8 @@ The universal envelope is:
     "task": "task:projects/dungeness/ecdsa-starter",
     "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
     "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
-    "agent": "agent:projects/dungeness/codex-openrouter",
-    "run_spec": "run-spec:users/bx/ecdsa-fail-codex-openrouter-1usd"
+    "agent": "agent:projects/dungeness/command",
+    "run_spec": "run-spec:users/bx/ecdsa-starter-1usd"
   },
   "data": {}
 }
@@ -837,8 +611,8 @@ the record.
 3. The agent works inside an internal-only Docker network.
 4. Model and web calls pass through the trusted gateway for metering, budgets,
    tracing, credential policy, and historical web cutoff enforcement.
-   Subscription Codex forwards its ChatGPT bearer credential through the
-   gateway; its separate allowlisted proxy is limited to OAuth refresh.
+   Provider credentials are held only by the gateway. No refresh proxy is
+   supplied to the harness.
    Historical web search fails closed: undated, post-cutoff, and known mutable
    results are removed before the agent sees them. Mutable dated pages are
    metadata-only, and full fetches require immutable version-pinned URLs.

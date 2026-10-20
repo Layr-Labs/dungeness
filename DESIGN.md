@@ -47,7 +47,7 @@ First-class records use a common envelope:
 schema_version: 1
 type: run
 namespace: users/bx
-id: ecdsa-fail-62ae3d00-claude-20260820T120000Z-a1b2c3d4
+id: ecdsa-fail-62ae3d00-command-20260820T120000Z-a1b2c3d4
 
 created_at: "2026-08-20T12:00:00.000Z"
 published_at: "2026-08-20T13:00:00.000Z"
@@ -56,7 +56,7 @@ labels:
   purpose: baseline
 
 relations:
-  agent: agent:projects/dungeness/claude
+  agent: agent:projects/dungeness/command
 
 data: {}
 ```
@@ -91,7 +91,7 @@ Manifests store these components separately. `id` is always local:
 ```yaml
 type: agent
 namespace: projects/dungeness
-id: claude
+id: command
 ```
 
 Relations and command inputs may use the qualified reference:
@@ -103,10 +103,10 @@ Relations and command inputs may use the qualified reference:
 For example:
 
 ```text
-agent:projects/dungeness/claude
+agent:projects/dungeness/command
 task:projects/dungeness/ecdsa-starter
 checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00...
-run-spec:users/bx/ecdsa-fail-claude-1usd
+run-spec:users/bx/ecdsa-fail-command-1usd
 run:users/bx/<run-id>
 ```
 
@@ -145,7 +145,7 @@ Examples:
 ```text
 problem:public/ecdsafail-challenge/ecdsa-fail
 task:projects/dungeness/ecdsa-starter
-agent:projects/dungeness/claude
+agent:projects/dungeness/command
 policy:system/dungeness/gateway-only
 ```
 
@@ -319,21 +319,11 @@ replacement for the universal `created_at` or `published_at` fields.
 
 ### Agent
 
-An agent record describes a runnable research agent:
-
-- package and pinned version;
-- model, provider route or subscription authentication, and API protocol;
-- an optional trusted protocol-adapter reference;
-- Harbor agent integration and arguments;
-- non-secret environment values; and
-- container image.
-
-The agent is deliberately a complete runnable profile rather than a composition
-of separate model and route records. Variants such as Codex/OpenRouter,
-Codex/ChatGPT-subscription, and Codex/Kimi use separate agent identities. This
-keeps run specs small and makes the configuration actually tested by an
-experiment explicit. If the number of combinations later becomes difficult to
-maintain, model composition can be introduced from observed requirements.
+An agent record selects an installed container image and a
+`dungeness-command-v1` entrypoint. Dependencies, coding-agent versions,
+configuration and session memory belong to that image. The host always uses
+the trusted command adapter. Model access is declared independently in the
+run spec; the same harness can run with different compatible models.
 
 Model pricing, provider credentials, upstream endpoints, and adapter
 implementations are trusted gateway policy under `system/dungeness`, not
@@ -353,10 +343,10 @@ A run spec is a reviewable input for one execution:
 schema_version: 1
 type: run-spec
 namespace: users/bx
-id: ecdsa-fail-claude-1usd
+id: ecdsa-fail-command-1usd
 
 task: task:projects/dungeness/ecdsa-starter
-agent: agent:projects/dungeness/claude
+agent: agent:projects/dungeness/command
 checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>
 
 budget:
@@ -411,13 +401,13 @@ new run ID and record:
   "schema_version": 1,
   "type": "run",
   "namespace": "users/alice",
-  "id": "ecdsa-fail-claude-1usd-20260820T120000Z-a1b2c3d4",
+  "id": "ecdsa-fail-command-1usd-20260820T120000Z-a1b2c3d4",
   "relations": {
-    "run_spec": "run-spec:users/bx/ecdsa-fail-claude-1usd",
+    "run_spec": "run-spec:users/bx/ecdsa-fail-command-1usd",
     "task": "task:projects/dungeness/ecdsa-starter",
     "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
     "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
-    "agent": "agent:projects/dungeness/claude"
+    "agent": "agent:projects/dungeness/command"
   },
   "data": {
     "status": "completed"
@@ -580,7 +570,7 @@ time view.
 The preferred command is:
 
 ```bash
-./dungeness run ecdsa-fail-codex-openrouter.yaml
+./dungeness run ecdsa-fail-command.yaml
 ```
 
 Dungeness then:
@@ -601,7 +591,7 @@ The flag-only form is supported for ad hoc runs:
 
 ```bash
 ./dungeness run projects/dungeness/ecdsa-starter \
-  --agent claude \
+  --agent command \
   --checkpoint 62ae3d0 \
   --max-usd 1
 ```
@@ -661,41 +651,15 @@ and evaluator completions include the latest readable usage snapshot. Fallback
 writes are idempotent by `(source, event_id)`; normal collected events always
 have an integer sequence.
 
-Kimi K3 profiles constrain reasoning effort to the model's supported
-`low`, `high`, and `max` values. The direct Moonshot adapter must preserve each
-assistant message's `reasoning_content` with its tool calls on the following
-turn; the OpenRouter Responses profile relies on the native Responses history
-while retaining the untouched upstream events in the canonical event stream.
+### Command harness execution
 
-### Subscription Codex
-
-`agent:projects/dungeness/codex-subscription` reuses the pinned Codex image but
-authenticates with a ChatGPT subscription. The launcher:
-
-1. validates the host's file-backed Codex login;
-2. copies it into a mode-`0600` temporary directory;
-3. mounts that directory read-only for one Harbor run; and
-4. deletes the temporary copy afterward.
-
-The agent remains on the internal Docker network. A trusted
-`service:system/dungeness/codex-subscription-proxy` accepts only HTTP CONNECT
-requests to `auth.openai.com` for OAuth token refresh. Model requests use
-Codex's custom Responses provider at
-`http://gateway:8080/model/chatgpt/v1`; the gateway forwards the ChatGPT bearer
-credential to the fixed upstream Codex endpoint. The proxy cannot reach that
-model endpoint and is not a generic web proxy.
-
-The gateway extracts provider-reported usage, applies
-`policy:system/dungeness/model-pricing`, and rejects the next request once the
-normalized USD limit is reached. Like API accounting, this is a
-between-response limit and can overshoot by the final response. Subscription
-runs record `normalized_usd`, `billed_usd: null`, and
-`accounting_method: gateway`.
-
-This mode deliberately has a reduced credential-isolation classification:
-Codex must be able to read the temporary OAuth credential. The persistent host
-credential is never writable from the container, and refreshed container state
-is not copied back.
+Only `dungeness-command-v1` is supported. The solver owns the agent software,
+versions, protocol compatibility and session memory inside its image. The trusted
+command adapter supplies task input and launches the entrypoint in the sandbox.
+Model selection and prices remain separately controlled by run configuration.
+Provider credentials, including temporary subscription access files, stay in the
+gateway. There is no native agent launcher, login flow or refresh proxy.
+Historical native runs must use their original pinned revision.
 
 `dungeness prune <run-id>` permanently removes an unreferenced local run. It
 does not yet implement catalog retention, publication, or artifact garbage
@@ -710,10 +674,8 @@ approved candidate paths reach:
 - the final clean, no-network verifier.
 
 The agent cannot modify trusted evaluator sources, gateway records, or verifier
-implementation. API credentials remain gateway-only. Subscription Codex is the
-explicit exception: it receives a read-only temporary OAuth credential and is
-therefore marked reduced-isolation. All model and web calls pass through the
-trusted gateway; the subscription proxy is restricted to OAuth refresh.
+implementation. Provider credentials remain gateway-only. All model and web
+calls pass through the trusted gateway.
 
 Verifier bundles live under top-level `verifiers/` because they are trusted
 execution implementations, not children of a problem or checkpoint:

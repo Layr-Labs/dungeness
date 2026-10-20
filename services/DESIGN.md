@@ -59,8 +59,7 @@ and limits at startup. Requests do not need an agent authentication token.
 
 The agent and gateway share an internal Docker network. Only trusted services
 join a network with external egress. Every model profile uses the gateway.
-`codex-subscription` additionally uses a narrow CONNECT proxy that permits only
-the OAuth refresh host.
+There is no agent-side credential mount or authentication-refresh proxy.
 
 ```yaml
 services:
@@ -110,12 +109,9 @@ TESTBED_OPENROUTER_API_KEY=<secret>
 effective budget. It is omitted for no-web runs. Provider credentials must not
 be mounted into the agent container or written to run artifacts.
 
-ChatGPT subscription authentication is the explicit exception. Dungeness
-mounts a read-only temporary copy of the host Codex `auth.json` into the Codex
-container. The credential is never written to run records or retained renders,
-but this profile is classified as reduced isolation because Codex itself must
-be able to read the OAuth tokens. Codex forwards its bearer credential to the
-fixed ChatGPT gateway route; the gateway never logs it.
+ChatGPT access uses a read-only temporary access file mounted only into the
+gateway. The caller owns its lifetime; Dungeness does not log in or refresh it.
+Every submitted command sees only gateway URLs and a placeholder token.
 
 ### Gateway implementation layout
 
@@ -226,12 +222,11 @@ OPENAI_API_KEY=testbed
 `OPENAI_API_KEY=testbed` is only a placeholder for clients that require a value.
 The real provider key exists only inside the gateway.
 
-Codex profiles use the same Responses contract with backend-specific fixed
-routes:
+Harnesses can use the Responses contract on fixed provider routes:
 
 ```text
 /model/openrouter/v1/responses  OpenRouter API key held by the gateway
-/model/chatgpt/v1/responses     ChatGPT bearer credential forwarded by Codex
+/model/chatgpt/v1/responses     ChatGPT access held by the gateway
 ```
 
 Moonshot and Kimi Code expose only `/model/<provider>/v1/chat/completions`.
@@ -254,13 +249,10 @@ them, for example:
 The gateway forwards only supported model API routes. It cannot forward an
 arbitrary URL supplied by the agent.
 
-The gateway forwards the request body verbatim (it reads only the model name,
-for accounting). It does **not yet** strip provider-hosted tools from the
-payload. A hosted tool such as OpenAI's server-side `web_search` would therefore
-execute on the provider side and bypass this gateway's web cutoff and budget.
-Until gateway-side rejection of hosted tools (`web_search*`, `file_search`,
-`code_interpreter`, `mcp`, `computer_use`) is added, those must be disabled in
-the agent definition — the Codex agent sets `web_search=disabled`.
+The gateway validates the declared model, usage-compatible request fields and
+locally executed tools before forwarding. Provider-hosted tools and unknown
+fields are rejected by the [request policy](../docs/gateway-request-policy.md).
+The harness owns CLI configuration and API compatibility.
 
 ## Usage and budgets
 

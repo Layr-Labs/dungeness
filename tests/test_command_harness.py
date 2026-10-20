@@ -32,6 +32,61 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_native_launchers_fail_before_model_selection(self):
+        for name in ("codex", "claude-code", "pi", "prime-agent"):
+            with self.subTest(name=name), patch.object(compiler, "command_models") as models:
+                with self.assertRaisesRegex(ValueError, "Bundled agents are retired"):
+                    compiler.build_harbor_job("retired", {"harbor": {"agent": name}}, ROOT)
+                models.assert_not_called()
+
+    def test_command_rejects_native_credentials_and_host_overrides(self):
+        execution = {"interface": "dungeness-command-v1", "entrypoint": ["solver"]}
+        for field, value in (
+            ("authentication", {"mode": "chatgpt-subscription"}),
+            ("environment", {"OPENAI_API_KEY": "synthetic-secret"}),
+            ("adapter", "adapter:system/dungeness/custom"),
+            ("harbor", {"import_path": "solver:HostCode"}),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "cannot select"):
+                compiler.command_execution({"execution": execution, field: value})
+
+    def test_chatgpt_without_command_policy_cannot_mount_credentials_in_agent(self):
+        with self.assertRaisesRegex(ValueError, "requires command model_access"):
+            compiler.build_compose("legacy", {"historical_cutoff": {}}, {}, provider="openai-chatgpt")
+
+    def test_only_generic_command_example_and_adapters_are_bundled(self):
+        descriptors = list((ROOT / "agents/projects/dungeness").glob("*/agent.yaml"))
+        self.assertEqual([path.parent.name for path in descriptors], ["command"])
+        for path in descriptors:
+            compiler.command_execution(yaml.safe_load(path.read_text()))
+        for path in ("adapters/harbor/codex_gateway.py", "adapters/harbor/codex_subscription.py",
+                     "adapters/harbor/prime_agent.py", "services/codex-subscription-proxy"):
+            self.assertFalse((ROOT / path).exists(), path)
+
+    def test_control_plane_accepts_only_the_trusted_command_adapter(self):
+        from test_record_model import cli
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "job.yaml"
+            entry = {"import_path": "command_agent:CommandAgent", "env": {}}
+            path.write_text(yaml.safe_dump({"agents": [entry]}))
+            cli.validate_command_job(path)
+            for override in ({"import_path": "solver:Host"}, {"name": "codex"},
+                             {"env": {"OPENAI_API_KEY": "synthetic-secret"}}):
+                path.write_text(yaml.safe_dump({"agents": [{**entry, **override}]}))
+                with self.assertRaisesRegex(RuntimeError, "Only dungeness-command-v1"):
+                    cli.validate_command_job(path)
+
+    def test_host_provider_environment_scrubbing_is_preserved(self):
+        from test_record_model import cli
+        environment, scrubbed = cli.harbor_launch_environment({
+            "PATH": "/usr/bin", "ANTHROPIC_API_KEY": "synthetic-secret",
+            "AWS_BEARER_TOKEN_BEDROCK": "synthetic-secret", "CLAUDE_CODE_USE_BEDROCK": "1",
+            "TESTBED_OPENAI_API_KEY": "gateway-only",
+        }, {})
+        self.assertEqual(environment, {"PATH": "/usr/bin", "TESTBED_OPENAI_API_KEY": "gateway-only"})
+        self.assertEqual(set(scrubbed), {"ANTHROPIC_API_KEY", "AWS_BEARER_TOKEN_BEDROCK",
+                                        "CLAUDE_CODE_USE_BEDROCK"})
+
     def test_configured_account_metadata_is_exposed_only_to_authorized_gateway(self):
         profile = {**compiler.CONFIGURED_PROVIDERS["xai"],
                    "credential_headers": {"account-id": "XAI_API_KEY_ACCOUNT"}}

@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -54,20 +53,6 @@ RUN_SPEC_FIELDS = {
     "runtime",
 }
 LOCAL_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
-CODEX_REASONING_EFFORTS = {
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "max",
-    "xhigh",
-}
-CODEX_REASONING_SUMMARIES = {
-    "auto",
-    "concise",
-    "detailed",
-    "none",
-}
 sys.path.insert(0, str(REPO_ROOT / "src"))
 from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
 
@@ -94,109 +79,6 @@ def user_config_path(environment: dict[str, str] | None = None) -> Path:
     xdg_root = environment.get("XDG_CONFIG_HOME")
     config_root = Path(xdg_root).expanduser() if xdg_root else Path.home() / ".config"
     return config_root / "dungeness/config.toml"
-
-
-def codex_auth_path(environment: dict[str, str] | None = None) -> Path:
-    environment = os.environ if environment is None else environment
-    override = environment.get("DUNGENESS_CODEX_AUTH_FILE")
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".codex/auth.json"
-
-
-def load_chatgpt_auth(path: Path) -> dict[str, object]:
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
-        raise SystemExit(
-            f"Codex subscription credential not found: {path}\n"
-            "Run: ./dungeness auth login codex"
-        ) from error
-    except (OSError, json.JSONDecodeError) as error:
-        raise SystemExit(f"invalid Codex subscription credential: {path}") from error
-    tokens = document.get("tokens")
-    if document.get("auth_mode") != "chatgpt" or not isinstance(tokens, dict):
-        raise SystemExit(
-            f"Codex credential is not a ChatGPT subscription login: {path}"
-        )
-    for key in ("access_token", "refresh_token"):
-        if not isinstance(tokens.get(key), str) or not tokens[key]:
-            raise SystemExit(f"Codex credential is missing {key}: {path}")
-    return document
-
-
-def codex_auth_command(args: argparse.Namespace) -> int:
-    path = codex_auth_path()
-    if args.auth_command == "status":
-        document = load_chatgpt_auth(path)
-        print("Codex subscription authentication: ready")
-        print(f"Credential: {path}")
-        if document.get("last_refresh"):
-            print(f"Last refresh: {document['last_refresh']}")
-        return 0
-
-    if shutil.which("codex") is None:
-        raise SystemExit("codex is not installed on the host")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
-    environment["CODEX_HOME"] = str(path.parent)
-    command = ["codex", "login"]
-    if args.device_auth:
-        command.append("--device-auth")
-    subprocess.run(command, env=environment, check=True)
-    load_chatgpt_auth(path)
-    print(f">> Codex subscription credential ready: {path}")
-    return 0
-
-
-def selected_agent_manifest(args: argparse.Namespace) -> dict[str, object]:
-    path = find_local_record_path(
-        "agent",
-        args.agent_namespace,
-        args.agent,
-    )
-    if path is None:
-        raise SystemExit(
-            f"agent is not installed locally: "
-            f"agent:{args.agent_namespace}/{args.agent}"
-        )
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise SystemExit(f"invalid agent manifest: {path}")
-    return document
-
-
-@contextmanager
-def prepared_subscription_auth(
-    args: argparse.Namespace,
-):
-    agent = selected_agent_manifest(args)
-    if agent.get("execution", {}).get("interface") == "dungeness-command-v1":
-        # Generic harnesses never receive native provider credentials. The
-        # caller supplies a tmpfs access file mounted only into the gateway.
-        yield {}
-        return
-    authentication = agent.get("authentication")
-    if not (
-        isinstance(authentication, dict)
-        and authentication.get("mode") == "chatgpt-subscription"
-    ):
-        yield {}
-        return
-
-    source = codex_auth_path()
-    load_chatgpt_auth(source)
-    temporary_root = Path(
-        tempfile.mkdtemp(prefix="dungeness-codex-auth-", dir=os.environ.get("DUNGENESS_AUTH_TMPDIR", "/tmp"))
-    )
-    temporary_root.chmod(0o700)
-    temporary_auth = temporary_root / "auth.json"
-    shutil.copy2(source, temporary_auth)
-    temporary_auth.chmod(0o600)
-    try:
-        yield {"DUNGENESS_CODEX_AUTH_DIR": str(temporary_root)}
-    finally:
-        shutil.rmtree(temporary_root, ignore_errors=True)
 
 
 def load_user_config(path: Path) -> dict[str, object]:
@@ -785,28 +667,6 @@ def experiment_axis_references(
     return list(dict.fromkeys(references))
 
 
-def validate_agent_model_control(
-    agent_reference: str,
-    expected: dict[str, object],
-) -> None:
-    _, agent = load_qualified_record(agent_reference, "agent")
-    model = agent.get("model")
-    if not isinstance(model, dict):
-        raise SystemExit(f"agent has no model configuration: {agent_reference}")
-    for field, value in expected.items():
-        if field not in {"provider", "upstream_id", "request_model", "api"}:
-            raise SystemExit(f"unsupported controlled model field: {field}")
-        if not isinstance(value, str) or not value:
-            raise SystemExit(
-                f"experiment controlled model field {field} must be a string"
-            )
-        if model.get(field) != value:
-            raise SystemExit(
-                f"agent does not match controlled model field {field}: "
-                f"{agent_reference}"
-            )
-
-
 def create_experiment(args: argparse.Namespace) -> int:
     experiment_path, experiment = load_experiment(
         args.target,
@@ -856,21 +716,14 @@ def create_experiment(args: argparse.Namespace) -> int:
         "checkpoints",
         "checkpoint",
     )
-    model_control = controls.get("model")
-    if model_control is not None:
-        if not isinstance(model_control, dict) or not model_control:
-            raise SystemExit(
-                "experiment design.controls.model must be a non-empty mapping"
-            )
-        for agent_reference in agent_references:
-            validate_agent_model_control(agent_reference, model_control)
+    if "model" in controls:
+        raise SystemExit("Use experiment controls.model_access instead of a bundled agent model.")
+    model_access = controls.get("model_access")
+    if not isinstance(model_access, dict) or not model_access.get("models"):
+        raise SystemExit("experiment controls.model_access.models is required for command harnesses")
 
     repetitions = design.get("repetitions", 1)
-    if (
-        not isinstance(repetitions, int)
-        or isinstance(repetitions, bool)
-        or repetitions < 1
-    ):
+    if type(repetitions) is not int or repetitions < 1:
         raise SystemExit("experiment design.repetitions must be a positive integer")
 
     budget = controls.get("budget")
@@ -928,64 +781,8 @@ def create_experiment(args: argparse.Namespace) -> int:
             "experiment runtime.agent_timeout_sec must be a positive integer"
         )
 
-    controlled_agent_options = controls.get("agent_options", {})
-    if not isinstance(controlled_agent_options, dict):
-        raise SystemExit(
-            "experiment design.controls.agent_options must be a mapping"
-        )
-    unknown_agent_options = sorted(
-        set(controlled_agent_options)
-        - {"reasoning_effort", "reasoning_summary"}
-    )
-    if unknown_agent_options:
-        raise SystemExit(
-            "unsupported controlled agent options: "
-            + ", ".join(unknown_agent_options)
-        )
-    controlled_effort = controlled_agent_options.get("reasoning_effort")
-    if controlled_effort is not None and controlled_effort not in CODEX_REASONING_EFFORTS:
-        raise SystemExit("invalid controlled reasoning_effort")
-    controlled_summary = controlled_agent_options.get("reasoning_summary")
-    if (
-        controlled_summary is not None
-        and controlled_summary not in CODEX_REASONING_SUMMARIES
-    ):
-        raise SystemExit("invalid controlled reasoning_summary")
-
-    reasoning_efforts = axes.get("reasoning_efforts")
-    if reasoning_efforts is None:
-        effort_axis: list[str | None] = [None]
-    else:
-        if (
-            not isinstance(reasoning_efforts, list)
-            or not reasoning_efforts
-            or not all(
-                isinstance(value, str) and value in CODEX_REASONING_EFFORTS
-                for value in reasoning_efforts
-            )
-        ):
-            raise SystemExit(
-                "experiment design.axes.reasoning_efforts must be a non-empty "
-                "list of Codex effort levels"
-            )
-        if len(set(reasoning_efforts)) != len(reasoning_efforts):
-            raise SystemExit(
-                "experiment design.axes.reasoning_efforts must not contain duplicates"
-            )
-        if controlled_effort is not None:
-            raise SystemExit(
-                "reasoning_effort cannot be both controlled and an experiment axis"
-            )
-        effort_axis = reasoning_efforts
-    if controlled_agent_options or reasoning_efforts is not None:
-        for agent_reference in agent_references:
-            _, agent_document = load_qualified_record(agent_reference, "agent")
-            harbor = agent_document.get("harbor")
-            if not isinstance(harbor, dict) or harbor.get("agent") != "codex":
-                raise SystemExit(
-                    "reasoning agent options require a Codex agent: "
-                    f"{agent_reference}"
-                )
+    if controls.get("agent_options") or "reasoning_efforts" in axes:
+        raise SystemExit("Native reasoning options are retired; vary submitted harness configuration instead.")
 
     run_labels = experiment.get("run_labels", {})
     if not isinstance(run_labels, dict) or not all(
@@ -1016,54 +813,45 @@ def create_experiment(args: argparse.Namespace) -> int:
             checkpoint_id = checkpoint_reference.rsplit("/", 1)[-1]
             checkpoint_label = checkpoint_prefixes[checkpoint_id]
             for repetition in range(1, repetitions + 1):
-                for reasoning_effort in effort_axis:
-                    cell_id = f"{experiment_id}-{agent_id}-{checkpoint_label}"
-                    if reasoning_effort is not None:
-                        cell_id += f"-{reasoning_effort}"
-                    if repetitions > 1:
-                        cell_id += f"-r{repetition}"
-                    cell_labels = {
-                        **default_run_labels,
-                        "agent": agent_id,
-                        "checkpoint": checkpoint_label,
-                    }
-                    if repetitions > 1:
-                        cell_labels["repetition"] = str(repetition)
-                    if reasoning_effort is not None:
-                        cell_labels["reasoning_effort"] = reasoning_effort
-                    run_spec: dict[str, object] = {
-                        "schema_version": 1,
-                        "type": "run-spec",
-                        "namespace": namespace,
-                        "id": cell_id,
-                        "task": task_reference,
-                        "agent": agent_reference,
-                        "checkpoint": checkpoint_reference,
-                        "budget": {
-                            "max_usd": max_usd,
-                        },
-                        "initialization": {"mode": initialization_mode},
-                        "labels": cell_labels,
-                        "runtime": {
-                            "env_file": env_file,
-                            "keep_render": keep_render,
-                            "keep_images": keep_images,
-                        },
-                    }
-                    resolved_agent_options = dict(controlled_agent_options)
-                    if reasoning_effort is not None:
-                        resolved_agent_options["reasoning_effort"] = reasoning_effort
-                    if resolved_agent_options:
-                        run_spec["agent_options"] = resolved_agent_options
-                    if max_model_tokens is not None:
-                        run_spec["budget"]["max_model_tokens"] = max_model_tokens
-                    if agent_timeout_sec is not None:
-                        run_spec["runtime"]["agent_timeout_sec"] = agent_timeout_sec
-                    path = run_spec_dir / f"{cell_id}.yaml"
-                    run_specs.append((path, run_spec))
-                    run_spec_refs.append(
-                        qualified_reference("run-spec", namespace, cell_id)
-                    )
+                cell_id = f"{experiment_id}-{agent_id}-{checkpoint_label}"
+                if repetitions > 1:
+                    cell_id += f"-r{repetition}"
+                cell_labels = {
+                    **default_run_labels,
+                    "agent": agent_id,
+                    "checkpoint": checkpoint_label,
+                }
+                if repetitions > 1:
+                    cell_labels["repetition"] = str(repetition)
+                run_spec: dict[str, object] = {
+                    "schema_version": 1,
+                    "type": "run-spec",
+                    "namespace": namespace,
+                    "id": cell_id,
+                    "task": task_reference,
+                    "agent": agent_reference,
+                    "checkpoint": checkpoint_reference,
+                    "budget": {
+                        "max_usd": max_usd,
+                    },
+                    "initialization": {"mode": initialization_mode},
+                    "labels": cell_labels,
+                    "runtime": {
+                        "env_file": env_file,
+                        "keep_render": keep_render,
+                        "keep_images": keep_images,
+                    },
+                }
+                run_spec["model_access"] = model_access
+                if max_model_tokens is not None:
+                    run_spec["budget"]["max_model_tokens"] = max_model_tokens
+                if agent_timeout_sec is not None:
+                    run_spec["runtime"]["agent_timeout_sec"] = agent_timeout_sec
+                path = run_spec_dir / f"{cell_id}.yaml"
+                run_specs.append((path, run_spec))
+                run_spec_refs.append(
+                    qualified_reference("run-spec", namespace, cell_id)
+                )
 
     planned_runs = len(run_specs)
     relations["task"] = task_reference
@@ -1376,23 +1164,10 @@ def resolve_run_spec_arguments(args: argparse.Namespace) -> argparse.Namespace:
     if args.max_model_tokens is None:
         args.max_model_tokens = configured_max_model_tokens
 
-    reasoning_effort = agent_options.get("reasoning_effort")
-    if reasoning_effort is not None and reasoning_effort not in CODEX_REASONING_EFFORTS:
-        raise SystemExit(
-            "run-spec agent_options.reasoning_effort must be one of: "
-            + ", ".join(sorted(CODEX_REASONING_EFFORTS))
-        )
-    reasoning_summary = agent_options.get("reasoning_summary")
-    if (
-        reasoning_summary is not None
-        and reasoning_summary not in CODEX_REASONING_SUMMARIES
-    ):
-        raise SystemExit(
-            "run-spec agent_options.reasoning_summary must be one of: "
-            + ", ".join(sorted(CODEX_REASONING_SUMMARIES))
-        )
-    args.reasoning_effort = reasoning_effort
-    args.reasoning_summary = reasoning_summary
+    if agent_options:
+        raise SystemExit("Native agent_options are retired; configure options inside the harness.")
+    args.reasoning_effort = None
+    args.reasoning_summary = None
 
     mode = initialization.get("mode", "checkpoint")
     if mode not in {"checkpoint", "blank", "scaffold"}:
@@ -2303,75 +2078,18 @@ def harbor_result_outcome(
     return None, None
 
 
-# Harbor's claude_code agent reads these variables from the CONTROL PLANE (the
-# env `harbor run` sees) rather than from the sandbox, and uses them to decide
-# model-name handling. `dungeness run` exports them from the selected agent's
-# manifest so the route is chosen per agent instead of once per .env.
-CONTROL_PLANE_AGENT_ENV = ("ANTHROPIC_BASE_URL",)
-
-
-def parse_env_file(path: Path) -> dict[str, str]:
-    """Read KEY=VALUE pairs from a dotenv file (comments and quotes tolerated)."""
-
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        if key:
-            values[key] = value
-    return values
-
-
-def control_plane_agent_environment(
-    job_path: Path,
-    env_file: Path,
-) -> dict[str, str]:
-    """Variables the rendered agent needs Harbor itself (not the sandbox) to see.
-
-    Harbor loads the env file with override, so a conflicting value there would
-    silently pin every profile to one route; refuse to start in that case.
-    """
-
+def validate_command_job(job_path: Path) -> None:
+    """Only the trusted command adapter may execute a submitted harness."""
     job = yaml.safe_load(job_path.read_text(encoding="utf-8"))
     agents = job.get("agents") if isinstance(job, dict) else None
-    if not isinstance(agents, list) or len(agents) != 1:
-        raise RuntimeError(f"Harbor job must declare exactly one agent: {job_path}")
-    agent_env = agents[0].get("env") or {}
-    if not isinstance(agent_env, dict):
-        raise RuntimeError(f"Harbor job agent env must be a mapping: {job_path}")
-    env_values = parse_env_file(env_file) if env_file.is_file() else {}
-    exported: dict[str, str] = {}
-    for key in CONTROL_PLANE_AGENT_ENV:
-        value = agent_env.get(key)
-        if value is None:
-            continue
-        value = str(value)
-        conflicting = env_values.get(key)
-        if conflicting is not None and conflicting != value:
-            raise SystemExit(
-                f"{env_file.name} sets {key}={conflicting!r}, but the selected "
-                f"agent requires {key}={value!r}. Harbor loads {env_file.name} "
-                f"with override, so remove {key} from it; dungeness exports the "
-                "agent's value automatically."
-            )
-        exported[key] = value
-    return exported
+    if (not isinstance(agents, list) or len(agents) != 1
+            or agents[0].get("import_path") != "command_agent:CommandAgent"
+            or "name" in agents[0] or agents[0].get("env")):
+        raise RuntimeError("Only dungeness-command-v1 jobs are supported; rebuild the harness job.")
 
 
-# Host variables that Harbor's installed agents (claude_code in particular) copy
-# from the CONTROL PLANE into the sandbox or use to switch provider mode
-# (Bedrock/Vertex/OAuth). A developer shell often carries them -- e.g. a Claude
-# Code session on Bedrock exports CLAUDE_CODE_USE_BEDROCK and AWS_* -- and they
-# would either leak a real credential into the sandbox or reroute the agent
-# away from the gateway. Drop them; the agent manifest is the only route source.
+# Defense in depth: do not pass ambient provider credentials or mode switches
+# to the execution framework. Submitted code receives only sandbox configuration.
 HOST_ENV_SCRUB_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "CLAUDECODE", "AWS_")
 HOST_ENV_SCRUB_KEYS = frozenset({"MAX_THINKING_TOKENS", "DISABLE_PROMPT_CACHING"})
 
@@ -2978,7 +2696,8 @@ def execute_run(args: argparse.Namespace) -> int:
             raise RuntimeError(
                 f"renderer did not produce a Harbor job at {job_path}"
             )
-        control_plane_env = control_plane_agent_environment(job_path, env_file)
+        validate_command_job(job_path)
+        control_plane_env = {}
         environment, scrubbed_host_env = harbor_launch_environment(
             os.environ, control_plane_env
         )
@@ -3008,26 +2727,24 @@ def execute_run(args: argparse.Namespace) -> int:
             else adapter_path + os.pathsep + existing_pythonpath
         )
         print(f">> executing run from {job_path}", flush=True)
-        with prepared_subscription_auth(args) as auth_environment:
-            environment.update(auth_environment)
-            stream_command(
-                [
-                    "uvx",
-                    "--python",
-                    "3.12",
-                    "--from",
-                    f"harbor=={HARBOR_VERSION}",
-                    "--with",
-                    f"litellm=={LITELLM_VERSION}",
-                    "harbor",
-                    "run",
-                    "--env-file",
-                    args.env_file,
-                    "--config",
-                    str(job_path),
-                ],
-                env=environment,
-            )
+        stream_command(
+            [
+                "uvx",
+                "--python",
+                "3.12",
+                "--from",
+                f"harbor=={HARBOR_VERSION}",
+                "--with",
+                f"litellm=={LITELLM_VERSION}",
+                "harbor",
+                "run",
+                "--env-file",
+                args.env_file,
+                "--config",
+                str(job_path),
+            ],
+            env=environment,
+        )
         final_status = "completed"
     except KeyboardInterrupt:
         final_status = "cancelled"
@@ -3094,31 +2811,6 @@ def main() -> int:
         "setup", help="check prerequisites and initialize .env"
     )
     setup_parser.set_defaults(handler=setup_environment)
-    auth_parser = subparsers.add_parser(
-        "auth", help="manage local credentials used by subscription agents"
-    )
-    auth_subparsers = auth_parser.add_subparsers(
-        dest="auth_command",
-        required=True,
-    )
-    auth_login_parser = auth_subparsers.add_parser(
-        "login", help="authenticate a supported subscription agent"
-    )
-    auth_login_parser.add_argument("agent", choices=["codex"])
-    auth_login_parser.add_argument(
-        "--device-auth",
-        action="store_true",
-        help="use Codex device-code authentication",
-    )
-    auth_login_parser.set_defaults(handler=codex_auth_command)
-    auth_status_parser = auth_subparsers.add_parser(
-        "status", help="check a supported subscription credential"
-    )
-    auth_status_parser.add_argument("agent", choices=["codex"])
-    auth_status_parser.set_defaults(
-        handler=codex_auth_command,
-        device_auth=False,
-    )
     run_parser = subparsers.add_parser(
         "run", help="render and execute one run"
     )
