@@ -1509,7 +1509,7 @@ def validated_gateway_configuration(
         raise ValueError("historical web access must disable Exa live crawling")
     for section, fields, minimum in (
         (budget.get("web"), ("searches", "fetches"), 0),
-        (budget.get("model"), ("requests", "total_tokens"), 1),
+        (budget.get("model"), ("requests",), 1),
     ):
         if not isinstance(section, dict):
             raise ValueError("budget policy is missing a required section")
@@ -1523,6 +1523,9 @@ def validated_gateway_configuration(
                 "gateway web budgets must be non-negative and model budgets "
                 "must be positive integers"
             )
+    token_cap = budget["model"].get("total_tokens")
+    if token_cap is not None and (type(token_cap) is not int or token_cap < 1):
+        raise ValueError("model total_tokens must be null or a positive integer")
     # Stamp the resolved cutoff into the web config the rest of the build
     # consumes. before_repository_commit is provenance: the exact commit the
     # publication boundary is anchored to for this run.
@@ -1733,7 +1736,7 @@ def build_compose(
                     "MAX_SEARCHES": str(budget["web"]["searches"]),
                     "MAX_FETCHES": str(budget["web"]["fetches"]),
                     "MAX_MODEL_REQUESTS": str(budget["model"]["requests"]),
-                    "MAX_MODEL_TOKENS": str(budget["model"]["total_tokens"]),
+                    "MAX_MODEL_TOKENS": str(budget["model"].get("total_tokens") or ""),
                     "EXA_MAX_RESULTS": str(web["search"]["max_results"]),
                     "EXA_END_PUBLISHED_DATE": cutoff["end_published_date"],
                     **exa_secret_env,
@@ -2072,6 +2075,7 @@ def build_task(
     agent_namespace: str | None = None,
     resume_from: str | None = None,
     max_model_tokens: int | None = None,
+    no_model_token_limit: bool = False,
     max_usd: float | None = None,
     checkpoint: str | None = None,
     fresh_start: bool = False,
@@ -2086,6 +2090,8 @@ def build_task(
 ) -> Path:
     if not RUN_ID_RE.fullmatch(run_id):
         raise ValueError(f"invalid run id: {run_id!r}")
+    if no_model_token_limit and max_model_tokens is not None:
+        raise ValueError("Choose either --max-model-tokens or --no-model-token-limit")
     if max_model_tokens is not None and max_model_tokens < 1:
         raise ValueError("--max-model-tokens must be a positive integer")
     if max_usd is not None and max_usd <= 0:
@@ -2477,7 +2483,7 @@ def build_task(
             budget_policy,
             resolved_web_search["mode"],
         )
-        if max_model_tokens is not None:
+        if no_model_token_limit or max_model_tokens is not None:
             # Per-render override of the model-token budget, leaving the shared
             # budget policy file untouched. Copy so we don't mutate the loaded dict.
             budget_policy = {
@@ -2961,6 +2967,7 @@ def main() -> None:
         help="warm-start from a prior run: seed the workspace with its final "
         "candidate and tell the agent to continue improving it",
     )
+    parser.add_argument("--no-model-token-limit", action="store_true", help="Disable the model-token ceiling for this run.")
     parser.add_argument(
         "--max-model-tokens",
         type=int,
@@ -3058,6 +3065,7 @@ def main() -> None:
         agent_namespace=args.agent_namespace,
         resume_from=args.resume_from,
         max_model_tokens=args.max_model_tokens,
+        no_model_token_limit=args.no_model_token_limit,
         max_usd=args.max_usd,
         checkpoint=args.checkpoint,
         fresh_start=args.fresh_start,

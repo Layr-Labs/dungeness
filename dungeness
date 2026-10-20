@@ -843,7 +843,7 @@ def create_experiment(args: argparse.Namespace) -> int:
                     },
                 }
                 run_spec["model_access"] = model_access
-                if max_model_tokens is not None:
+                if "max_model_tokens" in budget:
                     run_spec["budget"]["max_model_tokens"] = max_model_tokens
                 if agent_timeout_sec is not None:
                     run_spec["runtime"]["agent_timeout_sec"] = agent_timeout_sec
@@ -1161,8 +1161,10 @@ def resolve_run_spec_arguments(args: argparse.Namespace) -> argparse.Namespace:
         )
     if args.max_usd is None:
         args.max_usd = configured_max_usd
-    if args.max_model_tokens is None:
+    if args.max_model_tokens is None and not getattr(args, "no_model_token_limit", False):
         args.max_model_tokens = configured_max_model_tokens
+        if "max_model_tokens" in budget and configured_max_model_tokens is None:
+            args.no_model_token_limit = True
 
     if agent_options:
         raise SystemExit("Native agent_options are retired; configure options inside the harness.")
@@ -2577,7 +2579,9 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="searchable run label; repeatable",
     )
     parser.add_argument("--resume-from", metavar="RUN_ID")
-    parser.add_argument("--max-model-tokens", type=int, metavar="N")
+    token_options = parser.add_mutually_exclusive_group()
+    token_options.add_argument("--max-model-tokens", type=int, metavar="N")
+    token_options.add_argument("--no-model-token-limit", action="store_true")
     parser.add_argument("--max-usd", type=float, metavar="USD")
     parser.add_argument(
         "--agent-timeout-sec",
@@ -2634,6 +2638,8 @@ def build_command(args: argparse.Namespace, run_id: str) -> list[str]:
     ):
         if value is not None:
             command.extend((flag, str(value)))
+    if getattr(args, "no_model_token_limit", False):
+        command.append("--no-model-token-limit")
     for label in args.label:
         command.extend(("--label", label))
     if args.fresh_start:

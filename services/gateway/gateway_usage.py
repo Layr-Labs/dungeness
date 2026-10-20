@@ -224,7 +224,8 @@ class Metrics:
         for name in sorted(counts):
             labels = metric_labels({"budget": name})
             lines.append(f"testbed_gateway_budget_used{labels} {counts[name]}")
-            lines.append(f"testbed_gateway_budget_limit{labels} {limits[name]}")
+            if limits[name] is not None:
+                lines.append(f"testbed_gateway_budget_limit{labels} {limits[name]}")
         return "\n".join(lines) + "\n"
 
 
@@ -247,7 +248,8 @@ class UsageLedger:
             "searches": int(os.environ["MAX_SEARCHES"]),
             "fetches": int(os.environ["MAX_FETCHES"]),
             "model_requests": int(os.environ["MAX_MODEL_REQUESTS"]),
-            "model_tokens": int(os.environ["MAX_MODEL_TOKENS"]),
+            "model_tokens": (int(os.environ["MAX_MODEL_TOKENS"])
+                             if os.environ.get("MAX_MODEL_TOKENS") else None),
         }
         self.counts = {name: 0 for name in self.limits}
         # Optional USD cap on model spend (the fair, provider-neutral stopping
@@ -327,7 +329,7 @@ class UsageLedger:
                 },
                 "remaining": {
                     **{
-                        name: max(0, self.limits[name] - self.counts[name])
+                        name: (None if self.limits[name] is None else max(0, self.limits[name] - self.counts[name]))
                         for name in self.limits
                     },
                     "normalized_usd": (
@@ -468,10 +470,11 @@ class UsageLedger:
         # Count an attempt before forwarding it. Provider errors and timeouts still
         # consume a request/search budget and therefore cannot bypass hard limits.
         with self.lock:
-            if self.counts[name] >= self.limits[name]:
+            if self.limits[name] is not None and self.counts[name] >= self.limits[name]:
                 raise BudgetExceeded(f"budget exhausted for {name}")
             if name == "model_requests":
-                if self.counts["model_tokens"] >= self.limits["model_tokens"]:
+                if (self.limits["model_tokens"] is not None
+                        and self.counts["model_tokens"] >= self.limits["model_tokens"]):
                     raise BudgetExceeded("model token budget is exhausted")
                 if self.usd_spent >= self.usd_limit:
                     raise BudgetExceeded("model USD budget is exhausted")

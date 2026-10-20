@@ -1622,3 +1622,23 @@ class InstrumentationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class OptionalTokenLedgerTests(unittest.TestCase):
+    def test_unlimited_tokens_are_metered_and_dollars_still_stop_admission(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'MAX_MODEL_TOKENS':'', 'MAX_MODEL_USD':'20', 'MAX_MODEL_REQUESTS':'100'}):
+            ledger=UsageLedger('no-token-ceiling',Path(temp))
+            ledger.add_model_tokens(2_000_000)
+            ledger.admit_model('first')
+            ledger.finish_model('first',accounted=True)
+            self.assertIsNone(ledger.status()['limits']['model_tokens'])
+            self.assertIsNone(ledger.status()['remaining']['model_tokens'])
+            self.assertEqual(ledger.status()['usage']['model_tokens'],2_000_000)
+            self.assertNotIn('None',Metrics().render(ledger))
+            ledger.add_model_usd(20)
+            with self.assertRaises(BudgetExceeded):ledger.admit_model('second')
+
+    def test_explicit_token_ceiling_is_still_enforced(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'MAX_MODEL_TOKENS':'100', 'MAX_MODEL_USD':'20'}):
+            ledger=UsageLedger('explicit-token-ceiling',Path(temp))
+            ledger.add_model_tokens(101)
+            with self.assertRaises(BudgetExceeded):ledger.admit_model('first')

@@ -479,6 +479,23 @@ class RecordModelTests(unittest.TestCase):
                 "EXA_API_KEY=\n",
             )
 
+    def test_run_spec_null_tokens_disable_the_inherited_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spec.yaml"
+            write_run_spec(path)
+            _, spec = cli.load_run_spec(str(path))
+            spec["budget"]["max_model_tokens"] = None
+            cli.write_yaml(path, spec)
+            args = cli.run_arguments_for_spec(path, namespace=None, env_file=None, labels=[])
+            resolved = cli.resolve_run_spec_arguments(args)
+            self.assertTrue(resolved.no_model_token_limit)
+            self.assertIsNone(resolved.max_model_tokens)
+            args = cli.run_arguments_for_spec(path, namespace=None, env_file=None, labels=[])
+            args.max_model_tokens = 100
+            resolved = cli.resolve_run_spec_arguments(args)
+            self.assertFalse(getattr(resolved, "no_model_token_limit", False))
+            self.assertEqual(resolved.max_model_tokens, 100)
+
     def test_run_spec_yaml_resolves_with_cli_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_spec_path = Path(directory) / "run-spec.yaml"

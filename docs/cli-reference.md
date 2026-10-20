@@ -663,3 +663,12 @@ runs/           persistent run records, usage, and Harbor results
   implemented. Current outputs remain under their run directories.
 - Subscription budgeting is normalized token accounting, not actual provider
   billing, and may exceed the configured cap by the final in-flight response.
+
+### Optional model-token ceiling
+
+The standard budget policies have no model-token ceiling. Model usage remains
+metered, with USD, request, concurrency and execution-time controls unchanged.
+Use `--max-model-tokens N` for an explicit ceiling, or `--no-model-token-limit`
+to disable one inherited from a custom policy. In a run spec,
+`budget.max_model_tokens: null` explicitly disables the policy ceiling.
+The gateway represents an unlimited token allowance as JSON `null` in `/status`.
