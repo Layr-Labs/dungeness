@@ -5,8 +5,11 @@ from __future__ import annotations
 from collections import defaultdict
 import gzip
 import json
+import sys
 import os
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from provider_profiles import PROFILES
 from typing import Any
 import zlib
 
@@ -559,6 +562,21 @@ def provider_auth_headers(
 ) -> dict[str, str]:
     """Resolve upstream authentication without ever logging credential values."""
 
+    if provider in PROFILES:
+        profile = PROFILES[provider]
+        token = os.environ.get(profile['credential_env'])
+        if not token:
+            raise ValueError('Configured provider credential is unavailable.')
+        if profile['credential_kind'] == 'session-token':
+            from datetime import datetime, timezone
+            expiry = os.environ.get(profile['credential_env'] + '_EXPIRES_AT', '')
+            try:
+                parsed = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                if parsed.tzinfo is None or parsed <= datetime.now(timezone.utc):
+                    raise ValueError
+            except ValueError:
+                raise ValueError('Subscription access expired; renew locally. API fallback is disabled.') from None
+        return {'authorization': 'Bearer ' + token, **profile['headers']}
     if provider == "openai-chatgpt":
         auth_file = os.environ.get("DUNGENESS_CHATGPT_AUTH_FILE")
         if auth_file:
@@ -593,6 +611,16 @@ def provider_auth_headers(
     if provider == "kimi-code":
         return {"authorization": f"Bearer {os.environ['KIMI_CODE_API_KEY']}"}
     return {"authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"}
+
+
+for _name, _profile in PROFILES.items():
+    MODEL_PROVIDERS[_name] = {
+        'routes': set(_profile['routes']),
+        'upstream_env': _name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
+        'upstream_default': _profile['base_url'],
+        'auth': 'gateway_secret', 'billed': _profile['billed'],
+        'passthrough': (), 'extract_usage': extract_usage,
+    }
 
 
 def usage_extractor(cfg: dict[str, Any], operation: str):

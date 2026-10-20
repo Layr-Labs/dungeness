@@ -134,3 +134,20 @@ python -m unittest discover -s tools/transcripts -p 'test_*.py'
 
 Use an environment with Harbor 0.18.0 for the adapter API contract tests. These checks do not launch paid model runs or establish Docker
 provider compatibility. Use an explicitly funded smoke run for that boundary.
+
+## Compatible provider profiles
+
+`services/gateway/providers.json` is trusted runtime configuration for fixed
+OpenAI-compatible upstreams. It ships direct `xai` API-key access and
+`grok-subscription` CLI session access, pinned to `grok-4.7`. Set
+`TESTBED_XAI_API_KEY`, or `TESTBED_GROK_SUBSCRIPTION_TOKEN` together with
+`TESTBED_GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT`, outside source. The compiler mounts
+these into the gateway only; command harnesses receive a placeholder.
+Session expiry fails closed and does not fall back to an API key.
+
+Profiles configure inference routes, fixed headers, model overrides and reference
+catalog identity. Adding a compatible provider does not require a new HTTP route.
+Do not accept profiles from agent input. Catalyst supplies its service-owned
+registry and frozen pricing snapshot during preparation; standalone runs must
+also provide trusted model pricing. Grok gateway tests use a mock upstream;
+live subscription entitlement remains to be verified with an account.

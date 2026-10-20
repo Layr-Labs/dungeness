@@ -35,6 +35,8 @@ VERIFIERS_ROOT = REPOSITORY_ROOT / "verifiers"
 ADAPTERS_ROOT = REPOSITORY_ROOT / "adapters"
 RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
+sys.path.insert(0, str(GATEWAY_ROOT))
+from provider_profiles import PROFILES as CONFIGURED_PROVIDERS
 CODEX_SUBSCRIPTION_PROXY_ROOT = (
     REPOSITORY_ROOT / "services/codex-subscription-proxy"
 )
@@ -1358,7 +1360,7 @@ def agent_provider(agent: dict[str, Any]) -> str:
 
     model = agent_model(agent)
     provider = model.get("provider")
-    if provider in {
+    if provider in CONFIGURED_PROVIDERS or provider in {
         "anthropic",
         "kimi-code",
         "moonshot",
@@ -1629,7 +1631,7 @@ def build_harbor_job(
             raise ValueError(
                 "OpenRouter Claude agents must request a vendor-prefixed model id"
             )
-    elif provider in {"openrouter", "moonshot", "kimi-code"}:
+    elif provider in CONFIGURED_PROVIDERS or provider in {"openrouter", "moonshot", "kimi-code"}:
         # OpenRouter gateway route (OpenAI-compatible). SDK-facing credential
         # names are independent from the upstream provider: Codex expects an
         # OPENAI_API_KEY while pi/prime-agent expect OPENROUTER_API_KEY. Moonshot
@@ -1640,11 +1642,11 @@ def build_harbor_job(
         ):
             raise ValueError("installed agent must use the non-secret gateway placeholder")
         if model.get("api") == "openai-responses" and agent_name == "codex":
-            expected_route = {
+            expected_route = {**{name: f'http://gateway:8080/model/{name}/v1' for name in CONFIGURED_PROVIDERS}, **{
                 "kimi-code": "http://gateway:8080/model/kimi-code/v1",
                 "moonshot": "http://gateway:8080/model/moonshot/v1",
                 "openrouter": "http://gateway:8080/model/openrouter/v1",
-            }[provider]
+            }}[provider]
             if (
                 environment.get("OPENAI_BASE_URL")
                 != expected_route
@@ -2006,6 +2008,12 @@ def build_compose(
             "DUNGENESS_CODEX_AUTH_DIR is required}:"
             "/run/dungeness/codex-auth:ro"
         )
+    elif provider in CONFIGURED_PROVIDERS:
+        profile = CONFIGURED_PROVIDERS[provider]
+        key = profile['credential_env']
+        provider_secret_env = {key: '${TESTBED_' + key + ':?provider access required}'}
+        if profile['credential_kind'] == 'session-token':
+            provider_secret_env[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
     elif provider == "anthropic":
         provider_secret_env = {
             "ANTHROPIC_API_KEY": "${TESTBED_ANTHROPIC_API_KEY:?TESTBED_ANTHROPIC_API_KEY is required}",
@@ -2148,6 +2156,14 @@ def build_compose(
             gateway_environment.pop(key, None)
             if api_provider in providers:
                 gateway_environment[key] = "${TESTBED_" + key + ":?provider access required}"
+        for name, profile in CONFIGURED_PROVIDERS.items():
+            key = profile['credential_env']
+            gateway_environment.pop(key, None)
+            gateway_environment.pop(key + '_EXPIRES_AT', None)
+            if name in providers:
+                gateway_environment[key] = '${TESTBED_' + key + ':?provider access required}'
+                if profile['credential_kind'] == 'session-token':
+                    gateway_environment[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
         if "openai-chatgpt" in providers:
             # Run the trusted gateway as the invoking host user so a private
             # 0600 credential remains readable through its read-only bind mount.

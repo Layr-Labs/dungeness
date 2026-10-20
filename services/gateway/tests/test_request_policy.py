@@ -11,6 +11,7 @@ from unittest.mock import patch
 import httpx
 import test_gateway  # Shared offline credentials and test environment.
 import gateway
+import gateway_pricing
 from gateway_models import MODEL_PROVIDERS
 from gateway_runtime import Gateway
 from gateway_request_policy import validate_model_request
@@ -23,6 +24,8 @@ MODELS = {
     "openai-chatgpt": "gpt-6-astra",
     "moonshot": "kimi-k3",
     "kimi-code": "k3",
+    "xai": "grok-4.7",
+    "grok-subscription": "grok-4.7",
 }
 
 
@@ -53,7 +56,13 @@ async def harness(*, declared=True, web=False):
         "MAX_MODEL_REQUESTS": "100", "MAX_MODEL_TOKENS": "1000000", "MAX_MODEL_USD": "100",
         "MAX_SEARCHES": "2" if web else "0", "MAX_FETCHES": "2" if web else "0",
         "DUNGENESS_CHATGPT_AUTH_FILE": str(Path(temp) / "auth.json"),
-    }):
+        "XAI_API_KEY": "unused-xai-key",
+        "GROK_SUBSCRIPTION_TOKEN": "unused-session",
+        "GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+    }), patch.object(gateway_pricing, "MODEL_PRICING", [*gateway_pricing.MODEL_PRICING, *[
+        {"provider": p, "upstream_id": "x-ai/grok-4.7", "request_models": ["grok-4.7"],
+         "input_per_mtok": 2, "output_per_mtok": 6, "cached_read_per_mtok": .5,
+         "cache_write_per_mtok": 2, "text_only": True} for p in ("xai", "grok-subscription")]]):
         Path(temp, "auth.json").write_text(json.dumps({
             "tokens": {"access_token": "private-test-token", "account_id": "private-account"}}))
         calls = []

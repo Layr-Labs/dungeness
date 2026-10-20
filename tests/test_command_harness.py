@@ -206,3 +206,21 @@ class CommandHarnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ConfiguredProviderCompilerTests(unittest.TestCase):
+    def test_configured_credentials_only_reach_gateway(self):
+        model = {'provider': 'grok-subscription', 'request_model': 'grok-4.7',
+                 'base_url': 'http://gateway:8080/model/grok-subscription/v1'}
+        compose = yaml.safe_load(compiler.build_compose(
+            'grok-run', {'historical_cutoff': {'end_published_date': '2026-05-28T23:59:59Z'},
+                         'search': {'max_results': 25}},
+            {'web': {'searches': 0, 'fetches': 0}, 'model': {'requests': 10, 'total_tokens': 10000}},
+            provider='grok-subscription', max_usd=3, command_policy={'models': [model]}))
+        env = compose['services']['gateway']['environment']
+        self.assertIn('GROK_SUBSCRIPTION_TOKEN', env)
+        self.assertIn('GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT', env)
+        self.assertNotIn('XAI_API_KEY', env)
+        self.assertNotIn('OPENAI_API_KEY', env)
+        main = json.dumps(compose['services']['main'])
+        self.assertNotIn('GROK_SUBSCRIPTION_TOKEN', main)
+        self.assertIn('testbed', main)

@@ -19,6 +19,8 @@ import tempfile
 import time
 from typing import Any
 
+from provider_profiles import PROFILES
+
 import httpx
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -125,6 +127,9 @@ gateway = Gateway(
 def instrumentation_route(path: str) -> str:
     """Return a bounded route label; never use an arbitrary URL path as a label."""
 
+    for provider in PROFILES:
+        if path.startswith(f"/model/{provider}/v1/"):
+            return f"/model/{provider}/v1/{{operation}}"
     if path.startswith("/task/files/"):
         return "/task/files/{name}"
     if path.startswith("/model/openai/v1/"):
@@ -453,6 +458,20 @@ async def model_openrouter(request: Request) -> Response:
         )
 
 
+async def model_configured(request: Request) -> Response:
+    provider = request.path_params['provider']
+    if provider not in PROFILES:
+        return JSONResponse({'error': 'Unknown configured provider.'}, status_code=404)
+    try:
+        return await gateway.proxy_model(provider, request.path_params['path'], request)
+    except BudgetExceeded as error:
+        return budget_rejected(request, 'model.' + provider, error)
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, status_code=400)
+    except httpx.HTTPError as error:
+        return JSONResponse({'error': f'provider request failed: {type(error).__name__}'}, status_code=502)
+
+
 async def model_chatgpt(request: Request) -> Response:
     try:
         return await gateway.proxy_model(
@@ -624,6 +643,7 @@ app = Starlette(
             model_kimi_code,
             methods=["POST"],
         ),
+        Route('/model/{provider}/v1/{path:path}', model_configured, methods=['POST']),
     ],
     lifespan=lifespan,
 )

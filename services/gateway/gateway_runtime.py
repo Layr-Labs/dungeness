@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 import hashlib
 import json
+from provider_profiles import PROFILES, upstream_model
 import os
 from pathlib import Path
 import time
@@ -393,6 +394,10 @@ class Gateway:
         # Access policy is independent of command/legacy harness identity,
         # pricing mode, web budgets, and whether a model allowlist was supplied.
         validate_model_request(provider, operation, payload)
+        if provider in PROFILES:
+            upstream_model(provider, payload['model'])
+            # Validate expiry/availability before reserving a model request.
+            provider_auth_headers(provider)
         if provider == "openrouter" and not self.openrouter_inference_only:
             raise ValueError(
                 "OpenRouter inference requires the operator to disable account-default "
@@ -636,6 +641,13 @@ class Gateway:
             upstream_base = os.environ.get(
                 cfg["upstream_env"], cfg["upstream_default"]
             ).rstrip("/")
+            profile_headers = {}
+            if provider in PROFILES:
+                profile = PROFILES[provider]
+                routed_model = upstream_model(provider, model)
+                if profile['model_header']:
+                    profile_headers[profile['model_header']] = routed_model
+                body = json.dumps({**payload, 'model': routed_model}, separators=(',', ':')).encode()
             upstream_request = self.client.build_request(
                 request.method,
                 f"{upstream_base}/{normalized}",
@@ -643,6 +655,7 @@ class Gateway:
                     # API profiles receive a gateway-owned secret. Subscription
                     # profiles explicitly forward Codex's ChatGPT bearer token.
                     **provider_auth_headers(provider, request.headers),
+                    **profile_headers,
                     "content-type": "application/json",
                     "accept": request.headers.get("accept", "application/json"),
                     # Force uncompressed responses: we forward raw upstream bytes
