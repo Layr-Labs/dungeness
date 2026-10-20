@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 import hashlib
 import json
 from provider_profiles import PROFILES, upstream_model
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -23,7 +24,6 @@ from gateway_models import (
     capture_prompt,
     decode_response_documents,
     extract_reasoning_summaries,
-    extract_usage,
     extract_visible_reasoning_events,
     is_sse_body,
     prompt_profile,
@@ -53,9 +53,6 @@ from gateway_web import (
     make_search_payload,
     parse_utc,
 )
-from kimi_adapter import model_dump as dump_adapter_event
-from kimi_adapter import NativeReasoningStream
-from kimi_adapter import request_kimi
 
 
 EXA_SEARCH_URL = "https://api.exa.ai/search"
@@ -63,9 +60,25 @@ EXA_CONTENTS_URL = "https://api.exa.ai/contents"
 BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
-def rejected_before_generation(body: bytes, content_type: str, http_status: int | None) -> bool:
+def rejected_before_generation(
+    body: bytes, content_type: str, http_status: int | None, *, provider: str | None = None,
+) -> bool:
     """Recognize an explicit input-validation rejection, never a missing receipt."""
-    if http_status != 400 or "application/json" not in content_type:
+    mime = content_type.partition(";")[0].strip().lower()
+    if provider == "grok-subscription" and http_status == 422 and mime == "text/plain":
+        # The CLI proxy's JSON decoder rejects this body before inference.
+        # Do not infer zero usage from arbitrary 422s or other provider errors.
+        if len(body) > 4096:
+            return False
+        try:
+            message = body.decode("utf-8")
+        except UnicodeError:
+            return False
+        return re.fullmatch(
+            r"Failed to deserialize the JSON body into the target type: "
+            r"[^\r\n]+ at line [0-9]+ column [0-9]+", message,
+        ) is not None
+    if http_status != 400 or mime != "application/json":
         return False
     try:
         document = json.loads(body)
@@ -79,12 +92,7 @@ def rejected_before_generation(body: bytes, content_type: str, http_status: int 
 class Gateway:
     """One trusted gateway instance and budget ledger for one benchmark run."""
 
-    def __init__(
-        self,
-        *,
-        kimi_request: Callable[..., Any] | None = None,
-    ) -> None:
-        self._request_kimi = kimi_request or request_kimi
+    def __init__(self) -> None:
         self.run_id = os.environ["TESTBED_RUN_ID"]
         self.max_results = int(os.environ.get("EXA_MAX_RESULTS", "25"))
         self.end_published_date = os.environ["EXA_END_PUBLISHED_DATE"]
@@ -396,8 +404,8 @@ class Gateway:
         validate_model_request(provider, operation, payload)
         if provider in PROFILES:
             upstream_model(provider, payload['model'])
-            # Validate expiry/availability before reserving a model request.
-            provider_auth_headers(provider)
+        # All credential types are checked before admitting a model request.
+        provider_auth_headers(provider, request.headers)
         if provider == "openrouter" and not self.openrouter_inference_only:
             raise ValueError(
                 "OpenRouter inference requires the operator to disable account-default "
@@ -457,7 +465,8 @@ class Gateway:
             usage = extract(response_body, content_type)
             accounting_basis = "provider_usage" if usage else "unavailable"
             if (not usage and status == "provider_error"
-                    and rejected_before_generation(response_body, content_type, upstream_status)):
+                    and rejected_before_generation(response_body, content_type, upstream_status,
+                                                   provider=provider)):
                 # A rejected input did not generate tokens. Successful,
                 # interrupted, and ambiguous error responses still fail closed.
                 usage = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0,
@@ -609,15 +618,6 @@ class Gateway:
             request_pricing = pricing_for_request(provider, model)
             if normalized == "chat/completions" and payload.get("stream"):
                 payload["stream_options"] = {**(payload.get("stream_options") or {}), "include_usage": True}
-            if provider == "openrouter" and model == "moonshotai/kimi-k3":
-                reasoning = payload.get("reasoning")
-                if reasoning is None:
-                    reasoning = {}
-                    payload["reasoning"] = reasoning
-                if isinstance(reasoning, dict):
-                    # OpenRouter returns provider-visible reasoning by default,
-                    # but make that invariant explicit for research traces.
-                    reasoning["exclude"] = False
             if provider == "openrouter":
                 # A missing plugins field can inherit an account's default web
                 # plugin. This override is gateway-owned; agents cannot set it.
@@ -652,9 +652,6 @@ class Gateway:
                 request.method,
                 f"{upstream_base}/{normalized}",
                 headers={
-                    # API profiles receive a gateway-owned secret. Subscription
-                    # profiles explicitly forward Codex's ChatGPT bearer token.
-                    **provider_auth_headers(provider, request.headers),
                     **profile_headers,
                     "content-type": "application/json",
                     "accept": request.headers.get("accept", "application/json"),
@@ -668,9 +665,9 @@ class Gateway:
                         name: request.headers[name]
                         for name in cfg["passthrough"]
                         if name in request.headers
-                        and not (name == "chatgpt-account-id"
-                                 and os.environ.get("DUNGENESS_CHATGPT_AUTH_FILE"))
                     },
+                    # Trusted credentials win over any allowed client metadata.
+                    **provider_auth_headers(provider, request.headers),
                 },
                 params=request.query_params,
                 content=body,
@@ -749,265 +746,4 @@ class Gateway:
             )
         except BaseException:
             finalize(bytes(response_body), content_type)
-            raise
-
-    async def proxy_kimi(
-        self,
-        provider: str,
-        path: str,
-        request: Request,
-    ) -> Response:
-        """Translate Codex Responses traffic to Kimi Chat Completions."""
-
-        config = MODEL_PROVIDERS.get(provider)
-        if config is None or config.get("adapter") != "responses-to-chat":
-            raise ValueError(f"unsupported Kimi adapter provider: {provider}")
-        normalized = path.strip("/")
-        if normalized not in config["routes"]:
-            return JSONResponse(
-                {"error": "unsupported model operation"}, status_code=404
-            )
-        payload = await self.admit_model(provider, request, normalized)
-        started = time.monotonic()
-        status = "error"
-        response_body = bytearray()
-        request_id = request.state.request_id
-        model = "unknown"
-        request_pricing: dict[str, Any] | None = None
-        finalized = False
-
-        def trace(event: dict[str, Any]) -> None:
-            record = {
-                "request_id": request_id,
-                "provider": provider,
-                "model": model,
-                **event,
-            }
-            self.ledger.timeline(
-                {
-                    "kind": "model.provider_event",
-                    **record,
-                }
-            )
-            for index, reasoning in enumerate(
-                extract_visible_reasoning_events(event.get("event"))
-            ):
-                self.ledger.timeline(
-                    {
-                        "kind": "model.reasoning",
-                        "request_id": request_id,
-                        "provider": provider,
-                        "model": model,
-                        "source": reasoning["source"],
-                        "stage": event.get("stage"),
-                        "index": index,
-                        "text": reasoning["text"],
-                    }
-                )
-
-        def finalize(content_type: str) -> None:
-            nonlocal finalized
-            if finalized:
-                return
-            finalized = True
-            usage = extract_usage(bytes(response_body), content_type)
-            billed_tokens = request_budget_tokens(usage, request_pricing)
-            usd = round(
-                request_usd(usage, request_pricing)
-                if request_pricing is not None
-                else 0,
-                6,
-            )
-            pricing_tier = (
-                request_pricing_rates(usage, request_pricing)[1]
-                if request_pricing is not None
-                else "unavailable"
-            )
-            billed_usd = usd if config.get("billed", True) and not (request_pricing or {}).get("text_only") else None
-            self.ledger.add_model_usage(
-                billed_tokens=billed_tokens,
-                normalized_usd=usd,
-                billed_usd=billed_usd,
-            )
-            duration_ms = round((time.monotonic() - started) * 1000)
-            response_documents = decode_response_documents(
-                bytes(response_body), content_type
-            )
-            self.ledger.timeline(
-                {
-                    "kind": "model.response",
-                    "request_id": request_id,
-                    "provider": provider,
-                    "operation": normalized,
-                    "model": model,
-                    "status": status,
-                    "content_type": content_type,
-                    "response": response_documents,
-                }
-            )
-            if usage:
-                METRICS.increment(
-                    "testbed_gateway_model_billed_tokens_total",
-                    labels={"provider": provider},
-                    value=billed_tokens,
-                )
-                METRICS.increment(
-                    "testbed_gateway_model_usd_total",
-                    labels={"provider": provider},
-                    value=usd,
-                )
-            for token_type in (
-                "input_tokens",
-                "cached_input_tokens",
-                "cache_write_input_tokens",
-                "output_tokens",
-                "reasoning_tokens",
-                "total_tokens",
-            ):
-                if usage.get(token_type):
-                    METRICS.increment(
-                        "testbed_gateway_model_tokens_total",
-                        labels={"provider": provider, "type": token_type},
-                        value=usage[token_type],
-                    )
-            self.ledger.record(
-                "model",
-                {
-                    "request_id": request_id,
-                    "provider": provider,
-                    "model": model,
-                    **usage,
-                    "billed_tokens": billed_tokens,
-                    "usd": usd,
-                    "normalized_usd": usd,
-                    "billed_usd": billed_usd,
-                    "pricing_tier": pricing_tier,
-                    "accounting_method": "gateway" if usage else "unavailable",
-                    "duration_ms": duration_ms,
-                    "status": status,
-                },
-            )
-            METRICS.increment(
-                "testbed_gateway_provider_requests_total",
-                labels={
-                    "provider": provider,
-                    "operation": normalized,
-                    "status": status,
-                },
-            )
-            METRICS.increment(
-                "testbed_gateway_provider_duration_seconds_sum",
-                labels={"provider": provider, "operation": normalized},
-                value=duration_ms / 1000,
-            )
-            log_event(
-                "model_request_completed",
-                run_id=self.run_id,
-                request_id=request_id,
-                provider=provider,
-                operation=normalized,
-                model=model,
-                duration_ms=duration_ms,
-                status=status,
-                usage=usage,
-            )
-            if self.allowed_models is not None:
-                self.ledger.finish_model(request_id, accounted=bool(usage))
-
-        try:
-            body = json.dumps(payload, separators=(",", ":")).encode()
-            model = bounded_model_name(payload.get("model"))
-            request_pricing = pricing_for_request(provider, model)
-            capture_prompt(request_id, provider, normalized, model, body, payload)
-            self.ledger.timeline(
-                {
-                    "kind": "model.request",
-                    "request_id": request_id,
-                    "provider": provider,
-                    "operation": normalized,
-                    "model": model,
-                    "prompt_profile": prompt_profile(payload, body),
-                    "request": payload,
-                }
-            )
-            result = await self._request_kimi(
-                payload,
-                api_base=os.environ.get(
-                    str(config["upstream_env"]),
-                    str(config["upstream_default"]),
-                ).rstrip("/"),
-                api_key=os.environ[str(config["api_key_env"])],
-                trace=trace,
-            )
-
-            if hasattr(result, "__aiter__"):
-                if not isinstance(result, NativeReasoningStream):
-                    result = NativeReasoningStream(result)
-                relay: asyncio.Queue[bytes | None] = asyncio.Queue()
-
-                async def pump() -> None:
-                    nonlocal status
-                    try:
-                        async for event in result:  # type: ignore[union-attr]
-                            document = dump_adapter_event(event)
-                            trace(
-                                {
-                                    "stage": "normalized",
-                                    "protocol": "openai-responses",
-                                    "event": document,
-                                }
-                            )
-                            event_type = str(document.get("type") or "message")
-                            encoded = (
-                                f"event: {event_type}\n"
-                                f"data: {json.dumps(document, separators=(',', ':'))}\n\n"
-                            ).encode()
-                            response_body.extend(encoded)
-                            relay.put_nowait(encoded)
-                        done = b"data: [DONE]\n\n"
-                        response_body.extend(done)
-                        relay.put_nowait(done)
-                        status = "success"
-                    except BaseException:
-                        status = "stream_interrupted"
-                    finally:
-                        relay.put_nowait(None)
-                        finalize("text/event-stream")
-
-                pump_task = asyncio.ensure_future(pump())
-                BACKGROUND_TASKS.add(pump_task)
-                pump_task.add_done_callback(BACKGROUND_TASKS.discard)
-
-                async def stream_chunks() -> AsyncIterator[bytes]:
-                    while True:
-                        chunk = await relay.get()
-                        if chunk is None:
-                            break
-                        yield chunk
-
-                return StreamingResponse(
-                    stream_chunks(),
-                    status_code=200,
-                    headers={
-                        "content-type": "text/event-stream",
-                        "cache-control": "no-cache",
-                    },
-                )
-
-            document = dump_adapter_event(result)
-            trace(
-                {
-                    "stage": "normalized",
-                    "protocol": "openai-responses",
-                    "event": document,
-                }
-            )
-            response_body.extend(
-                json.dumps(document, separators=(",", ":")).encode()
-            )
-            status = "success"
-            finalize("application/json")
-            return JSONResponse(document)
-        except BaseException:
-            finalize("text/event-stream" if payload.get("stream") else "application/json")
             raise

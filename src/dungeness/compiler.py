@@ -2012,6 +2012,8 @@ def build_compose(
         profile = CONFIGURED_PROVIDERS[provider]
         key = profile['credential_env']
         provider_secret_env = {key: '${TESTBED_' + key + ':?provider access required}'}
+        for env in profile.get('credential_headers', {}).values():
+            provider_secret_env[env] = '${TESTBED_' + env + ':?provider metadata required}'
         if profile['credential_kind'] == 'session-token':
             provider_secret_env[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
     elif provider == "anthropic":
@@ -2160,8 +2162,12 @@ def build_compose(
             key = profile['credential_env']
             gateway_environment.pop(key, None)
             gateway_environment.pop(key + '_EXPIRES_AT', None)
+            for env in profile.get('credential_headers', {}).values():
+                gateway_environment.pop(env, None)
             if name in providers:
                 gateway_environment[key] = '${TESTBED_' + key + ':?provider access required}'
+                for env in profile.get('credential_headers', {}).values():
+                    gateway_environment[env] = '${TESTBED_' + env + ':?provider metadata required}'
                 if profile['credential_kind'] == 'session-token':
                     gateway_environment[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
         if "openai-chatgpt" in providers:

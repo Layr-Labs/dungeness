@@ -364,11 +364,6 @@ class RecordModelTests(unittest.TestCase):
         )
 
 
-
-
-
-
-
     def test_candidate_state_round_trips_directory_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -385,11 +380,6 @@ class RecordModelTests(unittest.TestCase):
                 "baseline",
             )
             self.assertEqual(candidate_state.digest_path(candidate), baseline_digest)
-
-
-
-
-
 
 
     def test_namespace_resolution_precedence(self) -> None:
@@ -830,11 +820,6 @@ class RecordModelTests(unittest.TestCase):
                 "codex-subscription-proxy",
             ),
             ("adapters/harbor/adapter.yaml", "adapter", "harbor"),
-            (
-                "adapters/responses-to-chat/adapter.yaml",
-                "adapter",
-                "responses-to-chat",
-            ),
         )
         for relative_path, record_type, local_id in manifests:
             path = REPOSITORY_ROOT / relative_path
@@ -853,9 +838,7 @@ class RecordModelTests(unittest.TestCase):
             "codex-claude-openrouter",
             "codex-fable-openrouter",
             "codex-openrouter",
-            "codex-kimi",
             "codex-kimi-openrouter",
-            "codex-kimi-subscription",
             "codex-openai",
             "codex-subscription",
             "pi",
@@ -892,20 +875,6 @@ class RecordModelTests(unittest.TestCase):
                     f"ARG CODEX_VERSION={agent['package']['version']}",
                     rendered,
                 )
-        kimi = build.load_agent("codex-kimi")
-        assert kimi is not None
-        resolved_adapter = build.resolve_agent_adapter(kimi)
-        assert resolved_adapter is not None
-        adapter_path, adapter_manifest, implementation_path = resolved_adapter
-        self.assertEqual(
-            adapter_path,
-            REPOSITORY_ROOT / "adapters/responses-to-chat/adapter.yaml",
-        )
-        self.assertEqual(adapter_manifest["namespace"], "system/dungeness")
-        self.assertEqual(
-            implementation_path,
-            REPOSITORY_ROOT / "services/gateway/kimi_adapter.py",
-        )
         kimi_openrouter = build.load_agent("codex-kimi-openrouter")
         assert kimi_openrouter is not None
         self.assertEqual(
@@ -1013,7 +982,6 @@ class RecordModelTests(unittest.TestCase):
         self.assertEqual(kwargs["continuation_max_resumes"], 2)
         self.assertEqual(kwargs["continuation_min_remaining_sec"], 600)
         self.assertEqual(kwargs["continuation_timeout_sec"], 3600)
-
 
 
     def test_codex_subscription_uses_gateway_and_auth_only_proxy(self) -> None:
@@ -1168,124 +1136,6 @@ class RecordModelTests(unittest.TestCase):
             persisted = json.loads(auth_path.read_text(encoding="utf-8"))
             self.assertNotIn("last_refresh", persisted)
 
-    def test_codex_kimi_uses_trusted_gateway_adapter(self) -> None:
-        agent = build.load_agent("codex-kimi")
-        assert agent is not None
-        self.assertEqual(
-            agent["model"]["supported_reasoning_efforts"],
-            ["low", "high", "max"],
-        )
-        self.assertEqual(
-            build.resolve_agent_options(
-                agent,
-                {"reasoning_effort": "max"},
-            )["reasoning_effort"],
-            "max",
-        )
-        with self.assertRaisesRegex(
-            ValueError,
-            "not supported by agent 'codex-kimi'",
-        ):
-            build.resolve_agent_options(
-                agent,
-                {"reasoning_effort": "medium"},
-            )
-        compose = build.yaml.safe_load(
-            build.build_compose(
-                "kimi-test",
-                {
-                    "historical_cutoff": {
-                        "end_published_date": "2026-05-28T23:59:59.999Z",
-                    },
-                    "search": {"max_results": 25},
-                },
-                {
-                    "web": {"searches": 1, "fetches": 1},
-                    "model": {"requests": 1, "total_tokens": 1000},
-                },
-                provider=build.agent_provider(agent),
-                agent_environment=agent["environment"],
-                max_usd=1.0,
-                model_pricing=build.resolve_model_pricing(agent),
-            )
-        )
-        main_environment = compose["services"]["main"]["environment"]
-        gateway_environment = compose["services"]["gateway"]["environment"]
-        self.assertEqual(
-            main_environment["OPENAI_BASE_URL"],
-            "http://gateway:8080/model/moonshot/v1",
-        )
-        self.assertEqual(main_environment["OPENAI_API_KEY"], "testbed")
-        self.assertNotIn("MOONSHOT_API_KEY", main_environment)
-        self.assertIn("MOONSHOT_API_KEY", gateway_environment)
-        self.assertEqual(
-            agent["adapter"],
-            "adapter:system/dungeness/responses-to-chat",
-        )
-
-    def test_codex_kimi_subscription_uses_membership_gateway(self) -> None:
-        agent = build.load_agent("codex-kimi-subscription")
-        assert agent is not None
-        self.assertEqual(build.agent_provider(agent), "kimi-code")
-        self.assertEqual(agent["model"]["request_model"], "k3")
-        self.assertEqual(agent["model"]["context_window"], 1048576)
-        self.assertEqual(
-            agent["model"]["supported_reasoning_efforts"],
-            ["low", "high", "max"],
-        )
-        pricing = build.resolve_model_pricing(agent)
-        self.assertEqual(pricing["provider"], "kimi-code")
-        compose = build.yaml.safe_load(
-            build.build_compose(
-                "kimi-code-test",
-                {
-                    "historical_cutoff": {
-                        "end_published_date": "2026-05-28T23:59:59.999Z",
-                    },
-                    "search": {"max_results": 25},
-                },
-                {
-                    "web": {"searches": 1, "fetches": 1},
-                    "model": {"requests": 1, "total_tokens": 1000},
-                },
-                provider=build.agent_provider(agent),
-                agent_environment=agent["environment"],
-                max_usd=0.25,
-                model_pricing=pricing,
-            )
-        )
-        main_environment = compose["services"]["main"]["environment"]
-        gateway_environment = compose["services"]["gateway"]["environment"]
-        self.assertEqual(
-            main_environment["OPENAI_BASE_URL"],
-            "http://gateway:8080/model/kimi-code/v1",
-        )
-        self.assertEqual(main_environment["OPENAI_API_KEY"], "testbed")
-        self.assertNotIn("KIMI_CODE_API_KEY", main_environment)
-        self.assertIn(
-            "TESTBED_KIMI_CODE_API_KEY",
-            gateway_environment["KIMI_CODE_API_KEY"],
-        )
-        job = build.yaml.safe_load(
-            build.build_harbor_job(
-                "kimi-code-test",
-                agent,
-                REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter",
-                agent_options={
-                    "reasoning_effort": "low",
-                    "reasoning_summary": "none",
-                },
-            )
-        )
-        self.assertEqual(job["agents"][0]["model_name"], "k3")
-        self.assertEqual(
-            job["agents"][0]["kwargs"]["model_context_window"],
-            1048576,
-        )
-        self.assertEqual(
-            job["agents"][0]["kwargs"]["reasoning_effort"],
-            "low",
-        )
 
     def test_experiment_create_materializes_factorial_run_specs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

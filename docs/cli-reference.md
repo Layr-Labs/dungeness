@@ -98,11 +98,9 @@ subscription authentication, and enough Docker memory for the selected task.
    ./dungeness run ecdsa-starter-codex-subscription.yaml
    ```
 
-To use a Kimi Code membership instead, set
-`TESTBED_KIMI_CODE_API_KEY` in `.env` and select
-`agent:projects/dungeness/codex-kimi-subscription`. The key is created in the
-Kimi Code console and consumes membership credits, not Moonshot Open Platform
-pay-as-you-go balance.
+Kimi Code and Moonshot require a solver-provided command harness that sends
+native Chat Completions. The legacy bundled Codex/Kimi presets and gateway
+protocol translation have been removed. See [command harnesses](command-harness.md).
 
 Dungeness prints the generated run ID. Persistent output is written under:
 
@@ -241,29 +239,11 @@ The credential is supplied as a read-only per-run temporary copy. It is still
 readable inside the Codex container, so subscription runs have weaker
 credential isolation than gateway API runs.
 
-Kimi Code membership is a separate subscription-style route. Create a key in
-the Kimi Code console, add it to `.env`, and select the membership profile:
-
-```dotenv
-TESTBED_KIMI_CODE_API_KEY=...
-```
-
-```yaml
-agent: agent:projects/dungeness/codex-kimi-subscription
-```
-
-This profile runs Kimi K3 with a 1,048,576-token context window. It supports
-`low`, `high`, and `max` reasoning effort and defaults to `high`. The key stays
-in the trusted gateway; the agent receives only a placeholder credential.
-`max_usd` uses Kimi K3 reference pricing for comparable experiment budgets,
-while `billed_usd` remains unknown because membership usage is not billed per
-token.
-
-The repository includes a membership smoke run:
-
-```bash
-./dungeness run ecdsa-kimi-k3-subscription-1m-smoke.yaml
-```
+Native command harnesses can use the `kimi-code` and `moonshot` gateway
+routes with `TESTBED_KIMI_CODE_API_KEY` and `TESTBED_MOONSHOT_API_KEY`,
+respectively. Credentials stay in the gateway; usage is metered against trusted
+prices. The harness must speak Chat Completions or supply its own adapter.
+Kimi Code accounting retains normalized usage; `billed_usd` remains unknown.
 
 ### Supported models and routes
 
@@ -275,11 +255,9 @@ Claude Opus 5 and Claude Fable 5.1:
 |---|---|---|---|
 | `agent:projects/dungeness/codex-subscription` | GPT-5.6-sol | ChatGPT subscription | `./dungeness auth login codex` |
 | `agent:projects/dungeness/codex-astra-subscription` | GPT-6 Astra | ChatGPT subscription | `./dungeness auth login codex` |
-| `agent:projects/dungeness/codex-kimi-subscription` | Kimi K3 | Kimi Code membership | `TESTBED_KIMI_CODE_API_KEY` |
 | `agent:projects/dungeness/codex-astra-openai` | GPT-6 Astra | OpenAI Responses API | `TESTBED_OPENAI_API_KEY` |
 | `agent:projects/dungeness/codex-openai` | GPT-5.6-sol | OpenAI Responses API | `TESTBED_OPENAI_API_KEY` |
 | `agent:projects/dungeness/codex-openrouter` | GPT-5.6-sol | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
-| `agent:projects/dungeness/codex-kimi` | Kimi K3 | Moonshot API through Responses-to-Chat | `TESTBED_MOONSHOT_API_KEY` |
 | `agent:projects/dungeness/codex-kimi-openrouter` | Kimi K3 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
 | `agent:projects/dungeness/codex-claude-openrouter` | Claude Opus 5 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
 | `agent:projects/dungeness/codex-fable-openrouter` | Claude Fable 5.1 | OpenRouter Responses API | `TESTBED_OPENROUTER_API_KEY` |
@@ -299,18 +277,7 @@ selects the full-request long-context pricing tier when reported input exceeds
 272,000 tokens. Reasoning tokens are included in output tokens and are not
 double counted.
 
-The direct Moonshot API profile also uses the trusted Responses-to-Chat
-adapter:
-
-```yaml
-agent: agent:projects/dungeness/codex-kimi
-```
-
-Set `TESTBED_MOONSHOT_API_KEY` in `.env`. The gateway records Kimi's decoded
-`reasoning_content` before converting the response for Codex, then uses Kimi's
-reported token usage for the ordinary run budget and summary.
-
-For the simpler OpenRouter path, select:
+For the existing OpenRouter Responses path, select:
 
 ```yaml
 agent: agent:projects/dungeness/codex-kimi-openrouter
@@ -319,9 +286,9 @@ agent: agent:projects/dungeness/codex-kimi-openrouter
 This profile needs `TESTBED_OPENROUTER_API_KEY` and the operator's
 [inference-only account configuration](gateway-request-policy.md#openrouter-account-defaults).
 OpenRouter's Responses
-API serves `moonshotai/kimi-k3` directly. Dungeness explicitly requests
-provider-visible reasoning and records the reconstructed reasoning stream plus
-the untouched response events in `usage/events.jsonl`.
+API serves `moonshotai/kimi-k3` directly. The harness chooses reasoning settings;
+Dungeness records any returned visible reasoning and response events in
+`usage/events.jsonl` without forcing reasoning disclosure.
 Kimi K3 accepts `low`, `high`, and `max` reasoning effort; Dungeness rejects
 other effort overrides before starting Harbor.
 

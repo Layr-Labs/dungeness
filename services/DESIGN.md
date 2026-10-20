@@ -127,10 +127,10 @@ services/gateway/
 ├── gateway.py          # stable entrypoint, HTTP routes, middleware, lifecycle
 ├── gateway_runtime.py  # run-scoped web and model request orchestration
 ├── gateway_models.py   # provider definitions and protocol/usage parsing
+├── gateway_auth.py     # provider-neutral trusted credential recipes
 ├── gateway_pricing.py  # trusted pricing policy and request-cost calculation
 ├── gateway_usage.py    # canonical events, budgets, metrics, operational logs
-├── gateway_web.py      # historical-source policy and Exa request validation
-└── kimi_adapter.py     # Responses-to-Chat adapter for Kimi routes
+└── gateway_web.py      # historical-source policy and Exa request validation
 ```
 
 The implementation modules do not import `gateway.py`; dependency flow remains
@@ -232,13 +232,12 @@ routes:
 ```text
 /model/openrouter/v1/responses  OpenRouter API key held by the gateway
 /model/chatgpt/v1/responses     ChatGPT bearer credential forwarded by Codex
-/model/moonshot/v1/responses    Kimi Chat Completions behind a trusted adapter
 ```
 
-The Kimi route converts Responses requests to Chat Completions and converts the
-result back to Responses. It writes decoded upstream chunks as
-`model.provider_event` records in `usage/events.jsonl` before conversion so
-Kimi `reasoning_content`, tool calls, and usage remain auditable.
+Moonshot and Kimi Code expose only `/model/<provider>/v1/chat/completions`.
+The gateway forwards native requests and responses and accounts for reported
+usage. Harnesses own any protocol conversion; the legacy gateway adapter and
+its bundled Codex/Kimi presets have been removed.
 
 For streaming Responses API calls, the gateway forwards SSE chunks as they
 arrive. It retains a request-local in-memory copy so it can extract

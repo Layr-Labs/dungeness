@@ -32,6 +32,31 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_configured_account_metadata_is_exposed_only_to_authorized_gateway(self):
+        profile = {**compiler.CONFIGURED_PROVIDERS["xai"],
+                   "credential_headers": {"account-id": "XAI_API_KEY_ACCOUNT"}}
+        with patch.dict(compiler.CONFIGURED_PROVIDERS, {"xai": profile}):
+            for selected in ("xai", "openai"):
+                with self.subTest(selected=selected):
+                    compose = yaml.safe_load(compiler.build_compose(
+                        "configured-account",
+                        {"historical_cutoff": {"end_published_date": "2026-05-28T23:59:59Z"},
+                         "search": {"max_results": 25}},
+                        {"web": {"searches": 0, "fetches": 0},
+                         "model": {"requests": 10, "total_tokens": 10000}},
+                        provider="xai", max_usd=1,
+                        command_policy={"models": [{
+                            **MODEL, "provider": selected, "request_model": "example",
+                            "base_url": f"http://gateway:8080/model/{selected}/v1",
+                        }]}))
+                    env = compose["services"]["gateway"]["environment"]
+                    if selected == "xai":
+                        self.assertEqual(env["XAI_API_KEY_ACCOUNT"],
+                                         "${TESTBED_XAI_API_KEY_ACCOUNT:?provider metadata required}")
+                    else:
+                        self.assertNotIn("XAI_API_KEY_ACCOUNT", env)
+                    self.assertNotIn("XAI_API_KEY_ACCOUNT", json.dumps(compose["services"]["main"]))
+
     def test_command_topology_needs_only_gateway_and_verifier(self):
         compose = yaml.safe_load(compiler.build_compose(
             "generic-run",

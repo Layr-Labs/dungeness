@@ -10,13 +10,13 @@ RUN pip install --no-cache-dir --requirement /app/requirements.txt
 
 COPY gateway.py /app/gateway.py
 COPY gateway_models.py /app/gateway_models.py
+COPY gateway_auth.py /app/gateway_auth.py
 COPY provider_profiles.py providers.json /app/
 COPY gateway_request_policy.py /app/gateway_request_policy.py
 COPY gateway_pricing.py /app/gateway_pricing.py
 COPY gateway_runtime.py /app/gateway_runtime.py
 COPY gateway_usage.py /app/gateway_usage.py
 COPY gateway_web.py /app/gateway_web.py
-COPY kimi_adapter.py /app/kimi_adapter.py
 COPY pricing.yaml /app/pricing.yaml
 
 RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 gateway \

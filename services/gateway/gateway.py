@@ -106,9 +106,6 @@ from gateway_web import (
     parse_utc,
     positive_int,
 )
-from kimi_adapter import model_dump as dump_adapter_event
-from kimi_adapter import NativeReasoningStream
-from kimi_adapter import request_kimi
 
 
 _BACKGROUND_TASKS = BACKGROUND_TASKS
@@ -116,12 +113,7 @@ _BACKGROUND_TASKS = BACKGROUND_TASKS
 
 # A Compose deployment creates exactly one process for exactly one run, so the
 # run-scoped gateway and ledger can be initialized once at process startup.
-gateway = Gateway(
-    # Resolve the entrypoint symbol at call time so existing integrations can
-    # replace ``gateway.request_kimi`` without reaching into implementation
-    # modules.
-    kimi_request=lambda *args, **kwargs: request_kimi(*args, **kwargs),
-)
+gateway = Gateway()
 
 
 def instrumentation_route(path: str) -> str:
@@ -490,20 +482,14 @@ async def model_chatgpt(request: Request) -> Response:
 
 async def model_moonshot(request: Request) -> Response:
     try:
-        if request.path_params["path"].strip("/") == "chat/completions":
-            return await gateway.proxy_model("moonshot", request.path_params["path"], request)
-        return await gateway.proxy_kimi(
-            "moonshot",
-            request.path_params["path"],
-            request,
-        )
+        return await gateway.proxy_model("moonshot", request.path_params["path"], request)
     except BudgetExceeded as error:
         return budget_rejected(request, "model.moonshot", error)
     except ValueError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
     except Exception as error:
         log_event(
-            "moonshot_adapter_failed",
+            "moonshot_proxy_failed",
             run_id=gateway.run_id,
             request_id=request.state.request_id,
             error_type=type(error).__name__,
@@ -517,20 +503,14 @@ async def model_moonshot(request: Request) -> Response:
 
 async def model_kimi_code(request: Request) -> Response:
     try:
-        if request.path_params["path"].strip("/") == "chat/completions":
-            return await gateway.proxy_model("kimi-code", request.path_params["path"], request)
-        return await gateway.proxy_kimi(
-            "kimi-code",
-            request.path_params["path"],
-            request,
-        )
+        return await gateway.proxy_model("kimi-code", request.path_params["path"], request)
     except BudgetExceeded as error:
         return budget_rejected(request, "model.kimi-code", error)
     except ValueError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
     except Exception as error:
         log_event(
-            "kimi_code_adapter_failed",
+            "kimi_code_proxy_failed",
             run_id=gateway.run_id,
             request_id=request.state.request_id,
             error_type=type(error).__name__,

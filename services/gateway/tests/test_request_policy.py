@@ -1,6 +1,5 @@
 """Security boundary tests: rejected requests never reach a provider."""
 from contextlib import asynccontextmanager
-import copy
 import json
 import os
 from pathlib import Path
@@ -49,7 +48,7 @@ def request_body(provider, operation):
 
 @asynccontextmanager
 async def harness(*, declared=True, web=False):
-    """Both HTTP and adapter paths are mocked; no live credentials or traffic."""
+    """HTTP requests are mocked; no live credentials or traffic."""
     with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
         "TESTBED_USAGE_DIR": temp,
         "DUNGENESS_ALLOWED_MODELS": json.dumps(list(MODELS.items())) if declared else "",
@@ -71,15 +70,12 @@ async def harness(*, declared=True, web=False):
                         "input_tokens": 2, "output_tokens": 1, "total_tokens": 3,
                         "prompt_tokens": 2, "completion_tokens": 1}}
 
-        async def adapter(payload, **kwargs):
-            calls.append(("adapter", copy.deepcopy(payload), None))
-            return response
 
         def upstream(request):
             calls.append(("http", json.loads(request.content), request))
             return httpx.Response(200, json=response)
 
-        runtime = Gateway(kimi_request=adapter)
+        runtime = Gateway()
         await runtime.client.aclose()
         runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
         try:
@@ -92,6 +88,38 @@ async def harness(*, declared=True, web=False):
 
 
 class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_kimi_routes_reject_legacy_responses_before_upstream(self):
+        async with harness() as (client, runtime, calls):
+            for provider in ("moonshot", "kimi-code"):
+                reply = await client.post(route(provider, "responses"),
+                    json={"model": MODELS[provider], "input": "solve"})
+                self.assertEqual(reply.status_code, 404, reply.text)
+            self.assertEqual(calls, [])
+            self.assertEqual(runtime.ledger.counts["model_requests"], 0)
+
+    async def test_native_kimi_chat_preserves_harness_payload_and_accounts_usage(self):
+        async with harness() as (client, runtime, calls):
+            for provider in ("moonshot", "kimi-code"):
+                payload = {
+                    "model": MODELS[provider],
+                    "messages": [{"role": "user", "content": "Use my own strategy."}],
+                    "tools": [{"type": "function", "function": {
+                        "name": "evaluate", "parameters": {"type": "object"}}}],
+                    "tool_choice": {"type": "function", "function": {"name": "evaluate"}},
+                }
+                reply = await client.post(route(provider, "chat/completions"), json=payload)
+                self.assertEqual(reply.status_code, 200, reply.text)
+                self.assertEqual(calls[-1][1], payload)
+                upstream = calls[-1][2]
+                self.assertEqual(upstream.headers["user-agent"], "dungeness-gateway/1")
+                self.assertEqual(upstream.url.host,
+                    "api.moonshot.ai" if provider == "moonshot" else "api.kimi.com")
+                self.assertEqual(reply.json()["usage"]["total_tokens"], 3)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(runtime.ledger.counts["model_requests"], 2)
+            self.assertEqual(runtime.ledger.counts["model_tokens"], 6)
+            self.assertGreater(runtime.ledger.usd_spent, 0)
+
     async def test_openrouter_is_closed_without_trusted_account_configuration(self):
         for declared in (False, True):
             with patch.dict(os.environ, {"DUNGENESS_OPENROUTER_INFERENCE_ONLY": ""}):

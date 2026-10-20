@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from provider_profiles import PROFILES
+from gateway_auth import authentication_headers, profile_authentication
 from typing import Any
 import zlib
 
@@ -24,8 +25,8 @@ OPENROUTER_ROUTES = {
     "models",
 }
 CHATGPT_ROUTES = {"responses", "responses/compact"}
-MOONSHOT_ROUTES = {"responses", "chat/completions"}
-KIMI_CODE_ROUTES = {"responses", "chat/completions"}
+MOONSHOT_ROUTES = {"chat/completions"}
+KIMI_CODE_ROUTES = {"chat/completions"}
 
 def validate_declared_request(payload, pricing):
     """Keep measured inference on the exact declared model and priced units."""
@@ -463,6 +464,9 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
 # parser differ.
 MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
     "openai": {
+        "authentication": {"sources": [{"headers": {
+            "authorization": {"env": "OPENAI_API_KEY", "prefix": "Bearer "},
+        }}]},
         "routes": OPENAI_ROUTES,
         "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
         "upstream_default": "https://api.openai.com/v1",
@@ -475,6 +479,10 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "extract_usage": extract_usage,
     },
     "anthropic": {
+        "authentication": {"sources": [{"headers": {
+            "x-api-key": {"env": "ANTHROPIC_API_KEY"},
+            "anthropic-version": {"env": "ANTHROPIC_VERSION", "default": "2023-06-01"},
+        }}]},
         "routes": ANTHROPIC_ROUTES,
         "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
         "upstream_default": "https://api.anthropic.com/v1",
@@ -484,6 +492,9 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "extract_usage": extract_anthropic_usage,
     },
     "openrouter": {
+        "authentication": {"sources": [{"headers": {
+            "authorization": {"env": "OPENROUTER_API_KEY", "prefix": "Bearer "},
+        }}]},
         "routes": OPENROUTER_ROUTES,
         "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
         "upstream_default": "https://openrouter.ai/api/v1",
@@ -503,6 +514,17 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "extract_usage": extract_usage,
     },
     "openai-chatgpt": {
+        "authentication": {"sources": [
+            {"file_env": "DUNGENESS_CHATGPT_AUTH_FILE", "headers": {
+                "authorization": {"path": ["tokens", "access_token"], "prefix": "Bearer "},
+                "chatgpt-account-id": {"path": ["tokens", "account_id"]},
+            }},
+            # Older native-agent runs carry their own bearer credential. A
+            # configured file always takes precedence and fails closed on error.
+            {"headers": {"authorization": {
+                "request_header": "authorization", "require_prefix": "Bearer ",
+            }}},
+        ]},
         "routes": CHATGPT_ROUTES,
         "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
         "upstream_default": "https://chatgpt.com/backend-api/codex",
@@ -532,23 +554,27 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "extract_usage": extract_usage,
     },
     "moonshot": {
+        "authentication": {"sources": [{"headers": {
+            "authorization": {"env": "MOONSHOT_API_KEY", "prefix": "Bearer "},
+        }}]},
         "routes": MOONSHOT_ROUTES,
         "upstream_env": "MOONSHOT_UPSTREAM_BASE_URL",
         "upstream_default": "https://api.moonshot.ai/v1",
         "auth": "gateway_secret",
         "billed": True,
-        "adapter": "responses-to-chat",
         "api_key_env": "MOONSHOT_API_KEY",
         "passthrough": (),
         "extract_usage": extract_usage,
     },
     "kimi-code": {
+        "authentication": {"sources": [{"headers": {
+            "authorization": {"env": "KIMI_CODE_API_KEY", "prefix": "Bearer "},
+        }}]},
         "routes": KIMI_CODE_ROUTES,
         "upstream_env": "KIMI_CODE_UPSTREAM_BASE_URL",
         "upstream_default": "https://api.kimi.com/coding/v1",
         "auth": "gateway_secret",
         "billed": False,
-        "adapter": "responses-to-chat",
         "api_key_env": "KIMI_CODE_API_KEY",
         "passthrough": (),
         "extract_usage": extract_usage,
@@ -562,59 +588,15 @@ def provider_auth_headers(
 ) -> dict[str, str]:
     """Resolve upstream authentication without ever logging credential values."""
 
-    if provider in PROFILES:
-        profile = PROFILES[provider]
-        token = os.environ.get(profile['credential_env'])
-        if not token:
-            raise ValueError('Configured provider credential is unavailable.')
-        if profile['credential_kind'] == 'session-token':
-            from datetime import datetime, timezone
-            expiry = os.environ.get(profile['credential_env'] + '_EXPIRES_AT', '')
-            try:
-                parsed = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
-                if parsed.tzinfo is None or parsed <= datetime.now(timezone.utc):
-                    raise ValueError
-            except ValueError:
-                raise ValueError('Subscription access expired; renew locally. API fallback is disabled.') from None
-        return {'authorization': 'Bearer ' + token, **profile['headers']}
-    if provider == "openai-chatgpt":
-        auth_file = os.environ.get("DUNGENESS_CHATGPT_AUTH_FILE")
-        if auth_file:
-            document = json.loads(Path(auth_file).read_text())
-            tokens = document.get("tokens", {})
-            access = tokens.get("access_token")
-            account = tokens.get("account_id")
-            if not isinstance(access, str) or not access or not isinstance(account, str) or not account:
-                raise ValueError("gateway ChatGPT access is unavailable")
-            return {"authorization": f"Bearer {access}", "chatgpt-account-id": account}
-        authorization = (
-            request_headers.get("authorization") if request_headers is not None else None
-        )
-        if (
-            not isinstance(authorization, str)
-            or not authorization.startswith("Bearer ")
-            or len(authorization) <= len("Bearer ")
-        ):
-            raise ValueError("ChatGPT subscription request is missing bearer authentication")
-        return {"authorization": authorization}
-    if provider == "anthropic":
-        return {
-            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-            "anthropic-version": os.environ.get(
-                "ANTHROPIC_VERSION", "2023-06-01"
-            ),
-        }
-    if provider == "openrouter":
-        return {"authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"}
-    if provider == "moonshot":
-        return {"authorization": f"Bearer {os.environ['MOONSHOT_API_KEY']}"}
-    if provider == "kimi-code":
-        return {"authorization": f"Bearer {os.environ['KIMI_CODE_API_KEY']}"}
-    return {"authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"}
+    cfg = MODEL_PROVIDERS.get(provider)
+    if cfg is None:
+        raise ValueError("Unknown authentication provider.")
+    return authentication_headers(cfg["authentication"], request_headers)
 
 
 for _name, _profile in PROFILES.items():
     MODEL_PROVIDERS[_name] = {
+        'authentication': profile_authentication(_profile),
         'routes': set(_profile['routes']),
         'upstream_env': _name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
         'upstream_default': _profile['base_url'],

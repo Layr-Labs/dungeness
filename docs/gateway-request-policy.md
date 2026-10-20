@@ -1,7 +1,7 @@
 # Gateway request policy
 
 The gateway accepts a reviewed subset of provider APIs. Every inference route
-validates requests **before provider traffic, adapter translation, or budget
+validates requests **before provider traffic or budget
 reservation**. This applies to command harnesses, legacy named agents, and runs
 without `model_access`. It does not depend on the harness obeying its own settings.
 
@@ -39,7 +39,8 @@ The authoritative schemas are in
 [`gateway_request_policy.py`](../services/gateway/gateway_request_policy.py).
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
 Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
-Moonshot and Kimi requests are checked before Responses-to-chat translation.
+Moonshot and Kimi accept native Chat Completions only; the gateway does not
+translate their requests or responses into another protocol.
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
   Unknown protocol beta headers and query controls are also rejected.
