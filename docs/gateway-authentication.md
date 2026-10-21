@@ -14,9 +14,8 @@ not use billing status to choose an authentication mechanism.
 Built-in recipes live beside the provider destinations in `gateway_models.py`.
 They preserve the existing environment names and credential-file mounts.
 ChatGPT's recipe reads its access token and account ID from the staged file.
-The older native-agent workflow has an explicit request-bearer fallback only
-when no credential-file path is configured. A missing, malformed, or incomplete
-configured file fails closed and never selects that fallback.
+A missing, malformed, or incomplete credential file fails closed. Caller-supplied
+bearer tokens are never used to authenticate upstream requests.
 
 For compatible providers in `providers.json`, bearer substitution remains the
 default. These optional fields configure different authentication headers:

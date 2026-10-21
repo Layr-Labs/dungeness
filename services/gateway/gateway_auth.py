@@ -25,28 +25,23 @@ def profile_authentication(profile):
     return {"sources": [source]}
 
 
-def _value(spec, document, request_headers):
+def _value(spec, document):
     if "env" in spec:
         value = os.environ.get(spec["env"], spec.get("default"))
     elif "path" in spec:
         value = document
         for part in spec["path"]:
             value = value.get(part) if isinstance(value, dict) else None
-    elif "request_header" in spec:
-        value = request_headers.get(spec["request_header"]) if request_headers is not None else None
     else:
         value = spec.get("literal")
     if (not isinstance(value, str) or not value
             or any(ord(c) < 32 or ord(c) > 126 for c in value)):
         raise ValueError("Gateway authentication value is missing or invalid.")
-    required_prefix = spec.get("require_prefix")
-    if required_prefix and (not value.startswith(required_prefix) or len(value) == len(required_prefix)):
-        raise ValueError("Gateway request is missing bearer authentication.")
     return spec.get("prefix", "") + value
 
 
-def authentication_headers(recipe, request_headers=None):
-    """Render a trusted recipe from environment, credential file, or legacy input."""
+def authentication_headers(recipe):
+    """Render a trusted recipe from environment, credential file, or fixed values."""
     selected = None
     document = {}
     for source in recipe["sources"]:
@@ -71,7 +66,7 @@ def authentication_headers(recipe, request_headers=None):
         raise ValueError("Gateway authentication source is unavailable.")
     if "expires_at" in selected:
         try:
-            stamp = _value(selected["expires_at"], document, request_headers)
+            stamp = _value(selected["expires_at"], document)
             expiry = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
             if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
                 raise ValueError
@@ -81,5 +76,5 @@ def authentication_headers(recipe, request_headers=None):
     for name, spec in selected["headers"].items():
         if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
             raise ValueError("Invalid configured authentication header.")
-        headers[name] = _value(spec, document, request_headers)
+        headers[name] = _value(spec, document)
     return headers

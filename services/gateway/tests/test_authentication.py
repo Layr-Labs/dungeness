@@ -26,9 +26,7 @@ class AuthenticationTests(unittest.TestCase):
             with self.subTest(header=header), patch.dict(os.environ, {
                 "EXAMPLE_TOKEN": "private-key", "EXAMPLE_ACCOUNT": "account-7",
             }):
-                self.assertEqual(authentication_headers(recipe, {
-                    header: "attacker", "example-account-id": "other-account",
-                }), {header: prefix + "private-key", "example-account-id": "account-7"})
+                self.assertEqual(authentication_headers(recipe), {header: prefix + "private-key", "example-account-id": "account-7"})
 
     def test_unknown_provider_does_not_reuse_default_credentials(self):
         with self.assertRaisesRegex(ValueError, "Unknown authentication provider"):
@@ -41,7 +39,7 @@ class AuthenticationTests(unittest.TestCase):
         for value in ("", "secret\r\nInjected: value"):
             with self.subTest(value=repr(value)), patch.dict(os.environ, {"EXAMPLE_TOKEN": value}):
                 with self.assertRaisesRegex(ValueError, "authentication"):
-                    authentication_headers(recipe, {"authorization": "Bearer attacker"})
+                    authentication_headers(recipe)
 
     def test_expiry_is_independent_of_provider_and_billing(self):
         recipe = {"sources": [{
@@ -57,7 +55,7 @@ class AuthenticationTests(unittest.TestCase):
                     (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}):
                 self.assertEqual(authentication_headers(recipe), {"authorization": "Bearer private-key"})
 
-    def test_invalid_configured_file_does_not_select_legacy_request_fallback(self):
+    def test_invalid_configured_file_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             "DUNGENESS_CHATGPT_AUTH_FILE": str(Path(temp) / "auth.json"),
         }):
@@ -69,16 +67,12 @@ class AuthenticationTests(unittest.TestCase):
                     if content is not None:
                         path.write_text(content)
                     with self.assertRaises(ValueError):
-                        provider_auth_headers("openai-chatgpt", {"authorization": "Bearer attacker"})
+                        provider_auth_headers("openai-chatgpt")
 
-    def test_legacy_request_auth_requires_explicit_configuration(self):
+    def test_missing_trusted_file_fails_closed(self):
         with patch.dict(os.environ, {"DUNGENESS_CHATGPT_AUTH_FILE": ""}):
-            self.assertEqual(provider_auth_headers("openai-chatgpt", {
-                "authorization": "Bearer legacy-token",
-            }), {"authorization": "Bearer legacy-token"})
-            for value in ("testbed", "Bearer ", "Basic secret"):
-                with self.subTest(value=value), self.assertRaises(ValueError):
-                    provider_auth_headers("openai-chatgpt", {"authorization": value})
+            with self.assertRaisesRegex(ValueError, "source is unavailable"):
+                provider_auth_headers("openai-chatgpt")
 
 
 class AuthenticationBoundaryTests(unittest.IsolatedAsyncioTestCase):
@@ -93,9 +87,7 @@ class AuthenticationBoundaryTests(unittest.IsolatedAsyncioTestCase):
             "TESTBED_USAGE_DIR": temp, "EXAMPLE_SESSION_TOKEN": "private-key",
             "EXAMPLE_SESSION_TOKEN_ACCOUNT": "account-7",
         }), patch.dict(MODEL_PROVIDERS, {"example-session": cfg}):
-            self.assertEqual(provider_auth_headers("example-session", {
-                "x-api-key": "attacker", "account-id": "other-account",
-            }), {"x-api-key": "private-key", "account-id": "account-7"})
+            self.assertEqual(provider_auth_headers("example-session"), {"x-api-key": "private-key", "account-id": "account-7"})
 
     async def test_trusted_file_overrides_agent_account_and_token(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
@@ -130,6 +122,12 @@ class AuthenticationBoundaryTests(unittest.IsolatedAsyncioTestCase):
                             json={"model": "gpt-6-astra", "input": "test"},
                             headers={"authorization": "Bearer attacker"})
                         self.assertEqual(denied.status_code, 400, denied.text)
+                        # Unconfigured credentials must not enable the old bearer passthrough.
+                        with patch.dict(os.environ, {"DUNGENESS_CHATGPT_AUTH_FILE": ""}):
+                            denied = await client.post("/model/chatgpt/v1/responses",
+                                json={"model": "gpt-6-astra", "input": "test"},
+                                headers={"authorization": "Bearer attacker", "chatgpt-account-id": "other-account"})
+                            self.assertEqual(denied.status_code, 400, denied.text)
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(runtime.ledger.counts["model_requests"], 1)
                 events = Path(temp, "events.jsonl").read_text()

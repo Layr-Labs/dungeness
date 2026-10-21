@@ -392,7 +392,7 @@ class Gateway:
         if provider in PROFILES:
             upstream_model(provider, payload['model'])
         # All credential types are checked before admitting a model request.
-        provider_auth_headers(provider, request.headers)
+        provider_auth_headers(provider)
         if provider == "openrouter" and not self.openrouter_inference_only:
             raise ValueError(
                 "OpenRouter inference requires the operator to disable account-default "
@@ -653,7 +653,7 @@ class Gateway:
                         if name in request.headers
                     },
                     # Trusted credentials win over any allowed client metadata.
-                    **provider_auth_headers(provider, request.headers),
+                    **provider_auth_headers(provider),
                 },
                 params=request.query_params,
                 content=body,

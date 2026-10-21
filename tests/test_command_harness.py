@@ -66,7 +66,8 @@ class CommandHarnessTests(unittest.TestCase):
         for path in descriptors:
             compiler.command_execution(yaml.safe_load(path.read_text()))
         for path in ("adapters/harbor/codex_gateway.py", "adapters/harbor/codex_subscription.py",
-                     "adapters/harbor/prime_agent.py", "services/codex-subscription-proxy"):
+                     "adapters/harbor/prime_agent.py", "adapters/harbor/pi_prebaked.py",
+                     "services/codex-subscription-proxy"):
             self.assertFalse((ROOT / path).exists(), path)
 
     def test_control_plane_accepts_only_the_trusted_command_adapter(self):
@@ -279,13 +280,13 @@ class CommandHarnessTests(unittest.TestCase):
                 check=True, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.stdout.strip(), "resumed")
 
-    def test_gateway_owns_chatgpt_auth_ignoring_harness_bearer(self):
+    def test_gateway_reads_chatgpt_auth_from_trusted_file(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "auth.json"
             path.write_text(json.dumps({"tokens": {
                 "access_token": "synthetic-private-token", "account_id": "synthetic-account"}}))
             with patch.dict(os.environ, {"DUNGENESS_CHATGPT_AUTH_FILE": str(path)}):
-                headers = models.provider_auth_headers("openai-chatgpt", {"authorization": "Bearer testbed"})
+                headers = models.provider_auth_headers("openai-chatgpt")
             self.assertEqual(headers, {"authorization": "Bearer synthetic-private-token",
                                       "chatgpt-account-id": "synthetic-account"})
 

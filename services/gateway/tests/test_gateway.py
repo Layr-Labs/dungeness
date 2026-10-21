@@ -415,7 +415,7 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(summary["usage"]["normalized_usd"], 0.125)
             self.assertEqual(summary["usage"]["billed_usd"], 0.125)
 
-    def test_chatgpt_subscription_forwards_auth_and_normalizes_cost(self) -> None:
+    def test_chatgpt_subscription_uses_trusted_auth_and_normalizes_cost(self) -> None:
         async def upstream(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/backend-api/codex/responses")
             self.assertEqual(
@@ -438,7 +438,13 @@ class UsageTests(unittest.TestCase):
                 },
             )
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DUNGENESS_CHATGPT_AUTH_FILE": "",
+        }):
+            auth_file = Path(directory) / "auth.json"
+            auth_file.write_text(json.dumps({"tokens": {
+                "access_token": "subscription-access-token", "account_id": "account-1"}}))
+            os.environ["DUNGENESS_CHATGPT_AUTH_FILE"] = str(auth_file)
             ledger = UsageLedger("chatgpt-test", Path(directory))
             model_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
             original_client, original_ledger = gateway.client, gateway.ledger
@@ -449,8 +455,8 @@ class UsageTests(unittest.TestCase):
                     response = client.post(
                         "/model/chatgpt/v1/responses",
                         headers={
-                            "authorization": "Bearer subscription-access-token",
-                            "chatgpt-account-id": "account-1",
+                            "authorization": "Bearer testbed",
+                            "chatgpt-account-id": "untrusted-account",
                             "x-codex-turn-metadata": "turn-metadata",
                         },
                         json={"model": "gpt-5.6-sol", "input": "test"},
@@ -563,7 +569,12 @@ class UsageTests(unittest.TestCase):
                 stream=OneChunkStream(),
             )
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DUNGENESS_CHATGPT_AUTH_FILE": "",
+        }):
+            auth_file = Path(directory) / "auth.json"
+            auth_file.write_text(json.dumps({"tokens": {"access_token": "subscription", "account_id": "account"}}))
+            os.environ["DUNGENESS_CHATGPT_AUTH_FILE"] = str(auth_file)
             ledger = UsageLedger("chatgpt-stream-test", Path(directory))
             model_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
             original_client = gateway.client
@@ -574,7 +585,7 @@ class UsageTests(unittest.TestCase):
                 with TestClient(app) as client:
                     response = client.post(
                         "/model/chatgpt/v1/responses",
-                        headers={"authorization": "Bearer subscription"},
+                        headers={"authorization": "Bearer testbed"},
                         json={
                             "model": "gpt-5.6-sol",
                             "stream": True,

@@ -517,16 +517,11 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
                 "authorization": {"path": ["tokens", "access_token"], "prefix": "Bearer "},
                 "chatgpt-account-id": {"path": ["tokens", "account_id"]},
             }},
-            # Older native-agent runs carry their own bearer credential. A
-            # configured file always takes precedence and fails closed on error.
-            {"headers": {"authorization": {
-                "request_header": "authorization", "require_prefix": "Bearer ",
-            }}},
         ]},
         "routes": CHATGPT_ROUTES,
         "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
         "upstream_default": "https://chatgpt.com/backend-api/codex",
-        "auth": "forward_openai_auth",
+        "auth": "gateway_secret",
         "billed": False,
         # ChatGPT's Codex backend uses these client/account headers in addition
         # to the bearer credential. Keep this a fixed allowlist; never forward
@@ -554,16 +549,13 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
 }
 
 
-def provider_auth_headers(
-    provider: str,
-    request_headers: Any | None = None,
-) -> dict[str, str]:
+def provider_auth_headers(provider: str) -> dict[str, str]:
     """Resolve upstream authentication without ever logging credential values."""
 
     cfg = MODEL_PROVIDERS.get(provider)
     if cfg is None:
         raise ValueError("Unknown authentication provider.")
-    return authentication_headers(cfg["authentication"], request_headers)
+    return authentication_headers(cfg["authentication"])
 
 
 def configured_provider_config(name, profile):
