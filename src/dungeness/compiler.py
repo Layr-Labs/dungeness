@@ -1593,6 +1593,7 @@ def resolve_problem_service(task_dir, value, destination):
         raise ValueError("Invalid problem service attachments")
     files = context / "files"
     declared = set()
+    resource_paths = set()
     total = 0
     for entry in entries:
         if not isinstance(entry, dict):
@@ -1601,7 +1602,9 @@ def resolve_problem_service(task_dir, value, destination):
         if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name)
                 or name in declared or type(entry.get("bytes")) is not int
                 or not 0 < entry["bytes"] <= 32 * 1024 * 1024
-                or entry.get("media_type") not in {"application/json", "application/pdf"}):
+                or not isinstance(entry.get("media_type"), str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*",
+                                    entry["media_type"])):
             raise ValueError("Invalid problem service attachment")
         path = files / name
         if (files.is_symlink() or path.is_symlink() or not path.is_file()
@@ -1611,6 +1614,16 @@ def resolve_problem_service(task_dir, value, destination):
             if hashlib.file_digest(source, "sha256").hexdigest() != entry.get("sha256"):
                 raise ValueError("Problem service attachment differs from pinned digest")
         declared.add(name)
+        paths = entry.get("paths", [])
+        if not isinstance(paths, list):
+            raise ValueError("Invalid problem resource routes")
+        part = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+        for route in paths:
+            if (not isinstance(route, str)
+                    or not re.fullmatch(rf"/{part}(?:/{part})?/(?:description|knowledge-base|resources/{part})", route)
+                    or route in resource_paths):
+                raise ValueError("Invalid or duplicate problem resource route")
+            resource_paths.add(route)
         total += entry["bytes"]
     if total > 256 * 1024 * 1024:
         raise ValueError("Problem service attachments exceed size limit")

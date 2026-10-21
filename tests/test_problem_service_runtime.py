@@ -34,6 +34,15 @@ class ProblemServiceRuntimeTests(unittest.TestCase):
                 return {"context": "source", "sha256": hashlib.sha256(payload).hexdigest()}
             pin = binding([entry])
             compiler.resolve_problem_service(root, pin, root / "ok")
+            for index, media_type in enumerate(('text/markdown', 'text/csv', 'application/zip')):
+                compiler.resolve_problem_service(root, binding([{**entry, 'media_type': media_type}]), root / f'media-{index}')
+            with self.assertRaises(ValueError):
+                compiler.resolve_problem_service(root, binding([{**entry, 'media_type': 'text/plain\r\nX: injected'}]), root / 'invalid-media')
+            for routes in ('/test/v1/resources/paper', ['/test/v1/resources/../paper'],
+                           ['/test/v1/resources/paper'] * 2, ['https://attacker.invalid/paper']):
+                with self.assertRaises(ValueError):
+                    compiler.resolve_problem_service(root, binding([{**entry, 'paths': routes}]), root / 'invalid-routes')
+            pin = binding([entry])
             paper.write_bytes(b"tampered")
             with self.assertRaises(ValueError):
                 compiler.resolve_problem_service(root, pin, root / "bad")

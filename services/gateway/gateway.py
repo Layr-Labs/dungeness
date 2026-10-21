@@ -124,6 +124,8 @@ def instrumentation_route(path: str) -> str:
             return f"/model/{provider}/v1/{{operation}}"
     if path.startswith("/task/files/"):
         return "/task/files/{name}"
+    if re.fullmatch(r"/[^/]+(?:/[^/]+)?/(?:description|knowledge-base|resources/[^/]+)", path):
+        return "/{problem}/{release}/resources/{resource}"
     if path.startswith("/model/openai/v1/"):
         return "/model/openai/v1/{operation}"
     if path.startswith("/model/anthropic/v1/"):
@@ -249,12 +251,12 @@ async def assigned_task(request: Request) -> Response:
 TASK_FILE_SLOTS = asyncio.Semaphore(4)
 
 
-async def assigned_file(request: Request) -> Response:
+async def assigned_file(request: Request, *, task=None, name=None) -> Response:
     """Serve only a file declared by this run's pinned task, with verified bytes."""
-    task = await assigned_task(request)
+    task = await assigned_task(request) if task is None else task
     if task.status_code != 200:
         return task
-    name = request.path_params["name"]
+    name = request.path_params["name"] if name is None else name
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
         return JSONResponse({"error": "Unknown task file."}, status_code=404)
     entries = json.loads(task.body).get("attachments", [])
@@ -262,9 +264,11 @@ async def assigned_file(request: Request) -> Response:
     if entry is None:
         return JSONResponse({"error": "Unknown task file."}, status_code=404)
     if (type(entry.get("bytes")) is not int or not 0 < entry["bytes"] <= 32 * 1024 * 1024
-            or entry.get("media_type") not in {"application/pdf", "application/json"}):
+            or not isinstance(entry.get("media_type"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*",
+                                entry["media_type"])):
         return JSONResponse({"error": "Invalid task file assignment."}, status_code=502)
-    # Spill large PDFs to disk, and verify the complete digest before sending any
+    # Spill large resources to disk, and verify the complete digest before sending any
     # bytes to the agent. Never forward client credentials or select an upstream URL.
     output = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
     try:
@@ -292,7 +296,8 @@ async def assigned_file(request: Request) -> Response:
                 output.close()
         return StreamingResponse(chunks(), media_type=entry["media_type"],
                                  headers={"Content-Length": str(size), "X-Content-SHA256": entry["sha256"],
-                                          "X-Content-Type-Options": "nosniff"},
+                                          "X-Content-Type-Options": "nosniff",
+                                          "Content-Disposition": f'attachment; filename="{name}"'},
                                  background=BackgroundTask(output.close))
     except (httpx.HTTPError, ValueError, OSError):
         output.close()
@@ -300,6 +305,21 @@ async def assigned_file(request: Request) -> Response:
     except BaseException:
         output.close()
         raise
+
+
+async def assigned_resource(request: Request) -> Response:
+    """Resolve a semantic URL only through this run's hash-pinned attachment map."""
+    task = await assigned_task(request)
+    if task.status_code != 200:
+        return task
+    entries = json.loads(task.body).get("attachments", [])
+    if not isinstance(entries, list) or any(not isinstance(entry, dict)
+            or not isinstance(entry.get("paths", []), list) for entry in entries):
+        return JSONResponse({"error": "Invalid task resource assignment."}, status_code=502)
+    matches = [entry for entry in entries if request.url.path in entry.get("paths", [])]
+    if len(matches) != 1:
+        return JSONResponse({"error": "Unknown assigned problem resource."}, status_code=404)
+    return await assigned_file(request, task=task, name=matches[0].get("name", ""))
 
 
 async def status(_request: Request) -> Response:
@@ -591,6 +611,12 @@ app = Starlette(
         Route("/status", status, methods=["GET"]),
         Route("/task", assigned_task, methods=["GET"]),
         Route("/task/files/{name}", assigned_file, methods=["GET"]),
+        Route("/{problem_slug}/{release}/description", assigned_resource, methods=["GET"]),
+        Route("/{problem_slug}/{release}/knowledge-base", assigned_resource, methods=["GET"]),
+        Route("/{problem_slug}/{release}/resources/{resource_id}", assigned_resource, methods=["GET"]),
+        Route("/{problem_slug}/description", assigned_resource, methods=["GET"]),
+        Route("/{problem_slug}/knowledge-base", assigned_resource, methods=["GET"]),
+        Route("/{problem_slug}/resources/{resource_id}", assigned_resource, methods=["GET"]),
         Route("/metrics", metrics, methods=["GET"]),
         Route("/internal/events", internal_event, methods=["POST"]),
         Route("/web/search", web_search, methods=["POST"]),
