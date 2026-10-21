@@ -87,6 +87,54 @@ async def harness(*, declared=True, web=False):
 
 
 class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_text_only_quote_excludes_media_and_counts_reasoning_once(self):
+        reference = {
+            "provider": "openrouter", "upstream_id": MODELS["openrouter"],
+            "request_models": [MODELS["openrouter"]], "text_only": True,
+            "input_per_mtok": 2, "output_per_mtok": 10,
+            "cached_read_per_mtok": .1, "cache_write_per_mtok": .1875,
+            "disabled_optional_charges": {"image": "0.000002", "audio": "0.000002",
+                                          "input_audio_cache": "0.0000001", "web_search": "0.014"},
+        }
+        usage = {"prompt_tokens": 1000, "completion_tokens": 300, "total_tokens": 1300,
+                 "prompt_tokens_details": {"cached_tokens": 200},
+                 "completion_tokens_details": {"reasoning_tokens": 250}}
+        async with harness() as (client, runtime, calls):
+            await runtime.client.aclose()
+            def upstream(request):
+                calls.append(json.loads(request.content))
+                data = {"choices": [], "usage": usage}
+                class Stream(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        yield ("data: " + json.dumps(data) + "\n\ndata: [DONE]\n\n").encode()
+                return httpx.Response(200, stream=Stream(),
+                                      headers={"content-type": "text/event-stream"})
+            runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+            with patch.object(gateway_pricing, "MODEL_PRICING", [reference]):
+                url = route("openrouter", "chat/completions")
+                payload = {**request_body("openrouter", "chat/completions"), "stream": True}
+                reply = await client.post(url, json=payload)
+                self.assertEqual(reply.status_code, 200, reply.text)
+                self.assertEqual(calls[0]["stream_options"], {"include_usage": True})
+                self.assertEqual(calls[0]["plugins"], [{"id": "web", "enabled": False}])
+                self.assertAlmostEqual(runtime.ledger.usd_spent, .00462)
+                for block in (
+                    {"type": "image_url", "image_url": {"url": "https://example.invalid/image"}},
+                    {"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}},
+                    {"type": "video_url", "video_url": {"url": "https://example.invalid/video"}},
+                ):
+                    reply = await client.post(url, json={**payload, "messages": [
+                        {"role": "user", "content": [block]}]})
+                    self.assertEqual(reply.status_code, 400, reply.text)
+                for extra in ({"modalities": ["text", "audio"]},
+                              {"audio": {"voice": "alloy", "format": "wav"}},
+                              {"web_search_options": {}}, {"plugins": [{"id": "web"}]}):
+                    reply = await client.post(url, json={**payload, **extra})
+                    self.assertEqual(reply.status_code, 400, reply.text)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(runtime.ledger.counts["model_requests"], 1)
+                self.assertAlmostEqual(runtime.ledger.usd_spent, .00462)
+
     async def test_retired_providers_reject_all_inference_before_upstream(self):
         async with harness() as (client, runtime, calls):
             for provider in ("moonshot", "kimi-code"):
