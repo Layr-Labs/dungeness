@@ -25,6 +25,7 @@ def load(name, path):
 
 
 compiler = load("command_compiler", "src/dungeness/compiler.py")
+CONFIGURED_FIXTURES = json.loads((ROOT / "tests/fixtures/provider-registry.json").read_text())["providers"]
 usage = load("command_usage", "services/gateway/gateway_usage.py")
 models = load("command_models", "services/gateway/gateway_models.py")
 MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
@@ -88,10 +89,10 @@ class CommandHarnessTests(unittest.TestCase):
                                         "CLAUDE_CODE_USE_BEDROCK"})
 
     def test_configured_account_metadata_is_exposed_only_to_authorized_gateway(self):
-        profile = {**compiler.CONFIGURED_PROVIDERS["xai"],
-                   "credential_headers": {"account-id": "XAI_API_KEY_ACCOUNT"}}
-        with patch.dict(compiler.CONFIGURED_PROVIDERS, {"xai": profile}):
-            for selected in ("xai", "openai"):
+        profile = {**CONFIGURED_FIXTURES["example-api"],
+                   "credential_headers": {"account-id": "EXAMPLE_API_KEY_ACCOUNT"}}
+        with patch.dict(compiler.CONFIGURED_PROVIDERS, {"example-api": profile}):
+            for selected in ("example-api", "openai"):
                 with self.subTest(selected=selected):
                     compose = yaml.safe_load(compiler.build_compose(
                         "configured-account",
@@ -99,18 +100,18 @@ class CommandHarnessTests(unittest.TestCase):
                          "search": {"max_results": 25}},
                         {"web": {"searches": 0, "fetches": 0},
                          "model": {"requests": 10, "total_tokens": 10000}},
-                        provider="xai", max_usd=1,
+                        provider="example-api", max_usd=1,
                         command_policy={"models": [{
                             **MODEL, "provider": selected, "request_model": "example",
                             "base_url": f"http://gateway:8080/model/{selected}/v1",
                         }]}))
                     env = compose["services"]["gateway"]["environment"]
-                    if selected == "xai":
-                        self.assertEqual(env["XAI_API_KEY_ACCOUNT"],
-                                         "${TESTBED_XAI_API_KEY_ACCOUNT:?provider metadata required}")
+                    if selected == "example-api":
+                        self.assertEqual(env["EXAMPLE_API_KEY_ACCOUNT"],
+                                         "${TESTBED_EXAMPLE_API_KEY_ACCOUNT:?provider metadata required}")
                     else:
-                        self.assertNotIn("XAI_API_KEY_ACCOUNT", env)
-                    self.assertNotIn("XAI_API_KEY_ACCOUNT", json.dumps(compose["services"]["main"]))
+                        self.assertNotIn("EXAMPLE_API_KEY_ACCOUNT", env)
+                    self.assertNotIn("EXAMPLE_API_KEY_ACCOUNT", json.dumps(compose["services"]["main"]))
 
     def test_command_topology_needs_only_gateway_and_verifier(self):
         compose = yaml.safe_load(compiler.build_compose(
@@ -288,19 +289,22 @@ if __name__ == "__main__":
     unittest.main()
 
 class ConfiguredProviderCompilerTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict(compiler.CONFIGURED_PROVIDERS, CONFIGURED_FIXTURES))
+
     def test_configured_credentials_only_reach_gateway(self):
-        model = {'provider': 'grok-subscription', 'request_model': 'grok-4.7',
-                 'base_url': 'http://gateway:8080/model/grok-subscription/v1'}
+        model = {'provider': 'example-session', 'request_model': 'example-model',
+                 'base_url': 'http://gateway:8080/model/example-session/v1'}
         compose = yaml.safe_load(compiler.build_compose(
-            'grok-run', {'historical_cutoff': {'end_published_date': '2026-05-28T23:59:59Z'},
+            'configured-run', {'historical_cutoff': {'end_published_date': '2026-05-28T23:59:59Z'},
                          'search': {'max_results': 25}},
             {'web': {'searches': 0, 'fetches': 0}, 'model': {'requests': 10, 'total_tokens': 10000}},
-            provider='grok-subscription', max_usd=3, command_policy={'models': [model]}))
+            provider='example-session', max_usd=3, command_policy={'models': [model]}))
         env = compose['services']['gateway']['environment']
-        self.assertIn('GROK_SUBSCRIPTION_TOKEN', env)
-        self.assertIn('GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT', env)
-        self.assertNotIn('XAI_API_KEY', env)
+        self.assertIn('EXAMPLE_SESSION_TOKEN', env)
+        self.assertIn('EXAMPLE_SESSION_TOKEN_EXPIRES_AT', env)
+        self.assertNotIn('EXAMPLE_API_KEY', env)
         self.assertNotIn('OPENAI_API_KEY', env)
         main = json.dumps(compose['services']['main'])
-        self.assertNotIn('GROK_SUBSCRIPTION_TOKEN', main)
+        self.assertNotIn('EXAMPLE_SESSION_TOKEN', main)
         self.assertIn('testbed', main)

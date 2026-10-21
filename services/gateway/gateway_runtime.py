@@ -61,23 +61,10 @@ BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 def rejected_before_generation(
-    body: bytes, content_type: str, http_status: int | None, *, provider: str | None = None,
+    body: bytes, content_type: str, http_status: int | None,
 ) -> bool:
     """Recognize an explicit input-validation rejection, never a missing receipt."""
     mime = content_type.partition(";")[0].strip().lower()
-    if provider == "grok-subscription" and http_status == 422 and mime == "text/plain":
-        # The CLI proxy's JSON decoder rejects this body before inference.
-        # Do not infer zero usage from arbitrary 422s or other provider errors.
-        if len(body) > 4096:
-            return False
-        try:
-            message = body.decode("utf-8")
-        except UnicodeError:
-            return False
-        return re.fullmatch(
-            r"Failed to deserialize the JSON body into the target type: "
-            r"[^\r\n]+ at line [0-9]+ column [0-9]+", message,
-        ) is not None
     if http_status != 400 or mime != "application/json":
         return False
     try:
@@ -465,8 +452,7 @@ class Gateway:
             usage = extract(response_body, content_type)
             accounting_basis = "provider_usage" if usage else "unavailable"
             if (not usage and status == "provider_error"
-                    and rejected_before_generation(response_body, content_type, upstream_status,
-                                                   provider=provider)):
+                    and rejected_before_generation(response_body, content_type, upstream_status)):
                 # A rejected input did not generate tokens. Successful,
                 # interrupted, and ambiguous error responses still fail closed.
                 usage = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0,

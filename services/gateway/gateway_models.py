@@ -594,15 +594,20 @@ def provider_auth_headers(
     return authentication_headers(cfg["authentication"], request_headers)
 
 
-for _name, _profile in PROFILES.items():
-    MODEL_PROVIDERS[_name] = {
-        'authentication': profile_authentication(_profile),
-        'routes': set(_profile['routes']),
-        'upstream_env': _name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
-        'upstream_default': _profile['base_url'],
-        'auth': 'gateway_secret', 'billed': _profile['billed'],
+def configured_provider_config(name, profile):
+    """Compile a trusted profile into the gateway protocol configuration."""
+    return {
+        'authentication': profile_authentication(profile),
+        'routes': set(profile['routes']),
+        'upstream_env': name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
+        'upstream_default': profile['base_url'],
+        'auth': 'gateway_secret', 'billed': profile['billed'],
         'passthrough': (), 'extract_usage': extract_usage,
     }
+
+
+for _name, _profile in PROFILES.items():
+    MODEL_PROVIDERS[_name] = configured_provider_config(_name, _profile)
 
 
 def usage_extractor(cfg: dict[str, Any], operation: str):

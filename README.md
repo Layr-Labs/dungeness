@@ -135,28 +135,22 @@ provider compatibility. Use an explicitly funded smoke run for that boundary.
 
 ## Compatible provider profiles
 
-The gateway records recognized input rejections before generation as zero-token
-receipts and releases their credit reservations. This includes HTTP 400 JSON
-`invalid_request_error` responses and the Grok subscription proxy's HTTP 422
-plain-text JSON-deserialization errors. Rejected requests still count toward the
-request limit. Other 422 responses, ambiguous errors, and successful responses
-without usage remain accounting failures and block subsequent model calls.
+The gateway records HTTP 400 JSON `invalid_request_error` responses as zero-token
+receipts and releases their credit reservations. Rejected requests still count
+toward the request limit. HTTP 422 responses, ambiguous errors, and successful
+responses without usage remain accounting failures and block subsequent model
+calls. No provider-name exception infers free usage from a plain-text error.
 
-`services/gateway/providers.json` is trusted runtime configuration for fixed
-OpenAI-compatible upstreams. It ships direct `xai` API-key access and
-`grok-subscription` CLI session access, pinned to `grok-4.7`. Set
-`TESTBED_XAI_API_KEY`, or `TESTBED_GROK_SUBSCRIPTION_TOKEN` together with
-`TESTBED_GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT`, outside source. The compiler mounts
-these into the gateway only; command harnesses receive a placeholder.
-Session expiry fails closed and does not fall back to an API key.
-The Grok subscription profile sends no CLI identity, client-version,
-authentication-response, or model-override headers. It uses the request body's
-model and the gateway's own `User-Agent`. Live compatibility without those
-headers remains unverified.
+`services/gateway/providers.json` is an empty trusted registry by default.
+Operators can supply profiles for compatible upstreams before compiling a run
+and building its gateway image. Profiles define the fixed HTTPS endpoint,
+protocol routes, credential injection and reference model mappings; the gateway
+implements the shared protocol and accounting. Credentials stay outside source
+and reach only the gateway. The submitted harness receives a placeholder.
 
-Profiles configure inference routes, fixed headers, model overrides and reference
-catalog identity. Adding a compatible provider does not require a new HTTP route.
-Do not accept profiles from agent input. Catalyst supplies its service-owned
-registry and frozen pricing snapshot during preparation; standalone runs must
-also provide trusted model pricing. Grok gateway tests use a mock upstream;
-live subscription entitlement remains to be verified with an account.
+Profiles and pricing are trusted operator inputs, never accepted from the
+harness or its run request. Catalyst installs its service-owned registry and
+frozen pricing snapshot in the disposable runtime during preparation. Standalone
+operators must provide both. Tests use synthetic providers under `.invalid`
+domains to check routing, authentication, expiry and usage accounting without
+provider accounts or live inference.

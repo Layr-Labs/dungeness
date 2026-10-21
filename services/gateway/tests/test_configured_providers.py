@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import shutil
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 import httpx
@@ -11,17 +14,22 @@ import test_gateway
 import gateway
 import gateway_pricing
 from gateway_runtime import Gateway
+from configured_fixture import configured_profiles
 
 class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_grok_rejection_releases_reservation_but_unknown_usage_blocks(self):
+    def setUp(self):
+        self.enterContext(configured_profiles())
+
+    async def test_protocol_rejection_releases_reservation_but_unknown_usage_blocks(self):
         rejection = (b'Failed to deserialize the JSON body into the target type: '
                      b'tools[0]: missing field `function` at line 1 column 6238')
-        provider, name = 'grok-subscription', 'grok-4.7'
-        reference = {'provider': provider, 'upstream_id': 'x-ai/grok-4.7', 'request_models': [name],
+        provider, name = 'example-session', 'example-model'
+        reference = {'provider': provider, 'upstream_id': 'example/example-model', 'request_models': [name],
                      'input_per_mtok': 2, 'cached_read_per_mtok': .5, 'cache_write_per_mtok': 2,
                      'output_per_mtok': 6, 'text_only': True}
         for status, body, mime, recoverable in (
-            (422, rejection, 'text/plain; charset=utf-8', True),
+            (400, b'{"error": {"type": "invalid_request_error"}}', 'application/json', True),
+            (422, rejection, 'text/plain; charset=utf-8', False),
             (422, b'Unprocessable entity', 'text/plain', False),
             (500, rejection, 'text/plain', False),
             (200, b'{"choices": []}', 'application/json', False),
@@ -29,8 +37,8 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status, body=body), tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
                 'TESTBED_USAGE_DIR': temp, 'MAX_MODEL_REQUESTS': '20', 'MAX_MODEL_TOKENS': '1000000',
                 'DUNGENESS_ALLOWED_MODELS': json.dumps([[provider, name]]),
-                'GROK_SUBSCRIPTION_TOKEN': 'private-subscription-session',
-                'GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                'EXAMPLE_SESSION_TOKEN': 'private-subscription-session',
+                'EXAMPLE_SESSION_TOKEN_EXPIRES_AT': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             }), patch.object(gateway_pricing, 'MODEL_PRICING', [reference]):
                 runtime = Gateway(); await runtime.client.aclose(); calls = []
                 def upstream(request):
@@ -43,7 +51,7 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     with patch.object(gateway, 'gateway', runtime):
                         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url='http://gateway') as client:
-                            route = '/model/grok-subscription/v1/chat/completions'
+                            route = '/model/example-session/v1/chat/completions'
                             payload = {'model': name, 'messages': [{'role': 'user', 'content': 'solve'}]}
                             first = await client.post(route, json=payload)
                             self.assertEqual(first.status_code, status)
@@ -60,7 +68,7 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
                     if recoverable:
                         self.assertEqual(receipts[0]['accounting_basis'], 'input_rejected_before_generation')
                         self.assertEqual(receipts[0]['accounting_method'], 'gateway')
-                        self.assertEqual(receipts[0]['http_status'], 422)
+                        self.assertEqual(receipts[0]['http_status'], 400)
                         self.assertEqual(receipts[0]['total_tokens'], 0)
                         self.assertEqual(receipts[0]['normalized_usd'], 0)
                         self.assertIsNone(receipts[0]['billed_usd'])
@@ -71,43 +79,25 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     await runtime.client.aclose()
 
-    def test_grok_zero_usage_requires_exact_provider_status_and_decoder_error(self):
-        from gateway_runtime import rejected_before_generation
-        body = (b'Failed to deserialize the JSON body into the target type: '
-                b'tools[0]: missing field `function` at line 1 column 6238')
-        self.assertTrue(rejected_before_generation(body, 'text/plain', 422, provider='grok-subscription'))
-        for provider, status, mime, response in (
-            ('xai', 422, 'text/plain', body),
-            ('openrouter', 422, 'text/plain', body),
-            ('grok-subscription', 200, 'text/plain', body),
-            ('grok-subscription', 422, 'text/event-stream', body),
-            ('grok-subscription', 422, 'application/json', body),
-            ('grok-subscription', 422, 'text/plain', body + b'\ngenerated output'),
-            ('grok-subscription', 422, 'text/plain', body + b' ' * 4096),
-            ('grok-subscription', 422, 'text/plain', b'\xff'),
-        ):
-            with self.subTest(provider=provider, status=status, mime=mime):
-                self.assertFalse(rejected_before_generation(response, mime, status, provider=provider))
-
-    async def test_grok_subscription_stream_auth_pinned_model_and_expiry(self):
-        provider, name = 'grok-subscription', 'grok-4.7'
-        reference = {'provider': provider, 'upstream_id': 'x-ai/grok-4.7', 'request_models': [name],
+    async def test_configured_stream_auth_pinned_model_and_expiry(self):
+        provider, name = 'example-session', 'example-model'
+        reference = {'provider': provider, 'upstream_id': 'example/example-model', 'request_models': [name],
                      'input_per_mtok': 2, 'cached_read_per_mtok': .5, 'cache_write_per_mtok': 2,
                      'output_per_mtok': 6, 'text_only': True}
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             'TESTBED_USAGE_DIR': temp, 'MAX_MODEL_REQUESTS': '20', 'MAX_MODEL_TOKENS': '1000000',
             'DUNGENESS_ALLOWED_MODELS': json.dumps([[provider, name]]),
-            'GROK_SUBSCRIPTION_TOKEN': 'private-subscription-session',
-            'GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            'EXAMPLE_SESSION_TOKEN': 'private-subscription-session',
+            'EXAMPLE_SESSION_TOKEN_EXPIRES_AT': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         }), patch.object(gateway_pricing, 'MODEL_PRICING', [reference]):
             runtime = Gateway(); await runtime.client.aclose(); calls = []
             def upstream(request):
                 calls.append(request)
-                self.assertEqual(str(request.url), 'https://cli-chat-proxy.grok.com/v1/chat/completions')
+                self.assertEqual(str(request.url), 'https://session.example.invalid/v1/chat/completions')
                 self.assertEqual(request.headers['authorization'], 'Bearer private-subscription-session')
                 self.assertEqual(request.headers['user-agent'], 'dungeness-gateway/1')
-                for header in ('x-xai-token-auth', 'x-authenticateresponse',
-                               'x-grok-client-version', 'x-grok-model-override'):
+                for header in ('x-untrusted-auth', 'x-auth-response',
+                               'x-client-version', 'x-model-override'):
                     self.assertNotIn(header, request.headers)
                 payload = json.loads(request.content)
                 self.assertEqual(payload['model'], name)
@@ -120,20 +110,20 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with patch.object(gateway, 'gateway', runtime):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url='http://gateway') as client:
-                        route = '/model/grok-subscription/v1/chat/completions'
+                        route = '/model/example-session/v1/chat/completions'
                         payload = {'model': name, 'messages': [{'role': 'user', 'content': 'solve'}], 'stream': True}
                         response = await client.post(route, json=payload, headers={
-                            'authorization': 'Bearer agent-placeholder', 'x-grok-model-override': 'grok-build-latest',
-                            'x-xai-token-auth': 'spoofed',
-                            'x-authenticateresponse': 'authenticate-response',
-                            'x-grok-client-version': '1.0.62',
+                            'authorization': 'Bearer agent-placeholder', 'x-model-override': 'unmapped-model-latest',
+                            'x-untrusted-auth': 'spoofed',
+                            'x-auth-response': 'authenticate-response',
+                            'x-client-version': '1.0.62',
                             'user-agent': 'solver-cli'})
                         self.assertEqual(response.status_code, 200, response.text)
-                        for extra in ({'search_parameters': {'mode': 'auto'}}, {'model': 'grok-build'},
+                        for extra in ({'search_parameters': {'mode': 'auto'}}, {'model': 'unmapped-model'},
                                       {'tools': [{'type': 'web_search'}]}, {'plugins': [{'id': 'web'}]}):
                             response = await client.post(route, json={**payload, **extra})
                             self.assertEqual(response.status_code, 400, response.text)
-                        os.environ['GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT'] = '2000-01-01T00:00:00Z'
+                        os.environ['EXAMPLE_SESSION_TOKEN_EXPIRES_AT'] = '2000-01-01T00:00:00Z'
                         response = await client.post(route, json=payload)
                         self.assertEqual(response.status_code, 400, response.text)
                         self.assertIn('expired', response.text)
@@ -145,3 +135,33 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertAlmostEqual(receipts[0]['normalized_usd'], .00026)
                 self.assertIsNone(receipts[0]['billed_usd'])
             finally: await runtime.client.aclose()
+
+
+class ProviderRegistryTests(unittest.TestCase):
+    def test_default_registry_has_no_configured_providers(self):
+        from provider_profiles import load_profiles
+        self.assertEqual(load_profiles(), {})
+
+    def test_fresh_gateway_loads_only_the_installed_operator_registry(self):
+        from configured_fixture import FIXTURES
+        source = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for path in source.iterdir():
+                if path.is_file() and path.suffix in {".py", ".json", ".yaml"}:
+                    shutil.copy2(path, root / path.name)
+            (root / "providers.json").write_text(json.dumps({"schema_version": 1, "providers": FIXTURES}))
+            script = """
+from provider_profiles import PROFILES
+from gateway_models import MODEL_PROVIDERS
+assert set(PROFILES) == {"example-api", "example-session"}
+for name, profile in PROFILES.items():
+    configured = MODEL_PROVIDERS[name]
+    assert configured["upstream_default"] == profile["base_url"]
+    assert configured["routes"] == set(profile["routes"])
+assert MODEL_PROVIDERS["example-api"]["authentication"]["sources"][0]["headers"]["authorization"]["env"] == "EXAMPLE_API_KEY"
+"""
+            result = subprocess.run([sys.executable, "-c", script], cwd=root,
+                                    env={**os.environ, "PYTHONPATH": str(root)},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)

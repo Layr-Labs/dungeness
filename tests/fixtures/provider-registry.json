@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "example-api": {
+      "protocol": "openai",
+      "base_url": "https://api.example.invalid/v1",
+      "credential_env": "EXAMPLE_API_KEY",
+      "credential_kind": "api-key",
+      "billed": true,
+      "routes": [
+        "chat/completions",
+        "responses"
+      ],
+      "headers": {},
+      "model_header": null,
+      "models": {},
+      "catalog_author": "example"
+    },
+    "example-session": {
+      "protocol": "openai",
+      "base_url": "https://session.example.invalid/v1",
+      "credential_env": "EXAMPLE_SESSION_TOKEN",
+      "credential_kind": "session-token",
+      "billed": false,
+      "routes": [
+        "chat/completions"
+      ],
+      "headers": {},
+      "model_header": null,
+      "models": {
+        "example-model": {
+          "upstream": "example-model",
+          "catalog": "example/example-model"
+        }
+      },
+      "catalog_author": "example"
+    }
+  }
+}

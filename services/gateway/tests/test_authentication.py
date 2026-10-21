@@ -10,8 +10,9 @@ from unittest.mock import patch
 import httpx
 import test_gateway
 import gateway
-from gateway_auth import authentication_headers, profile_authentication
-from gateway_models import MODEL_PROVIDERS, provider_auth_headers
+from gateway_auth import authentication_headers
+from gateway_models import MODEL_PROVIDERS, provider_auth_headers, configured_provider_config
+from configured_fixture import FIXTURES
 from gateway_runtime import Gateway
 
 
@@ -82,19 +83,17 @@ class AuthenticationTests(unittest.TestCase):
 
 class AuthenticationBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_configured_authentication_does_not_depend_on_provider_name(self):
-        from provider_profiles import PROFILES
-        profile = {**PROFILES["grok-subscription"],
+        profile = {**FIXTURES["example-session"],
                    "credential_kind": "api-key",
                    "credential_header": "x-api-key", "credential_prefix": "",
-                   "credential_headers": {"account-id": "GROK_SUBSCRIPTION_TOKEN_ACCOUNT"}}
-        cfg = {**MODEL_PROVIDERS["grok-subscription"],
-               "authentication": profile_authentication(profile)}
+                   "credential_headers": {"account-id": "EXAMPLE_SESSION_TOKEN_ACCOUNT"}}
+        cfg = configured_provider_config("example-session", profile)
         # The provider's name does not determine its authentication mechanism.
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
-            "TESTBED_USAGE_DIR": temp, "GROK_SUBSCRIPTION_TOKEN": "private-key",
-            "GROK_SUBSCRIPTION_TOKEN_ACCOUNT": "account-7",
-        }), patch.dict(MODEL_PROVIDERS, {"grok-subscription": cfg}):
-            self.assertEqual(provider_auth_headers("grok-subscription", {
+            "TESTBED_USAGE_DIR": temp, "EXAMPLE_SESSION_TOKEN": "private-key",
+            "EXAMPLE_SESSION_TOKEN_ACCOUNT": "account-7",
+        }), patch.dict(MODEL_PROVIDERS, {"example-session": cfg}):
+            self.assertEqual(provider_auth_headers("example-session", {
                 "x-api-key": "attacker", "account-id": "other-account",
             }), {"x-api-key": "private-key", "account-id": "account-7"})
 
