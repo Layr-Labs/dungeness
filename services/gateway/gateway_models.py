@@ -25,8 +25,6 @@ OPENROUTER_ROUTES = {
     "models",
 }
 CHATGPT_ROUTES = {"responses", "responses/compact"}
-MOONSHOT_ROUTES = {"chat/completions"}
-KIMI_CODE_ROUTES = {"chat/completions"}
 
 def validate_declared_request(payload, pricing):
     """Keep measured inference on the exact declared model and priced units."""
@@ -551,32 +549,6 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
             "user-agent",
             "openai-beta",
         ),
-        "extract_usage": extract_usage,
-    },
-    "moonshot": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "MOONSHOT_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": MOONSHOT_ROUTES,
-        "upstream_env": "MOONSHOT_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.moonshot.ai/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "api_key_env": "MOONSHOT_API_KEY",
-        "passthrough": (),
-        "extract_usage": extract_usage,
-    },
-    "kimi-code": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "KIMI_CODE_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": KIMI_CODE_ROUTES,
-        "upstream_env": "KIMI_CODE_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.kimi.com/coding/v1",
-        "auth": "gateway_secret",
-        "billed": False,
-        "api_key_env": "KIMI_CODE_API_KEY",
-        "passthrough": (),
         "extract_usage": extract_usage,
     },
 }

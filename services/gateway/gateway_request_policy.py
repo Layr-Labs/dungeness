@@ -283,8 +283,6 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
         raise ValueError("unsupported model operation")
     if provider == "openrouter":
         allowed |= OPENROUTER_FIELDS
-    if provider in ("moonshot", "kimi-code") and operation == "chat/completions":
-        allowed |= {"thinking"}
     fields(payload, allowed, f"{operation} request")
     model = payload.get("model")
     if not isinstance(model, str) or not model:

@@ -39,8 +39,7 @@ The authoritative schemas are in
 [`gateway_request_policy.py`](../services/gateway/gateway_request_policy.py).
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
 Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
-Moonshot and Kimi accept native Chat Completions only; the gateway does not
-translate their requests or responses into another protocol.
+The gateway does not translate requests or responses into another protocol.
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
   Unknown protocol beta headers and query controls are also rejected.
@@ -111,5 +110,4 @@ python -m unittest discover -s tests
 The boundary tests use mock providers. They exercise all registered inference
 routes with and without model allowlists and with disabled/optional web budgets,
 and assert that rejected requests cause no upstream calls or model charges.
-Positive cases cover local Codex/Claude-style tool histories, SDK loops, both
-Kimi protocols, compaction, token counting, embeddings and local model discovery.
+Positive cases cover local Codex/Claude-style tool histories, SDK loops, configured providers, compaction, token counting, embeddings and local model discovery.

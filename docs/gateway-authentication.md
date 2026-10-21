@@ -51,5 +51,4 @@ resolved authentication values.
 
 Usage parsing, pricing, allowed models, request restrictions, and budget
 enforcement remain separate from authentication. Streaming requests still
-request usage where required. The gateway no longer changes Kimi reasoning
-preferences; the harness owns those settings.
+request usage where required. The harness owns reasoning preferences.

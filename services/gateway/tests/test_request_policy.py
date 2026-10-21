@@ -22,8 +22,6 @@ MODELS = {
     "anthropic": "claude-opus-5",
     "openrouter": "openai/gpt-5.6-sol",
     "openai-chatgpt": "gpt-6-astra",
-    "moonshot": "kimi-k3",
-    "kimi-code": "k3",
     "example-api": "example-model",
     "example-session": "example-model",
 }
@@ -89,18 +87,20 @@ async def harness(*, declared=True, web=False):
 
 
 class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_kimi_routes_reject_legacy_responses_before_upstream(self):
+    async def test_retired_providers_reject_all_inference_before_upstream(self):
         async with harness() as (client, runtime, calls):
             for provider in ("moonshot", "kimi-code"):
-                reply = await client.post(route(provider, "responses"),
-                    json={"model": MODELS[provider], "input": "solve"})
-                self.assertEqual(reply.status_code, 404, reply.text)
+                self.assertNotIn(provider, gateway.MODEL_PROVIDERS)
+                for operation in ("responses", "chat/completions"):
+                    reply = await client.post(route(provider, operation),
+                        json={"model": "k3", "input": "solve"})
+                    self.assertEqual(reply.status_code, 404, reply.text)
             self.assertEqual(calls, [])
             self.assertEqual(runtime.ledger.counts["model_requests"], 0)
 
-    async def test_native_kimi_chat_preserves_harness_payload_and_accounts_usage(self):
+    async def test_native_chat_preserves_harness_payload_and_accounts_usage(self):
         async with harness() as (client, runtime, calls):
-            for provider in ("moonshot", "kimi-code"):
+            for provider in ("openai", "example-api"):
                 payload = {
                     "model": MODELS[provider],
                     "messages": [{"role": "user", "content": "Use my own strategy."}],
@@ -114,7 +114,7 @@ class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 upstream = calls[-1][2]
                 self.assertEqual(upstream.headers["user-agent"], "dungeness-gateway/1")
                 self.assertEqual(upstream.url.host,
-                    "api.moonshot.ai" if provider == "moonshot" else "api.kimi.com")
+                    "api.openai.com" if provider == "openai" else "api.example.invalid")
                 self.assertEqual(reply.json()["usage"]["total_tokens"], 3)
             self.assertEqual(len(calls), 2)
             self.assertEqual(runtime.ledger.counts["model_requests"], 2)

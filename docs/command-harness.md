@@ -54,10 +54,8 @@ catalog snapshot into the isolated runtime's `services/gateway/pricing.yaml`
 before compiling a run. The same snapshot is used by the compiler, gateway
 and downstream verifier. Submitted agents cannot set their own rates.
 
-Kimi Code and Moonshot accept ordinary OpenAI-compatible Chat Completions at
-`/model/<provider>/v1/chat/completions`. The legacy Responses-to-Chat adapter and
-its bundled Codex/Kimi presets have been removed; `/responses` on these routes
-returns HTTP 404 before any upstream call. Harnesses own any protocol conversion.
+Kimi Code and direct Moonshot routes are retired. Harnesses own any protocol
+conversion; the gateway forwards supported native requests and meters usage.
 Agents can use SDKs directly without a Codex dependency.
 Streaming chat requests always ask for usage. When a pricing entry declares
 `text_only: true`, non-text inputs/outputs are rejected and reference costs

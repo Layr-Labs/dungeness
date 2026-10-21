@@ -27,8 +27,6 @@ os.environ.update(
         "OPENROUTER_API_KEY": "unused",
         "DUNGENESS_OPENROUTER_INFERENCE_ONLY": "1",
         "ANTHROPIC_API_KEY": "unused",
-        "MOONSHOT_API_KEY": "unused",
-        "KIMI_CODE_API_KEY": "membership-unused",
         "MAX_MODEL_USD": "1.0",
     }
 )

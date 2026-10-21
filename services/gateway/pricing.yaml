@@ -75,25 +75,6 @@ entries:
     output_per_mtok: 30.0
     note: normalized experimental cost; billed USD is unavailable
 
-  - provider: moonshot
-    upstream_id: moonshot/kimi-k3
-    request_models: [kimi-k3]
-    input_per_mtok: 3.0
-    cached_read_per_mtok: 0.3
-    output_per_mtok: 15.0
-    note: flat Kimi K3 API pricing
-
-  # Kimi Code membership is not billed per token. Reuse the project's Kimi K3
-  # reference schedule so normalized experiment budgets remain comparable;
-  # gateway records keep billed_usd null for this provider.
-  - provider: kimi-code
-    upstream_id: kimi-code/k3
-    request_models: [k3]
-    input_per_mtok: 3.0
-    cached_read_per_mtok: 0.3
-    output_per_mtok: 15.0
-    note: normalized Kimi K3 reference cost; membership billed USD unavailable
-
   - provider: anthropic
     upstream_id: anthropic/claude-opus-5
     request_models: [claude-opus-5]

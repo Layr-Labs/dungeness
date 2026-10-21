@@ -35,9 +35,7 @@ import uvicorn
 from gateway_models import (
     ANTHROPIC_ROUTES,
     CHATGPT_ROUTES,
-    KIMI_CODE_ROUTES,
     MODEL_PROVIDERS,
-    MOONSHOT_ROUTES,
     OPENAI_ROUTES,
     OPENROUTER_ROUTES,
     capture_prompt,
@@ -134,10 +132,7 @@ def instrumentation_route(path: str) -> str:
         return "/model/openrouter/v1/{operation}"
     if path.startswith("/model/chatgpt/v1/"):
         return "/model/chatgpt/v1/{operation}"
-    if path.startswith("/model/moonshot/v1/"):
-        return "/model/moonshot/v1/{operation}"
-    if path.startswith("/model/kimi-code/v1/"):
-        return "/model/kimi-code/v1/{operation}"
+
     if path in {
         "/healthz",
         "/status",
@@ -500,48 +495,6 @@ async def model_chatgpt(request: Request) -> Response:
         )
 
 
-async def model_moonshot(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model("moonshot", request.path_params["path"], request)
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.moonshot", error)
-    except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
-    except Exception as error:
-        log_event(
-            "moonshot_proxy_failed",
-            run_id=gateway.run_id,
-            request_id=request.state.request_id,
-            error_type=type(error).__name__,
-            level="error",
-        )
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
-
-
-async def model_kimi_code(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model("kimi-code", request.path_params["path"], request)
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.kimi-code", error)
-    except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
-    except Exception as error:
-        log_event(
-            "kimi_code_proxy_failed",
-            run_id=gateway.run_id,
-            request_id=request.state.request_id,
-            error_type=type(error).__name__,
-            level="error",
-        )
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
-
-
 async def drain_background_tasks(timeout_seconds: float | None = None) -> None:
     """Finish detached response drains before the gateway process exits."""
 
@@ -638,16 +591,6 @@ app = Starlette(
             "/model/chatgpt/v1/{path:path}",
             model_chatgpt,
             methods=["GET", "POST"],
-        ),
-        Route(
-            "/model/moonshot/v1/{path:path}",
-            model_moonshot,
-            methods=["POST"],
-        ),
-        Route(
-            "/model/kimi-code/v1/{path:path}",
-            model_kimi_code,
-            methods=["POST"],
         ),
         Route('/model/{provider}/v1/{path:path}', model_configured, methods=['POST']),
     ],

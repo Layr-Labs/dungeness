@@ -33,6 +33,11 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_retired_native_providers_cannot_compile(self):
+        for provider in ("kimi-code", "moonshot"):
+            with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, "unsupported model provider"):
+                compiler.command_models({"model": {**MODEL, "provider": provider}})
+
     def test_native_launchers_fail_before_model_selection(self):
         for name in ("codex", "claude-code", "pi", "prime-agent"):
             with self.subTest(name=name), patch.object(compiler, "command_models") as models:

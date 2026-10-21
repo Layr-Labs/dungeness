@@ -229,10 +229,9 @@ Harnesses can use the Responses contract on fixed provider routes:
 /model/chatgpt/v1/responses     ChatGPT access held by the gateway
 ```
 
-Moonshot and Kimi Code expose only `/model/<provider>/v1/chat/completions`.
-The gateway forwards native requests and responses and accounts for reported
-usage. Harnesses own any protocol conversion; the legacy gateway adapter and
-its bundled Codex/Kimi presets have been removed.
+Kimi Code and direct Moonshot routes are retired. Supported routes forward
+native requests and responses and account for reported usage. Harnesses own
+any protocol conversion.
 
 For streaming Responses API calls, the gateway forwards SSE chunks as they
 arrive. It retains a request-local in-memory copy so it can extract

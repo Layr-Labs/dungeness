@@ -1263,8 +1263,6 @@ def agent_provider(agent: dict[str, Any]) -> str:
     provider = model.get("provider")
     if provider in CONFIGURED_PROVIDERS or provider in {
         "anthropic",
-        "kimi-code",
-        "moonshot",
         "openai",
         "openai-chatgpt",
         "openrouter",
@@ -1701,16 +1699,6 @@ def build_compose(
             "OPENROUTER_API_KEY": "${TESTBED_OPENROUTER_API_KEY:?TESTBED_OPENROUTER_API_KEY is required}",
             "OPENROUTER_UPSTREAM_BASE_URL": "${OPENROUTER_UPSTREAM_BASE_URL:-https://openrouter.ai/api/v1}",
         }
-    elif provider == "moonshot":
-        provider_secret_env = {
-            "MOONSHOT_API_KEY": "${TESTBED_MOONSHOT_API_KEY:?TESTBED_MOONSHOT_API_KEY is required}",
-            "MOONSHOT_UPSTREAM_BASE_URL": "${MOONSHOT_UPSTREAM_BASE_URL:-https://api.moonshot.ai/v1}",
-        }
-    elif provider == "kimi-code":
-        provider_secret_env = {
-            "KIMI_CODE_API_KEY": "${TESTBED_KIMI_CODE_API_KEY:?TESTBED_KIMI_CODE_API_KEY is required}",
-            "KIMI_CODE_UPSTREAM_BASE_URL": "${KIMI_CODE_UPSTREAM_BASE_URL:-https://api.kimi.com/coding/v1}",
-        }
     else:
         provider_secret_env = {
             "OPENAI_API_KEY": "${TESTBED_OPENAI_API_KEY:?TESTBED_OPENAI_API_KEY is required}",
@@ -1827,8 +1815,7 @@ def build_compose(
             command_policy.get("request_reservation_usd", min(max_usd or 1, 1)))
         for api_provider, key in (
             ("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
-            ("openrouter", "OPENROUTER_API_KEY"), ("moonshot", "MOONSHOT_API_KEY"),
-            ("kimi-code", "KIMI_CODE_API_KEY"),
+            ("openrouter", "OPENROUTER_API_KEY"),
         ):
             gateway_environment.pop(key, None)
             if api_provider in providers:
