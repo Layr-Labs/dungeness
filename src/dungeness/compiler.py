@@ -25,6 +25,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
+from dungeness.execution.harbor import (
+    build_job, build_task_toml, build_verifier_compose, toml_string,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -919,10 +922,6 @@ def materialize_scaffold_candidate(scaffold: dict[str, Any], root: Path) -> None
     shutil.copy2(scaffold["candidate_stub"], destination / "mod.rs")
 
 
-def toml_string(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
 # Default resource envelopes. A task may override any field via its task-level
 # resource block, and an interface may refine that envelope for historical
 # implementations with different requirements.
@@ -958,117 +957,6 @@ def resolve_resources(
             raise ValueError(f"{label}.{key} must be a positive integer")
         resolved[key] = value
     return resolved
-
-
-def build_task_toml(
-    task_id: str,
-    namespace: str,
-    baseline_commit: str,
-    evaluator_commit: str,
-    candidate_paths: list[PurePosixPath],
-    agent_id: str | None,
-    description: str,
-    keywords: list[str],
-    agent_res: dict[str, int],
-    verifier_res: dict[str, int],
-    resume_meta: dict[str, Any] | None = None,
-    checkpoint_meta: dict[str, Any] | None = None,
-    web_cutoff: str | None = None,
-    labels: dict[str, str] | None = None,
-) -> str:
-    artifact_lines = ",\n  ".join(
-        toml_string(f"{WORKSPACE_ROOT}/{path.as_posix()}")
-        for path in candidate_paths
-    )
-    keyword_line = ", ".join(toml_string(k) for k in keywords)
-    # Resume lineage: record where a warm-started run's workspace came from, so
-    # the provenance is machine-auditable from the job config (not only implicit
-    # in the seeded files). Absent for fresh runs.
-    resume_lines = ""
-    if resume_meta is not None:
-        resume_lines = f"\nresumed_from = {toml_string(resume_meta['run_id'])}"
-        best = resume_meta.get("best_score")
-        if isinstance(best, (int, float)) and not isinstance(best, bool):
-            resume_lines += f"\nresumed_best_score = {best!r}"
-        shas = resume_meta.get("candidate_sha256") or {}
-        if len(shas) == 1:
-            resume_lines += (
-                f"\nresumed_candidate_sha256 = {toml_string(next(iter(shas.values())))}"
-            )
-        elif shas:
-            inline = ", ".join(
-                f"{toml_string(k)} = {toml_string(v)}" for k, v in sorted(shas.items())
-            )
-            resume_lines += f"\nresumed_candidate_sha256 = {{ {inline} }}"
-    # Public sample provenance and whether the candidate was kept or blanked.
-    checkpoint_lines = ""
-    if checkpoint_meta is not None:
-        checkpoint_lines = (
-            f"\ncheckpoint = {toml_string(checkpoint_meta['id'])}"
-            f"\ninitialization = {toml_string(checkpoint_meta['initialization'])}"
-        )
-    cutoff_line = (
-        f"\nweb_cutoff = {toml_string(web_cutoff)}" if web_cutoff is not None else ""
-    )
-    # k8s-style run labels: key=value organizing metadata, its own [metadata.labels]
-    # table so runs are filterable without touching universal record fields.
-    labels_block = ""
-    if labels:
-        labels_block = "\n\n[metadata.labels]\n" + "".join(
-            f"{toml_string(k)} = {toml_string(v)}\n" for k, v in sorted(labels.items())
-        )
-    return f'''schema_version = "1.3"
-artifacts = [
-  {artifact_lines},
-]
-
-[task]
-name = {toml_string(f"research-testbed/{task_id}")}
-description = {toml_string(description)}
-keywords = [{keyword_line}]
-
-[metadata]
-type = "run"
-namespace = {toml_string(namespace)}
-task_id = {toml_string(task_id)}
-start_commit = {toml_string(baseline_commit)}
-evaluator_commit = {toml_string(evaluator_commit)}
-agent_network = "gateway-mediated"
-agent = {toml_string(agent_id or "unspecified")}{cutoff_line}{checkpoint_lines}{resume_lines}{labels_block}
-
-[agent]
-timeout_sec = {agent_res["timeout_sec"]}
-
-[environment]
-build_timeout_sec = {agent_res["build_timeout_sec"]}
-# The Compose file applies the stricter per-service boundary: main is internal
-# only, while the gateway alone joins the egress network.
-network_mode = "public"
-cpus = {agent_res["cpus"]}
-memory_mb = {agent_res["memory_mb"]}
-storage_mb = {agent_res["storage_mb"]}
-
-[verifier]
-timeout_sec = {verifier_res["timeout_sec"]}
-environment_mode = "separate"
-
-[verifier.environment]
-build_timeout_sec = {verifier_res["build_timeout_sec"]}
-# The verifier's generated Compose file applies `network_mode: none`.
-# Harbor's Docker network-policy sidecar is unavailable on some Docker Desktop
-# kernels, so keep its baseline public and enforce isolation at the service.
-network_mode = "public"
-cpus = {verifier_res["cpus"]}
-memory_mb = {verifier_res["memory_mb"]}
-storage_mb = {verifier_res["storage_mb"]}
-'''
-
-
-def build_verifier_compose() -> str:
-    return """services:
-  main:
-    network_mode: none
-"""
 
 
 def find_namespaced_manifest(
@@ -1394,20 +1282,11 @@ def build_harbor_job(
     execution = command_execution(agent)
     resolve_agent_options(agent, agent_options)
     models = command_models(agent)
-    if continuation and continuation.get("max_resumes", 0) and not execution.get("resume_entrypoint"):
-        raise ValueError("command continuation requires execution.resume_entrypoint")
-    kwargs = {"execution": execution, "models": models,
-              "task_input": agent.get("task_input", {})}
-    if continuation:
-        kwargs.update({f"continuation_{key}": value for key, value in continuation.items()})
-    return yaml.safe_dump({
-        "job_name": run_id, "jobs_dir": str(((run_dir or RUNS_ROOT / run_id) / "harbor").resolve()),
-        "n_attempts": 1, "n_concurrent_trials": 1,
-        "agents": [{"import_path": "command_agent:CommandAgent",
-                    "model_name": models[0]["request_model"], "kwargs": kwargs,
-                    "env": {}}],
-        "tasks": [{"path": str(task_path.resolve())}],
-    }, sort_keys=False)
+    return build_job(
+        run_id=run_id, task_path=task_path, run_dir=run_dir or RUNS_ROOT / run_id,
+        execution=execution, models=models, task_input=agent.get("task_input", {}),
+        continuation=continuation,
+    )
 
 
 def resolve_continuation_policy(runtime: dict[str, Any]) -> dict[str, int]:
@@ -2744,6 +2623,7 @@ def build_task(
             },
             web_cutoff=web_cutoff,
             labels=labels,
+            workspace_root=WORKSPACE_ROOT,
         )
         (task_root / "task.toml").write_text(task_toml_text, encoding="utf-8")
         harbor_job_text = build_harbor_job(

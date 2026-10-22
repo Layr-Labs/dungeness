@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "runtime": "dungeness",
+  "capabilities": [
+    "command-harness-v1",
+    "run-model-access-v1",
+    "priced-model-requests-v1",
+    "command-exit-status-v1",
+    "rejected-request-accounting-v1",
+    "ecdsa-readable-verifier-results-v1",
+    "assigned-problem-service-v1",
+    "optional-model-token-limit-v1"
+  ]
+}

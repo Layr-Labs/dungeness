@@ -18,18 +18,14 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 import uuid
 
 import yaml
-from collections.abc import Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parent
 BUILD_SCRIPT = REPO_ROOT / "src/dungeness/compiler.py"
-HARBOR_VERSION = "0.18.0"
-LITELLM_VERSION = "1.86.2"
 NAMESPACE_RE = re.compile(
     r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*"
 )
@@ -55,6 +51,13 @@ RUN_SPEC_FIELDS = {
 LOCAL_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 sys.path.insert(0, str(REPO_ROOT / "src"))
 from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
+from dungeness.execution.harbor import (
+    HARBOR_VERSION, LITELLM_VERSION, harbor_result_outcome,
+    validate_command_job, harbor_launch_environment,
+)
+
+from dungeness.execution import environments
+from dungeness.execution.runner import execute as execute_lifecycle, dispose_render
 
 
 def utc_now() -> str:
@@ -1596,22 +1599,6 @@ def run_references(run_dir: Path, runs_root: Path) -> list[str]:
     return references
 
 
-def live_harbor_runs() -> list[str]:
-    """Harbor processes executing on this machine right now."""
-
-    try:
-        result = subprocess.run(
-            ["pgrep", "-fl", "harbor run"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-
-
 def clean_environments(args: argparse.Namespace) -> int:
     """Release Docker environments left behind by runs that are no longer live.
 
@@ -1621,7 +1608,7 @@ def clean_environments(args: argparse.Namespace) -> int:
 
     # An in-flight run owns a live environment that looks exactly like a leaked
     # one, so refuse rather than pull the floor out from under it.
-    live = live_harbor_runs()
+    live = environments.live_harbor_runs()
     if live and not args.force:
         formatted = "\n".join(f"  - {line}" for line in live)
         raise SystemExit(
@@ -1630,7 +1617,7 @@ def clean_environments(args: argparse.Namespace) -> int:
             "Wait for it to finish, or pass --force if you know it is dead."
         )
 
-    listing = docker_query(
+    listing = environments.docker_query(
         [
             "ps",
             "--all",
@@ -1646,8 +1633,8 @@ def clean_environments(args: argparse.Namespace) -> int:
         if len(fields) != 3 or not fields[0].startswith("task__"):
             continue
         projects.setdefault(fields[0], []).append(f"{fields[1]} ({fields[2]})")
-    networks = docker_task_networks()
-    images = docker_task_images()
+    networks = environments.docker_task_networks()
+    images = environments.docker_task_images()
     if not projects and not networks and not images:
         print(">> no leftover run environments")
         return 0
@@ -1682,14 +1669,14 @@ def clean_environments(args: argparse.Namespace) -> int:
             return 0
 
     for project in sorted(projects):
-        if compose_down(project):
+        if environments.compose_down(project):
             print(f">> released docker environment {project}")
     # A network can outlive every container that used it, so sweep whatever the
     # per-project teardown could not reach.
-    for name in docker_task_networks():
-        if docker_query(["network", "rm", name]) is not None:
+    for name in environments.docker_task_networks():
+        if environments.docker_query(["network", "rm", name]) is not None:
             print(f">> removed network {name}")
-    removed_images = remove_docker_images(images)
+    removed_images = environments.remove_docker_images(images)
     if removed_images:
         print(f">> removed {removed_images} run docker image(s)")
     return 0
@@ -2032,383 +2019,6 @@ def finalize_run_record(
     write_json(record_path, record)
 
 
-def harbor_result_outcome(
-    harbor_result: dict[str, object],
-) -> tuple[str | None, str | None]:
-    stats = harbor_result.get("stats")
-    if not isinstance(stats, dict):
-        return None, None
-
-    errored = stats.get("n_errored_trials", 0)
-    cancelled = stats.get("n_cancelled_trials", 0)
-    running = stats.get("n_running_trials", 0)
-    pending = stats.get("n_pending_trials", 0)
-
-    if isinstance(errored, int) and not isinstance(errored, bool) and errored > 0:
-        exception_types: set[str] = set()
-        evals = stats.get("evals")
-        if isinstance(evals, dict):
-            for evaluation in evals.values():
-                if not isinstance(evaluation, dict):
-                    continue
-                exception_stats = evaluation.get("exception_stats")
-                if isinstance(exception_stats, dict):
-                    exception_types.update(
-                        key for key in exception_stats if isinstance(key, str)
-                    )
-        detail = (
-            f": {', '.join(sorted(exception_types))}" if exception_types else ""
-        )
-        noun = "trial" if errored == 1 else "trials"
-        return "failed", f"Harbor reported {errored} errored {noun}{detail}"
-
-    if (
-        isinstance(cancelled, int)
-        and not isinstance(cancelled, bool)
-        and cancelled > 0
-    ):
-        return "cancelled", f"Harbor reported {cancelled} cancelled trial(s)"
-
-    unfinished = sum(
-        value
-        for value in (running, pending)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0
-    )
-    if unfinished:
-        return "failed", f"Harbor exited with {unfinished} unfinished trial(s)"
-
-    return None, None
-
-
-def validate_command_job(job_path: Path) -> None:
-    """Only the trusted command adapter may execute a submitted harness."""
-    job = yaml.safe_load(job_path.read_text(encoding="utf-8"))
-    agents = job.get("agents") if isinstance(job, dict) else None
-    if (not isinstance(agents, list) or len(agents) != 1
-            or agents[0].get("import_path") != "command_agent:CommandAgent"
-            or "name" in agents[0] or agents[0].get("env")):
-        raise RuntimeError("Only dungeness-command-v1 jobs are supported; rebuild the harness job.")
-
-
-# Defense in depth: do not pass ambient provider credentials or mode switches
-# to the execution framework. Submitted code receives only sandbox configuration.
-HOST_ENV_SCRUB_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "CLAUDECODE", "AWS_")
-HOST_ENV_SCRUB_KEYS = frozenset({"MAX_THINKING_TOKENS", "DISABLE_PROMPT_CACHING"})
-
-
-def harbor_launch_environment(
-    base: Mapping[str, str],
-    control_plane_environment: Mapping[str, str],
-) -> tuple[dict[str, str], list[str]]:
-    """Return (env for `harbor run`, names of host variables that were dropped)."""
-
-    scrubbed = sorted(
-        key
-        for key in base
-        if key.startswith(HOST_ENV_SCRUB_PREFIXES) or key in HOST_ENV_SCRUB_KEYS
-    )
-    environment = {key: value for key, value in base.items() if key not in scrubbed}
-    environment.update(control_plane_environment)
-    return environment, scrubbed
-
-
-def stream_command(command: list[str], *, env: dict[str, str] | None = None) -> str:
-    """Run a command visibly and return its last non-empty output line."""
-    process = subprocess.Popen(
-        command,
-        cwd=REPO_ROOT,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    last_line = ""
-    assert process.stdout is not None
-    for line in process.stdout:
-        print(line, end="", flush=True)
-        if line.strip():
-            last_line = line.strip()
-    return_code = process.wait()
-    if return_code != 0:
-        raise subprocess.CalledProcessError(return_code, command)
-    return last_line
-
-
-def dispose_render(
-    rendered_path: Path,
-    run_id: str,
-    run_dir: Path,
-    *,
-    keep: bool,
-) -> Path | None:
-    resolved_render = rendered_path.resolve()
-    render_root = resolved_render.parent
-    temporary_root = Path(tempfile.gettempdir()).resolve()
-    if (
-        resolved_render.name != "task"
-        or render_root.parent != temporary_root
-        or not render_root.name.startswith(f"dungeness-{run_id}-")
-    ):
-        raise RuntimeError(
-            f"refusing to remove unexpected render path: {resolved_render}"
-        )
-
-    retained_path = None
-    if keep:
-        retained_path = run_dir / "debug" / "harbor-task"
-        retained_path.parent.mkdir(parents=True, exist_ok=True)
-        if retained_path.exists():
-            raise RuntimeError(f"debug render already exists: {retained_path}")
-        shutil.move(resolved_render, retained_path)
-    shutil.rmtree(render_root, ignore_errors=True)
-    return retained_path
-
-
-def docker_query(arguments: list[str]) -> str | None:
-    """Read from the Docker daemon, or None when it cannot be reached."""
-
-    try:
-        result = subprocess.run(
-            ["docker", *arguments],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return result.stdout if result.returncode == 0 else None
-
-
-def docker_task_networks() -> list[str]:
-    """Every per-run Harbor network currently held by the daemon."""
-
-    listing = docker_query(["network", "ls", "--format", "{{.Name}}"])
-    if listing is None:
-        return []
-    return [
-        name
-        for name in listing.split()
-        if name.startswith("task__") and "__env" in name
-    ]
-
-
-def docker_network_capacity() -> int | None:
-    """How many networks the daemon's address pools can hold.
-
-    Returns None when the pools have been configured locally: the operator has
-    already taken this into their own hands, so there is nothing to warn about.
-    Docker's built-in defaults are 15 x /16 plus 16 x /20, hence 31.
-    """
-
-    pools = docker_query(
-        ["info", "--format", "{{json .DefaultAddressPools}}"]
-    )
-    if pools is None or pools.strip() not in {"null", ""}:
-        return None
-    return 31
-
-
-def check_docker_network_capacity() -> None:
-    """Fail before rendering when compose could not allocate this run's networks.
-
-    Each run needs two networks. Exhausting the pools produces a hundred-line
-    docker traceback whose one useful line is buried at the end, so say plainly
-    what is wrong and how to clear it.
-    """
-
-    capacity = docker_network_capacity()
-    if capacity is None:
-        return
-    listing = docker_query(["network", "ls", "--format", "{{.Name}}"])
-    if listing is None:
-        return
-    in_use = len(listing.split())
-    if capacity - in_use >= 2:
-        return
-    leaked = len(docker_task_networks())
-    raise SystemExit(
-        f"Docker has {in_use} of {capacity} networks in use and this run "
-        "needs 2.\n"
-        f"{leaked} belong to previous Dungeness runs; remove them with "
-        "./dungeness clean\n"
-        "Raise the ceiling permanently by setting default-address-pools in "
-        "~/.docker/daemon.json."
-    )
-
-
-def harbor_trials_for_run(run_dir: Path) -> list[str]:
-    """The lowercase Harbor trial IDs recorded under one run."""
-
-    harbor_root = run_dir / "harbor"
-    if not harbor_root.is_dir():
-        return []
-    return sorted(
-        {
-            trial.name.lower()
-            for trial in harbor_root.glob("*/task__*")
-            if trial.is_dir()
-        }
-    )
-
-
-def compose_projects_for_run(run_dir: Path) -> list[str]:
-    """The environment projects Harbor created for a run."""
-
-    return [f"{trial}__env" for trial in harbor_trials_for_run(run_dir)]
-
-
-def docker_compose_images() -> list[tuple[str, str]]:
-    """Return (image reference, compose project) for Compose-built images."""
-
-    listing = docker_query(
-        [
-            "image",
-            "ls",
-            "--format",
-            '{{.Repository}}:{{.Tag}}\t{{.Label "com.docker.compose.project"}}',
-        ]
-    )
-    if listing is None:
-        return []
-    images: set[tuple[str, str]] = set()
-    for line in listing.splitlines():
-        fields = line.split("\t", 1)
-        if len(fields) != 2:
-            continue
-        image, project = fields
-        if not project or image.startswith("<none>:"):
-            continue
-        images.add((image, project))
-    return sorted(images)
-
-
-def docker_images_for_run(run_dir: Path) -> list[str]:
-    """Every Compose-built image whose project belongs to this run's trials."""
-
-    trials = harbor_trials_for_run(run_dir)
-    if not trials:
-        return []
-    return sorted(
-        {
-            image
-            for image, project in docker_compose_images()
-            if any(
-                project == trial or project.startswith(f"{trial}__")
-                for trial in trials
-            )
-        }
-    )
-
-
-def docker_task_images() -> list[str]:
-    """Every image built by a Harbor task Compose project."""
-
-    return sorted(
-        {
-            image
-            for image, project in docker_compose_images()
-            if project.startswith("task__")
-        }
-    )
-
-
-def remove_docker_images(images: list[str]) -> int:
-    """Remove exact image tags without pruning shared or unrelated images."""
-
-    removed = 0
-    for image in sorted(set(images)):
-        try:
-            result = subprocess.run(
-                ["docker", "image", "rm", image],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=300,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            print(
-                f">> warning: could not remove docker image {image}: {error}",
-                file=sys.stderr,
-                flush=True,
-            )
-            continue
-        if result.returncode == 0:
-            removed += 1
-            continue
-        detail = (result.stderr or result.stdout or "").strip().splitlines()
-        print(
-            f">> warning: could not remove docker image {image}: "
-            f"{detail[-1] if detail else 'unknown docker error'}",
-            file=sys.stderr,
-            flush=True,
-        )
-    return removed
-
-
-def compose_down(project: str) -> bool:
-    """Remove a compose project's containers and networks. True when removed."""
-
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--project-name",
-                project,
-                "down",
-                "--volumes",
-                "--remove-orphans",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=300,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        print(
-            f">> warning: could not tear down {project}: {error}",
-            file=sys.stderr,
-            flush=True,
-        )
-        return False
-    if result.returncode == 0:
-        return True
-    detail = (result.stderr or result.stdout or "").strip().splitlines()
-    print(
-        f">> warning: could not tear down {project}: "
-        f"{detail[-1] if detail else 'unknown docker error'}",
-        file=sys.stderr,
-        flush=True,
-    )
-    return False
-
-
-def teardown_run_environments(
-    run_dir: Path,
-    *,
-    remove_images: bool = True,
-) -> None:
-    """Release a finished run's Docker containers, networks, and images.
-
-    Harbor removes its own environment when a trial ends normally, but an
-    interrupt aborts that cleanup mid-flight and leaks two networks per run.
-    Docker's built-in address pools hold only 31 networks, so a handful of
-    interrupted runs is enough to make every later run fail at compose time.
-    Compose-built images are run-scoped and can consume several gigabytes each,
-    so they are removed by default as well. Teardown is best-effort: it must
-    never mask the run's own outcome.
-    """
-
-    for project in compose_projects_for_run(run_dir):
-        if compose_down(project):
-            print(f">> released docker environment {project}", flush=True)
-    if remove_images:
-        removed = remove_docker_images(docker_images_for_run(run_dir))
-        if removed:
-            print(f">> removed {removed} run docker image(s)", flush=True)
-
-
 def verifier_candidate_path(dockerfile: Path) -> PurePosixPath:
     match = re.search(
         r"(?:^|\s)CANDIDATE_PATH=([^\s\\]+)",
@@ -2685,120 +2295,21 @@ def execute_run(args: argparse.Namespace) -> int:
         + evaluation_events_command(run_dir),
         flush=True,
     )
-    check_docker_network_capacity()
-
-    rendered_path: Path | None = None
-    record_path: Path | None = None
-    final_status = "failed"
-    failure: str | None = None
-    try:
-        print(">> rendering temporary run task", flush=True)
-        rendered_text = stream_command(build_command(args, run_id))
-        rendered_path = Path(rendered_text)
-        if not rendered_path.is_absolute():
-            rendered_path = REPO_ROOT / rendered_path
-        job_path = rendered_path / "harbor-job.yaml"
-        if not job_path.is_file():
-            raise RuntimeError(
-                f"renderer did not produce a Harbor job at {job_path}"
-            )
-        validate_command_job(job_path)
-        control_plane_env = {}
-        environment, scrubbed_host_env = harbor_launch_environment(
-            os.environ, control_plane_env
-        )
-        record_path = start_run_record(
-            rendered_path,
-            run_id,
-            environment_file=args.env_file,
-            keep_images=args.keep_images,
-            control_plane_environment=control_plane_env,
-            scrubbed_host_environment=scrubbed_host_env,
-        )
-        print(f">> recorded run {run_id}", flush=True)
-
-        if scrubbed_host_env:
-            print(
-                ">> dropping host provider variables from the Harbor control plane: "
-                + ", ".join(scrubbed_host_env),
-                flush=True,
-            )
-        for key, value in control_plane_env.items():
-            print(f">> exporting {key}={value} to the Harbor control plane", flush=True)
-        adapter_path = str(REPO_ROOT / "adapters/harbor")
-        existing_pythonpath = environment.get("PYTHONPATH")
-        environment["PYTHONPATH"] = (
-            adapter_path
-            if not existing_pythonpath
-            else adapter_path + os.pathsep + existing_pythonpath
-        )
-        print(f">> executing run from {job_path}", flush=True)
-        stream_command(
-            [
-                "uvx",
-                "--python",
-                "3.12",
-                "--from",
-                f"harbor=={HARBOR_VERSION}",
-                "--with",
-                f"litellm=={LITELLM_VERSION}",
-                "harbor",
-                "run",
-                "--env-file",
-                args.env_file,
-                "--config",
-                str(job_path),
-            ],
-            env=environment,
-        )
-        final_status = "completed"
-    except KeyboardInterrupt:
-        final_status = "cancelled"
-        failure = "interrupted"
-        raise
-    except BaseException as error:
-        failure = f"{type(error).__name__}: {error}"
-        raise
-    finally:
-        teardown_run_environments(
-            run_dir,
-            remove_images=not args.keep_images,
-        )
-        if record_path is not None:
-            try:
-                finalize_run_record(
-                    record_path,
-                    status=final_status,
-                    error=failure,
-                )
-            except Exception as error:
-                if failure is None and final_status == "completed":
-                    raise
-                print(f">> warning: could not finalize run record: {error}", file=sys.stderr)
-        if rendered_path is not None:
-            retained_path = dispose_render(
-                rendered_path,
-                run_id,
-                run_dir,
-                keep=args.keep_render,
-            )
-            if retained_path is not None:
-                print(f">> retained render at {retained_path}", flush=True)
-            print(">> removed temporary run task", flush=True)
-        events_path = run_dir / "usage" / "events.jsonl"
-        timeline_path = run_dir / "usage" / "gateway-timeline.jsonl"
-        audit_path = events_path if events_path.is_file() else timeline_path
-        if audit_path.is_file():
-            print(
-                f">> usage events at {audit_path.relative_to(REPO_ROOT)}",
-                flush=True,
-            )
-    return 0
+    return execute_lifecycle(
+        repository_root=REPO_ROOT, render_command=build_command(args, run_id),
+        run_id=run_id, run_dir=run_dir, environment_file=args.env_file,
+        keep_render=args.keep_render, keep_images=args.keep_images,
+        start_record=start_run_record, finalize_record=finalize_run_record,
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dungeness")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    capabilities_parser = subparsers.add_parser(
+        "capabilities", help="print the versioned runtime contract as JSON"
+    )
+    capabilities_parser.set_defaults(handler=show_capabilities)
     init_parser = subparsers.add_parser(
         "init", help="configure the namespace used for new records"
     )
@@ -2961,6 +2472,13 @@ def main() -> int:
         return error.returncode
     except KeyboardInterrupt:
         return 130
+
+
+def show_capabilities(_args: argparse.Namespace) -> int:
+    from dungeness.contracts import runtime_contract
+
+    print(json.dumps(runtime_contract(REPO_ROOT), sort_keys=True, indent=2))
+    return 0
 
 
 if __name__ == "__main__":

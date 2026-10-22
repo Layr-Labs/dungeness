@@ -21,6 +21,7 @@
 /script/*.csv
 __pycache__/
 *.pyc
+.venv/
 
 # Root-level run specs are editable local configurations created from README examples.
 # Specs organized in subdirectories remain trackable for deliberate sharing.

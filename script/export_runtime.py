@@ -17,7 +17,10 @@ FILES = {
     "dungeness", "README.md", "DESIGN.md", ".env.example", ".gitignore",
     ".gitattributes", "LICENSE", "LICENSE.md",
     "docs/command-harness.md", "docs/runtime-distribution.md", "docs/cli-reference.md",
-    "script/export_runtime.py", "doc/knowledge-base-preload.md",
+    "script/export_runtime.py", "runtime-contract.json",
+    "pyproject.toml", "uv.lock",
+    "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
+    "docs/problem-service.md", "docs/runtime-contract.md", "docs/development.md",
 }
 TRANSCRIPT_TOOLS = {
     "tools/transcripts/render_gateway_transcript.py",

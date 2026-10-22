@@ -96,6 +96,16 @@ Show available commands:
 ./dungeness <command> --help
 ```
 
+### `capabilities`
+
+```sh
+./dungeness capabilities
+```
+
+Print the versioned runtime capability declaration as JSON without initializing
+a workspace or contacting a model. Integrators can also read
+`runtime-contract.json` directly. See the [compatibility contract](runtime-contract.md).
+
 ### `init`
 
 Configure the default namespace for newly created user records:

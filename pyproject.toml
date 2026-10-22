@@ -1,0 +1,31 @@
+[project]
+name = "dungeness"
+version = "0.1.0"
+description = "Isolated research harness execution and trusted evaluation evidence"
+requires-python = ">=3.11"
+dependencies = ["PyYAML==6.0.3"]
+
+# Runtime assets still require a source checkout. This manifest establishes a
+# locked developer environment; it does not claim wheel installation support.
+[tool.uv]
+package = false
+conflicts = [[{ group = "gateway" }, { group = "harbor" }]]
+
+[tool.uv.dependency-groups]
+harbor = { requires-python = ">=3.12" }
+
+[dependency-groups]
+# Match services/gateway/requirements.txt until the gateway is packaged.
+gateway = [
+    "anyio==4.14.2",
+    "certifi==2026.7.22",
+    "click==8.4.2",
+    "h11==0.16.0",
+    "httpcore==1.0.9",
+    "httpx==0.28.1",
+    "idna==3.18",
+    "starlette==0.47.3",
+    "typing-extensions==4.16.0",
+    "uvicorn==0.35.0",
+]
+harbor = ["harbor==0.18.0", "litellm==1.86.2"]

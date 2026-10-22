@@ -27,8 +27,14 @@ class RuntimeDistributionTests(unittest.TestCase):
         self.git("config", "commit.gpgsign", "false")
         for path in (
             "dungeness", "src/dungeness/compiler.py", "adapters/harbor/command_agent.py",
+            "src/dungeness/execution/__init__.py", "src/dungeness/execution/harbor.py",
+            "src/dungeness/execution/runner.py", "src/dungeness/execution/environments.py",
+            "src/dungeness/execution/process.py",
             "services/gateway/gateway.py", "tasks/projects/dungeness/ecdsa-starter/task.yaml",
             "run-specs/projects/dungeness/ecdsa-starter.yaml", ".env.example",
+            "runtime-contract.json", "pyproject.toml", "uv.lock",
+            "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
+            "docs/problem-service.md", "docs/runtime-contract.md",
             "tools/transcripts/render_gateway_transcript.py", "tools/transcripts/serve_gateway_transcripts.py",
         ):
             self.write(path, f"runtime {path}\n")
@@ -70,6 +76,12 @@ class RuntimeDistributionTests(unittest.TestCase):
         with tarfile.open(output) as archive:
             names = archive.getnames()
             self.assertIn("dungeness-runtime/.env.example", names)
+            self.assertIn("dungeness-runtime/runtime-contract.json", names)
+            self.assertIn("dungeness-runtime/src/dungeness/execution/harbor.py", names)
+            self.assertIn("dungeness-runtime/src/dungeness/execution/runner.py", names)
+            self.assertIn("dungeness-runtime/src/dungeness/execution/environments.py", names)
+            self.assertIn("dungeness-runtime/src/dungeness/execution/process.py", names)
+            self.assertIn("dungeness-runtime/docs/runtime-contract.md", names)
             self.assertNotIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", names)
             self.assertFalse(any(name.startswith("dungeness-runtime/tasks/users/") for name in names))
             self.assertEqual(archive.getmember("dungeness-runtime/dungeness").mode, 0o755)

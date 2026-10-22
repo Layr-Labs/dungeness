@@ -120,18 +120,17 @@ archive.
 - [Runtime distribution and artifact retention](docs/runtime-distribution.md)
 - [Record and configuration model](DESIGN.md)
 - [Gateway architecture](services/DESIGN.md)
+- [Runtime compatibility contract](docs/runtime-contract.md)
+- [Development and component boundaries](docs/development.md)
 
-No-model-call regression checks from a full source checkout, using a Python
-environment with the gateway's pinned requirements installed:
+Offline regression checks from a full source checkout use locked dependencies:
 
 ```sh
-python -m unittest discover -s tests
-PYTHONPATH=services/gateway python -m unittest discover -s services/gateway/tests
-python -m unittest discover -s tools/transcripts -p 'test_*.py'
+make check
 ```
 
-Use an environment with Harbor 0.18.0 for the adapter API contract tests. These checks do not launch paid model runs or establish Docker
-provider compatibility. Use an explicitly funded smoke run for that boundary.
+The gateway and Harbor use separate dependency environments. These checks do not
+launch paid model runs or establish Docker/provider compatibility.
 
 ## Compatible provider profiles
 
