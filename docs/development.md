@@ -44,8 +44,13 @@ Run orchestration now lives in `execution/runner.py`: rendering, launch, outcome
 handling, record finalization and render retention/disposal. It takes explicit
 paths, a renderer command and retention settings; it does not resolve CLI flags
 or load run specs. Record persistence is supplied through two typed callbacks,
-so the runner does not import the CLI or own the record schema. Record-writing
-implementations still live in the CLI pending their own extraction.
+so the runner does not import the CLI or own the record schema.
+
+`records.py` owns atomic JSON persistence, Git provenance and run-record
+initialization/finalization, including read-only historical evidence compatibility.
+It receives an explicit storage root, launcher metadata and an execution-result
+interpreter. It imports neither execution nor the compiler/gateway. The CLI
+supplies the Harbor interpreter and retains its existing helper entry points.
 
 `execution/environments.py` owns run-scoped Docker discovery and teardown;
 the CLI's administrative `clean` command uses those same operations.
@@ -56,9 +61,17 @@ period before killing an unresponsive child. Cleanup attempts all stages even
 when record finalization fails, and secondary errors do not replace the original
 execution failure or cancellation.
 
-Configuration resolution, record persistence and standalone verification still
+Configuration resolution, record lookup and standalone verification still
 live in the root CLI. Model policy/accounting stays in the gateway; task
 validation and generic compilation remain in the compiler.
+
+`scaffolds.py` materializes schema-v2 scaffold manifests using explicit file
+mappings and text edits that must match an expected number of times. It knows
+no language filenames or problem-specific validation stages. Catalyst owns its
+ECDSA scaffold under `src/catalyst/problem-set/ecdsa-fail/` and installs it into
+the disposable runtime. Candidate files and trusted edits remain separate;
+submitted harnesses cannot choose the manifest or load preparation code.
+See [trusted scaffolds](scaffolds.md).
 
 The current extraction order is:
 

@@ -24,6 +24,8 @@ from typing import Any
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from dungeness import scaffolds
+from dungeness.scaffolds import apply_scaffold_trusted_files, materialize_scaffold_candidate
 from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
 from dungeness.execution.harbor import (
     build_job, build_task_toml, build_verifier_compose, toml_string,
@@ -49,7 +51,6 @@ CANDIDATE_STATE_PATH = REPOSITORY_ROOT / "agents/common/candidate_state.py"
 NETWORK_POLICY_PATH = REPOSITORY_ROOT / "policies/network/mediated.yaml"
 WEB_POLICY_PATH = REPOSITORY_ROOT / "policies/web/exa.yaml"
 BUDGET_POLICY_PATH = REPOSITORY_ROOT / "policies/budget/default.yaml"
-SCAFFOLDS_ROOT = REPOSITORY_ROOT / "scaffolds"
 ADAPTER_MANIFEST_PATH = REPOSITORY_ROOT / "adapters/harbor/adapter.yaml"
 # The source repo is always mounted at this fixed, task-agnostic path in the
 # agent and verifier. Candidate paths are relative to the repo root, so a single
@@ -747,179 +748,7 @@ def apply_evaluator_patches(
 
 
 def resolve_scaffold(value: Any) -> dict[str, Any]:
-    """Resolve a trusted, repository-local scaffold manifest."""
-
-    if not isinstance(value, str):
-        raise ValueError("task scaffold must be a repository-relative manifest path")
-    relative = require_relative_path(value, "task scaffold")
-    manifest_path = REPOSITORY_ROOT.joinpath(*relative.parts)
-    if not manifest_path.is_file() or not manifest_path.is_relative_to(SCAFFOLDS_ROOT):
-        raise ValueError(f"task scaffold does not exist under scaffolds/: {relative}")
-    manifest = load_yaml(manifest_path)
-    if (
-        manifest.get("schema_version") != 1
-        or manifest.get("type") != "scaffold"
-        or not isinstance(manifest.get("id"), str)
-    ):
-        raise ValueError(f"invalid scaffold manifest: {manifest_path}")
-    candidate_path = require_relative_path(
-        str(manifest.get("candidate_path")), "scaffold candidate_path"
-    )
-    candidate_stub = require_relative_path(
-        str(manifest.get("candidate_stub")), "scaffold candidate_stub"
-    )
-    workspace_paths = manifest.get("workspace_paths")
-    if (
-        not isinstance(workspace_paths, list)
-        or not workspace_paths
-        or not all(isinstance(path, str) and path for path in workspace_paths)
-    ):
-        raise ValueError("scaffold workspace_paths must be a non-empty list")
-    trusted_files = manifest.get("trusted_files")
-    if not isinstance(trusted_files, dict) or not trusted_files:
-        raise ValueError("scaffold trusted_files must be a non-empty mapping")
-    resolved_trusted: dict[PurePosixPath, Path] = {}
-    for source_value, destination_value in trusted_files.items():
-        source_rel = require_relative_path(
-            str(source_value), "scaffold trusted source"
-        )
-        destination_rel = require_relative_path(
-            str(destination_value), "scaffold trusted destination"
-        )
-        source = manifest_path.parent.joinpath(*source_rel.parts)
-        if source.is_symlink() or not source.is_file():
-            raise ValueError(f"scaffold trusted source is not a regular file: {source}")
-        if (
-            destination_rel == candidate_path
-            or destination_rel.is_relative_to(candidate_path)
-        ):
-            raise ValueError(
-                "trusted scaffold files must be outside the editable candidate: "
-                f"{destination_rel}"
-            )
-        resolved_trusted[destination_rel] = source
-    stub_source = manifest_path.parent.joinpath(*candidate_stub.parts)
-    if stub_source.is_symlink() or not stub_source.is_file():
-        raise ValueError(f"scaffold candidate stub is not a regular file: {stub_source}")
-    rust_modules = manifest.get("rust_modules", [])
-    if not isinstance(rust_modules, list) or not all(
-        isinstance(module, str) and re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", module)
-        for module in rust_modules
-    ):
-        raise ValueError("scaffold rust_modules must be Rust identifiers")
-    progressive = manifest.get("progressive_validation", {})
-    shots = progressive.get("shots") if isinstance(progressive, dict) else None
-    if (
-        not isinstance(shots, list)
-        or not shots
-        or not all(
-            isinstance(shot, int) and not isinstance(shot, bool) and shot > 0
-            for shot in shots
-        )
-        or shots[-1] != 9024
-    ):
-        raise ValueError(
-            "scaffold progressive_validation.shots must end with 9024"
-        )
-    return {
-        "id": manifest["id"],
-        "path": manifest_path,
-        "manifest": manifest,
-        "candidate_path": candidate_path,
-        "candidate_stub": stub_source,
-        "workspace_paths": list(workspace_paths),
-        "trusted_files": resolved_trusted,
-        "rust_modules": list(rust_modules),
-        "shots": list(shots),
-    }
-
-
-def patch_progressive_eval(path: Path, shots: list[int]) -> None:
-    """Make the trusted evaluator fail fast through progressively larger stages."""
-
-    text = path.read_text(encoding="utf-8")
-    pattern = re.compile(
-        r'    println!\("\\n-- correctness tests \(\{\} shots\) --", NUM_TESTS\);'
-        r".*?"
-        r'    println!\("  all \{\} shots OK", r\.n_shots\);',
-        re.DOTALL,
-    )
-    stages = ", ".join(
-        "NUM_TESTS" if index == len(shots) - 1 else str(shot)
-        for index, shot in enumerate(shots)
-    )
-    replacement = f'''    let validation_stages: &[usize] = &[{stages}];
-    let mut final_report = None;
-    for &target_shots in validation_stages {{
-        println!("\\n-- correctness stage ({{}} shots) --", target_shots);
-        let xof = fiat_shamir_seed(&ops);
-        let stage = run_tests(
-            &ops,
-            &regs,
-            total_qubits,
-            num_bits,
-            xof,
-            target_shots,
-        );
-        println!("  tested shots            : {{}}", stage.n_shots);
-        println!("  classical mismatches    : {{}}", stage.classical_failures);
-        println!("  phase-garbage batches   : {{}}", stage.phase_garbage_batches);
-        println!("  ancilla-garbage batches : {{}}", stage.ancilla_garbage_batches);
-        if !stage.ok {{
-            let reason = stage
-                .fail_reason
-                .clone()
-                .unwrap_or_else(|| "(no detail)".into());
-            println!("\\n!! correctness FAILED at {{}} shots: {{}}", target_shots, reason);
-            let fail_note = format!(
-                "{{}} | validation_stage={{}} | {{}}",
-                note, target_shots, reason
-            );
-            append_results_row(
-                "FAIL",
-                stage.avg_tof,
-                stage.avg_cliff,
-                total_qubits,
-                ops.len(),
-                &fail_note,
-            );
-            std::process::exit(1);
-        }}
-        println!("  stage {{}} shots OK", stage.n_shots);
-        final_report = Some(stage);
-    }}
-    let r = final_report.expect("progressive validation stages are non-empty");
-    println!("  all {{}} shots OK", r.n_shots);'''
-    patched, count = pattern.subn(replacement, text, count=1)
-    if count != 1:
-        raise ValueError(f"could not patch progressive evaluator source: {path}")
-    path.write_text(patched, encoding="utf-8")
-
-
-def apply_scaffold_trusted_files(scaffold: dict[str, Any], root: Path) -> None:
-    for destination, source in scaffold["trusted_files"].items():
-        target = root.joinpath(*destination.parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    lib_path = root / "src/lib.rs"
-    lib_text = lib_path.read_text(encoding="utf-8")
-    for module in scaffold["rust_modules"]:
-        declaration = f"pub mod {module};"
-        if declaration not in lib_text:
-            lib_text = lib_text.rstrip() + f"\n{declaration}\n"
-    lib_path.write_text(lib_text, encoding="utf-8")
-    patch_progressive_eval(root / "src/bin/eval_circuit.rs", scaffold["shots"])
-
-
-def materialize_scaffold_candidate(scaffold: dict[str, Any], root: Path) -> None:
-    destination = root.joinpath(*scaffold["candidate_path"].parts)
-    if destination.exists():
-        if destination.is_dir():
-            shutil.rmtree(destination)
-        else:
-            destination.unlink()
-    destination.mkdir(parents=True)
-    shutil.copy2(scaffold["candidate_stub"], destination / "mod.rs")
+    return scaffolds.resolve_scaffold(REPOSITORY_ROOT, value)
 
 
 # Default resource envelopes. A task may override any field via its task-level
@@ -2371,8 +2200,7 @@ def build_task(
             }
         for candidate_path in candidate_paths:
             candidate_source = start_checkout.joinpath(*candidate_path.parts)
-            # A candidate may be a single file (src/point_add.rs in early
-            # history) or a module directory (src/point_add later). Reject symlinks.
+            # A candidate may be a single file or a directory. Reject symlinks.
             if candidate_source.is_symlink() or not (
                 candidate_source.is_file() or candidate_source.is_dir()
             ):
@@ -2429,8 +2257,7 @@ def build_task(
         if fresh_start:
             # Fresh start: discard the commit's solution so the agent implements
             # from only the statement + task contract. Blank each candidate to an empty
-            # editable stub (a directory module gets an empty mod.rs so the crate's
-            # `mod` still resolves; a single file becomes empty).
+            # editable file or directory. Language-specific starters belong to scaffolds.
             if resume is not None:
                 raise ValueError("--fresh-start cannot be combined with --resume-from")
             for candidate_path in candidate_paths:
@@ -2438,7 +2265,6 @@ def build_task(
                 if destination.is_dir():
                     shutil.rmtree(destination)
                     destination.mkdir(parents=True)
-                    (destination / "mod.rs").write_text("")
                 else:
                     if destination.exists():
                         destination.unlink()
@@ -2501,7 +2327,7 @@ def build_task(
         submissions = budget_policy.get("evaluation", {}).get("submissions", 200)
         dev_scorer_cfg = None
         if sidecar_mode == "full-benchmark":
-            # ecdsa-fail full-benchmark sidecar: the verifier grader in serve
+            # Full-benchmark sidecar: the verifier grader in serve
             # mode, sized to the same memory envelope as the selected verifier
             # interface.
             dev_scorer_cfg = {
@@ -2751,7 +2577,10 @@ def build_task(
                 "manifest": source_snapshot(
                     scaffold["path"], scaffold["manifest"]
                 ),
-                "candidate_stub": file_snapshot(scaffold["candidate_stub"]),
+                "candidate_files": {
+                    destination.as_posix(): file_snapshot(source)
+                    for destination, source in scaffold["candidate_files"].items()
+                },
                 "trusted_files": {
                     destination.as_posix(): file_snapshot(source)
                     for destination, source in scaffold["trusted_files"].items()
@@ -2764,7 +2593,7 @@ def build_task(
                 "trusted_paths": sorted(
                     path.as_posix() for path in scaffold["trusted_files"]
                 ),
-                "progressive_validation_shots": list(scaffold["shots"]),
+                "text_edit_paths": sorted({edit["path"] for edit in scaffold["text_edits"]}),
             }
         resolved_record = build_run_record(
             run_id=run_id,

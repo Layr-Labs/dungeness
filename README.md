@@ -97,7 +97,7 @@ the optional transcript tools and cleanup commands still work on retained local 
 
 | Location | Purpose |
 | --- | --- |
-| `dungeness`, `src/dungeness/` | CLI, run compiler and provenance |
+| `dungeness`, [`src/`](src/README.md) | CLI, compiler, records and execution lifecycle |
 | `adapters/`, `services/`, `policies/` | Trusted execution, metering and isolation |
 | `agents/projects/dungeness/`, `tasks/projects/dungeness/` | Command example and starter task |
 | `run-specs/projects/dungeness/` | Small maintained run examples |
@@ -111,6 +111,8 @@ separately. New user-authored inputs and run outputs belong in local or service 
 This repository starts from a reviewed source snapshot with fresh history.
 Historical runs and reports are retained separately in the private research
 archive.
+
+Each top-level directory has a short README describing its ownership and entry points.
 
 ## Documentation and checks
 

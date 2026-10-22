@@ -25,50 +25,6 @@ def load_cli():
 
 
 class ScaffoldInitializationTests(unittest.TestCase):
-    def test_scaffold_is_neutral_and_outside_candidate(self) -> None:
-        scaffold = build.resolve_scaffold(
-            "scaffolds/ecdsa-point-add-sdk-v1/scaffold.yaml"
-        )
-        self.assertEqual(
-            scaffold["candidate_path"].as_posix(), "src/point_add"
-        )
-        self.assertEqual(scaffold["shots"], [1, 64, 512, 9024])
-        for destination in scaffold["trusted_files"]:
-            self.assertFalse(
-                destination.is_relative_to(scaffold["candidate_path"])
-            )
-        stub = scaffold["candidate_stub"].read_text(encoding="utf-8")
-        self.assertIn("pub fn build() -> Vec<Op>", stub)
-        self.assertNotIn("kaliski", stub.lower())
-        self.assertNotIn("modular", stub.lower())
-
-    def test_progressive_patch_uses_final_authoritative_stage(self) -> None:
-        source = r'''
-fn main() {
-    println!("\n-- correctness tests ({} shots) --", NUM_TESTS);
-    let xof = fiat_shamir_seed(&ops);
-    let r = run_tests(&ops, &regs, total_qubits, num_bits, xof, NUM_TESTS);
-    println!("  tested shots            : {}", r.n_shots);
-    println!("  classical mismatches    : {}", r.classical_failures);
-    println!("  phase-garbage batches   : {}", r.phase_garbage_batches);
-    println!("  ancilla-garbage batches : {}", r.ancilla_garbage_batches);
-    if !r.ok {
-        let reason = r.fail_reason.clone().unwrap_or_else(|| "(no detail)".into());
-        println!("\n!! correctness FAILED: {reason}");
-        std::process::exit(1);
-    }
-    println!("  all {} shots OK", r.n_shots);
-}
-'''
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "eval_circuit.rs"
-            path.write_text(source, encoding="utf-8")
-            build.patch_progressive_eval(path, [1, 64, 512, 9024])
-            patched = path.read_text(encoding="utf-8")
-        self.assertIn("&[1, 64, 512, NUM_TESTS]", patched)
-        self.assertIn("correctness FAILED at {} shots", patched)
-        self.assertIn("final_report.expect", patched)
-
     def test_run_spec_selects_scaffold_without_fresh_start(self) -> None:
         cli = load_cli()
         with tempfile.TemporaryDirectory() as temporary:

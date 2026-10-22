@@ -19,8 +19,10 @@ FILES = {
     "docs/command-harness.md", "docs/runtime-distribution.md", "docs/cli-reference.md",
     "script/export_runtime.py", "runtime-contract.json",
     "pyproject.toml", "uv.lock",
+    "agents/README.md", "tasks/README.md", "run-specs/README.md",
+    "docs/README.md", "script/README.md", "tools/README.md",
     "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
-    "docs/problem-service.md", "docs/runtime-contract.md", "docs/development.md",
+    "docs/problem-service.md", "docs/runtime-contract.md", "docs/development.md", "docs/scaffolds.md",
 }
 TRANSCRIPT_TOOLS = {
     "tools/transcripts/render_gateway_transcript.py",

@@ -29,7 +29,9 @@ class RuntimeDistributionTests(unittest.TestCase):
             "dungeness", "src/dungeness/compiler.py", "adapters/harbor/command_agent.py",
             "src/dungeness/execution/__init__.py", "src/dungeness/execution/harbor.py",
             "src/dungeness/execution/runner.py", "src/dungeness/execution/environments.py",
-            "src/dungeness/execution/process.py",
+            "src/dungeness/execution/process.py", "src/dungeness/records.py",
+            "agents/README.md", "tasks/README.md", "run-specs/README.md",
+            "docs/README.md", "script/README.md", "tools/README.md",
             "services/gateway/gateway.py", "tasks/projects/dungeness/ecdsa-starter/task.yaml",
             "run-specs/projects/dungeness/ecdsa-starter.yaml", ".env.example",
             "runtime-contract.json", "pyproject.toml", "uv.lock",
@@ -81,6 +83,9 @@ class RuntimeDistributionTests(unittest.TestCase):
             self.assertIn("dungeness-runtime/src/dungeness/execution/runner.py", names)
             self.assertIn("dungeness-runtime/src/dungeness/execution/environments.py", names)
             self.assertIn("dungeness-runtime/src/dungeness/execution/process.py", names)
+            self.assertIn("dungeness-runtime/src/dungeness/records.py", names)
+            for directory in ("agents", "tasks", "run-specs", "docs", "script", "tools"):
+                self.assertIn(f"dungeness-runtime/{directory}/README.md", names)
             self.assertIn("dungeness-runtime/docs/runtime-contract.md", names)
             self.assertNotIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", names)
             self.assertFalse(any(name.startswith("dungeness-runtime/tasks/users/") for name in names))

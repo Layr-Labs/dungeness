@@ -21,6 +21,7 @@ additive changes do not require an envelope version change.
 | `ecdsa-readable-verifier-results-v1` | The bundled ECDSA benchmark verifier writes readable JSON results, including under a restrictive umask. This is a problem-specific capability. |
 | `assigned-problem-service-v1` | A pinned read-only task service and declared attachments/resources are accessible through the gateway; attachment integrity and path constraints are checked during compilation. |
 | `optional-model-token-limit-v1` | An explicit null model-token cap disables that ceiling while preserving USD and execution limits and token accounting. |
+| `declarative-scaffolds-v2` | Trusted schema-v2 scaffolds declare candidate files, support files and checked text edits without problem-specific compiler code or executable host hooks. |
 
 This declaration is a compatibility interface, not a security attestation.
 Consumers must still select a trusted runtime revision and verify that the
