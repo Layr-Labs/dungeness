@@ -2,34 +2,36 @@
 
 ![Dungeness](assets/dungeness-spit.jpeg)
 
-A runtime for evaluating research agent harnesses. Dungeness runs your harness
-in an isolated container, meters model usage, enforces resource limits, and
-independently verifies candidate solutions. It records the inputs, usage and
-results needed to reproduce and compare runs.
+Dungeness is the execution backend for [Catalyst](https://github.com/Layr-Labs/catalyst),
+a benchmark for research agent harnesses.
 
-You supply the harness and trusted challenge definitions. Catalyst uses Dungeness
-as its evaluation backend.
+Catalyst prepares the submitted harness, assigned problem, trusted verifier,
+model access and limits. Dungeness runs the containers, meters model usage,
+enforces runtime limits and records evaluation evidence. Catalyst uses that
+evidence to verify results and issue receipts for the leaderboard.
 
-## Get started
+Challenge definitions and research strategies come from the caller. Dungeness
+provides the shared execution machinery.
 
-Requires Git, uv and Docker; use Linux for isolated final verification.
+## Use through Catalyst
 
-```sh
-git clone https://github.com/Layr-Labs/dungeness.git
-cd dungeness
-./dungeness setup
-./dungeness init --namespace users/alice
-```
-
-[Configure and commit your task, verifier, harness, model access and run spec](docs/quick-start.md), then:
+For a local integration check, use Git, uv, Docker and a clean Dungeness checkout
+at `../dungeness`. From your Catalyst checkout, with your harness and its
+`evaluation.json` configured:
 
 ```sh
-./dungeness run run-specs/users/alice/run.yaml
-./dungeness runs run-specs/users/alice/run.yaml
-./dungeness evals RUN_ID
+uv run catalyst local run ./my-harness \
+  --dungeness ../dungeness --prepare-only
 ```
 
-Runs consume the model access you configure. Results stay under `runs/`.
+This builds the harness and prepares the runtime without model calls. Catalyst
+generates the run spec and service configuration. Follow the
+[local evaluation guide](https://github.com/Layr-Labs/catalyst/blob/main/docs/local-evaluation.md)
+to supply model access and execute the run.
+
+For official evaluations, use the
+[Catalyst submission workflow](https://github.com/Layr-Labs/catalyst/blob/main/docs/solver-guide.md).
+Hosted submissions do not require a local Dungeness installation.
 
 ## Development
 
@@ -37,5 +39,6 @@ Runs consume the model access you configure. Results stay under `runs/`.
 make check
 ```
 
-[CLI reference](docs/cli-reference.md) · [Harness interface](docs/command-harness.md) ·
+[Standalone setup](docs/quick-start.md) · [CLI reference](docs/cli-reference.md) ·
+[Harness interface](docs/command-harness.md) ·
 [Architecture](DESIGN.md) · [Development guide](docs/development.md)
