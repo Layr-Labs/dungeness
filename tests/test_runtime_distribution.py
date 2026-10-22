@@ -32,6 +32,7 @@ class RuntimeDistributionTests(unittest.TestCase):
             "src/dungeness/execution/process.py", "src/dungeness/records.py",
             "agents/README.md", "tasks/README.md", "run-specs/README.md",
             "docs/README.md", "script/README.md", "tools/README.md",
+            "docs/quick-start.md", "docs/evaluation-events.md",
             "services/gateway/gateway.py", ".env.example",
             "runtime-contract.json", "pyproject.toml", "uv.lock",
             "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
@@ -90,6 +91,8 @@ class RuntimeDistributionTests(unittest.TestCase):
             for directory in ("agents", "tasks", "run-specs", "docs", "script", "tools"):
                 self.assertIn(f"dungeness-runtime/{directory}/README.md", names)
             self.assertIn("dungeness-runtime/docs/runtime-contract.md", names)
+            self.assertIn("dungeness-runtime/docs/quick-start.md", names)
+            self.assertIn("dungeness-runtime/docs/evaluation-events.md", names)
             self.assertNotIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", names)
             self.assertFalse(any(name.startswith("dungeness-runtime/tasks/users/") for name in names))
             self.assertEqual(archive.getmember("dungeness-runtime/dungeness").mode, 0o755)

@@ -225,6 +225,30 @@ class ProgressRailTests(unittest.TestCase):
         self.assertIn("knowledge-base activity", document)
         self.assertIn("drawEvalTrajectory()", document)
 
+    def test_challenge_metrics_reach_markers_and_trajectory(self) -> None:
+        run = self.run_data()
+        metrics = {"throughput": 21, "latency_ms": 2.5, "</script><b>metric": 0}
+        run.evals[0].update(metrics=metrics, duration_ms=100)
+        points = renderer.evaluation_trajectory_points(run)
+        self.assertEqual(points[0]["metrics"], metrics)
+        marker = next(m for m in renderer.build_markers(run) if m.kind == "evaluation")
+        self.assertIn("throughput 21", marker.detail)
+        self.assertIn("latency_ms 2.5", marker.detail)
+        document = renderer.Renderer(run).render()
+        self.assertIn('"metrics":{"throughput":21,"latency_ms":2.5', document)
+        self.assertNotIn("</script><b>metric", document)
+        self.assertNotIn("avg_toffoli", document)
+        self.assertNotIn("peak_qubits", document)
+
+    def test_historical_flat_metrics_remain_visible(self) -> None:
+        run = self.run_data()
+        run.evals[0].update(avg_toffoli=21, peak_qubits=2, sequence=3, duration_ms=10)
+        points = renderer.evaluation_trajectory_points(run)
+        self.assertEqual(points[0]["metrics"], {"avg_toffoli": 21, "peak_qubits": 2})
+        marker = next(m for m in renderer.build_markers(run) if m.kind == "evaluation")
+        self.assertIn("avg_toffoli 21", marker.detail)
+        self.assertIn("peak_qubits 2", marker.detail)
+
     def test_trajectory_falls_back_to_model_usage_cost(self) -> None:
         run = self.run_data()
         run.evals[0].pop("cumulative_usage")

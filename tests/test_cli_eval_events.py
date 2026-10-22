@@ -64,8 +64,7 @@ class EvaluationEventsCommandTests(unittest.TestCase):
                     "status": "ok",
                     "score": 42,
                     "best_score": 42,
-                    "avg_toffoli": 21,
-                    "peak_qubits": 2,
+                    "metrics": {"throughput": 21, "latency_ms": 2},
                     "candidate_sha256": "a" * 64,
                     "submissions_used": 1,
                     "submissions_limit": 200,
@@ -137,10 +136,34 @@ class EvaluationEventsCommandTests(unittest.TestCase):
         self.assertIn("eval 1/200", text)
         self.assertIn("score=42", text)
         self.assertIn("usd=$0.125", text)
-        self.assertIn("toffoli=21", text)
+        self.assertIn("throughput=21", text)
+        self.assertIn("latency_ms=2", text)
+        self.assertNotIn("toffoli=", text)
+        self.assertNotIn("qubits=", text)
+        self.assertNotIn("throughput=", text.split("eval 2/200", 1)[1])
         self.assertIn("eval 2/200", text)
         self.assertIn("invalid", text)
         self.assertNotIn("model.accounting", text)
+
+    def test_legacy_metrics_and_control_characters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text(json.dumps({
+                "source": "evaluator", "kind": "evaluation.completed",
+                "data": {"score": 42, "avg_toffoli": 21, "peak_qubits": 2,
+                         "duration_ms": 123, "sequence": 4,
+                         "label\nwith\x1bcontrol": 7},
+            }) + "\n")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                cli.show_evaluations(argparse.Namespace(target=str(path), jsonl=False))
+        text = output.getvalue()
+        self.assertIn("avg_toffoli=21", text)
+        self.assertIn("peak_qubits=2", text)
+        self.assertNotIn("duration_ms=", text)
+        self.assertNotIn("sequence=", text)
+        self.assertNotIn("\x1b", text)
+        self.assertEqual(len(text.splitlines()), 2)
 
     def test_jsonl_output_preserves_matching_lines(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

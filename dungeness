@@ -48,6 +48,7 @@ RUN_SPEC_FIELDS = {
 LOCAL_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 sys.path.insert(0, str(REPO_ROOT / "src"))
 from dungeness import records
+from dungeness.evaluation_metrics import evaluation_metrics
 from dungeness.records import (
     NAMESPACE_RE, require_namespace, utc_now, read_json, write_json, repository_provenance,
 )
@@ -1510,14 +1511,17 @@ def show_evaluations(args: argparse.Namespace) -> int:
         candidate_text = (
             candidate[:12] if isinstance(candidate, str) and candidate else "-"
         )
+        metrics = "".join(
+            f"{json.dumps(name, ensure_ascii=True)[1:-1]}={format_evaluation_number(value)}  "
+            for name, value in evaluation_metrics(data).items()
+        )
         print(
             f"eval {submission}  {event.get('observed_at', '-')}  "
             f"{data.get('status', '-')}  "
             f"score={format_evaluation_number(data.get('score'))}  "
             f"best={format_evaluation_number(data.get('best_score'))}  "
             f"usd={usd}  "
-            f"toffoli={format_evaluation_number(data.get('avg_toffoli'))}  "
-            f"qubits={format_evaluation_number(data.get('peak_qubits'))}  "
+            f"{metrics}"
             f"candidate={candidate_text}"
         )
     return 0

@@ -209,7 +209,8 @@ Read every canonical evaluation event recorded for a run:
 
 The target may also be a run directory, its `usage` directory, or an explicit
 `usage/events.jsonl` path. The default output is a compact score-and-cost
-trajectory. Use `--jsonl` to emit the complete matching JSON lines unchanged.
+trajectory, including [challenge-defined metrics](evaluation-events.md).
+Use `--jsonl` to emit the complete matching JSON lines unchanged.
 
 ### `experiment`
 

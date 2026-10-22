@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from dungeness.evaluation_metrics import evaluation_metrics
+
 RESEARCH_STATE_MARKER = "## Current Dungeness research-effort state (per-request)"
 TRUNCATE_CHARS = 1500
 REASONING_TRUNCATE_CHARS = 800
@@ -1692,8 +1695,6 @@ def evaluation_trajectory_points(
                 else "unavailable"
             )
 
-        avg_toffoli = score_number(event.get("avg_toffoli"))
-        peak_qubits = event.get("peak_qubits")
         points.append(
             {
                 "index": index,
@@ -1710,13 +1711,7 @@ def evaluation_trajectory_points(
                 "cost_source": cost_source,
                 "status": str(event.get("status") or "unknown"),
                 "score": score,
-                "avg_toffoli": avg_toffoli,
-                "peak_qubits": (
-                    int(peak_qubits)
-                    if isinstance(peak_qubits, (int, float))
-                    and not isinstance(peak_qubits, bool)
-                    else None
-                ),
+                "metrics": evaluation_metrics(event),
             }
         )
     return points
@@ -1917,11 +1912,10 @@ def build_markers(run: RunData) -> list[Marker]:
             label += f" score {fmt_score(score)}"
         if improved:
             label += " (new best)"
-        detail_parts = []
-        if ev.get("avg_toffoli") is not None:
-            detail_parts.append(f"avg_toffoli {fmt_score(ev.get('avg_toffoli'))}")
-        if ev.get("peak_qubits") is not None:
-            detail_parts.append(f"peak_qubits {fmt_int(ev.get('peak_qubits'))}")
+        detail_parts = [
+            f"{name} {fmt_score(value)}"
+            for name, value in evaluation_metrics(ev).items()
+        ]
         cumulative_usage = ev.get("cumulative_usage")
         if isinstance(cumulative_usage, dict):
             detail_parts.append(
@@ -2305,8 +2299,7 @@ function evalHasCost(point){
 }
 function evalTooltip(point){
   var lines=['Evaluation #'+point.index,String(point.status||'unknown'),'cost '+evalUsd(point.cumulative_usd),'score '+Number(point.score).toLocaleString()];
-  if(point.avg_toffoli!==null&&point.avg_toffoli!==undefined)lines.push('avg Toffoli '+Number(point.avg_toffoli).toLocaleString());
-  if(point.peak_qubits!==null&&point.peak_qubits!==undefined)lines.push('peak qubits '+Number(point.peak_qubits).toLocaleString());
+  Object.entries(point.metrics||{}).forEach(function(entry){lines.push(entry[0]+' '+Number(entry[1]).toLocaleString());});
   if(point.cost_source)lines.push('cost source: '+point.cost_source);
   return lines.join(' · ');
 }

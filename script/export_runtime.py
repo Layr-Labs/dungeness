@@ -17,6 +17,7 @@ FILES = {
     "dungeness", "README.md", "DESIGN.md", ".env.example", ".gitignore",
     ".gitattributes", "LICENSE", "LICENSE.md",
     "docs/command-harness.md", "docs/runtime-distribution.md", "docs/cli-reference.md",
+    "docs/quick-start.md", "docs/evaluation-events.md",
     "script/export_runtime.py", "runtime-contract.json",
     "pyproject.toml", "uv.lock",
     "agents/README.md", "tasks/README.md", "run-specs/README.md",
