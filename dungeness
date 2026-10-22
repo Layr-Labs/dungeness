@@ -1775,7 +1775,7 @@ def retained_verifier_memory(task_root: Path) -> str:
     except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
         # Compatibility for old retained renders that predate recorded resource
         # envelopes. This is deliberately only a fallback, not the current
-        # ECDSA default.
+        # task default.
         return "20g"
     if not isinstance(memory_mb, int) or isinstance(memory_mb, bool) or memory_mb <= 0:
         raise SystemExit(f"invalid verifier memory_mb in {task_path}: {memory_mb!r}")

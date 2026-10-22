@@ -3,8 +3,7 @@
 
 The agent never sees test inputs or answers: this ships the candidate to the eval
 sidecar, which scores it and returns a score only. The candidate may be a single
-file (e.g. ecdsa-fail's src/point_add.rs at the earliest commit) or a whole module
-DIRECTORY (src/point_add/ at later commits); this client sends raw bytes for a
+file or a whole DIRECTORY; this client sends raw bytes for a
 file and a tar for a directory, and the matching sidecar handles each. What the
 score means comes from the sidecar's `note`. This client holds no test data and
 does no scoring itself.
@@ -73,7 +72,7 @@ def main() -> None:
         print(json.dumps(result, sort_keys=True))
         return
 
-    # `status` is present when the sidecar builds/runs the candidate (ecdsa-fail);
+    # `status` is present when the sidecar builds/runs the candidate;
     # a non-ok status carries the agent's own build/correctness output in `detail`.
     status = result.get("status")
     if status and status != "ok":

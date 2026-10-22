@@ -32,8 +32,7 @@ class RuntimeDistributionTests(unittest.TestCase):
             "src/dungeness/execution/process.py", "src/dungeness/records.py",
             "agents/README.md", "tasks/README.md", "run-specs/README.md",
             "docs/README.md", "script/README.md", "tools/README.md",
-            "services/gateway/gateway.py", "tasks/projects/dungeness/ecdsa-starter/task.yaml",
-            "run-specs/projects/dungeness/ecdsa-starter.yaml", ".env.example",
+            "services/gateway/gateway.py", ".env.example",
             "runtime-contract.json", "pyproject.toml", "uv.lock",
             "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
             "docs/problem-service.md", "docs/runtime-contract.md",
@@ -47,6 +46,10 @@ class RuntimeDistributionTests(unittest.TestCase):
             "knowledge-bases/users/test/paper.pdf", "knowledge-base-prompts/system/test.yaml",
             "run-specs/users/test/run.yaml",
             "tasks/users/test/task.yaml", "experiments/users/test/result.md",
+            "tasks/projects/dungeness/sample/task.yaml", "problems/sample/problem.yaml",
+            "checkpoints/sample/source.yaml", "verifiers/sample/grade.py",
+            "scaffolds/sample/candidate.py", "run-specs/projects/dungeness/sample.yaml",
+            "tests/fixtures/runtime/tasks/sample/task.yaml",
         ):
             self.write(path, "synthetic-private-data\n")
         self.commit()

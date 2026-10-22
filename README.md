@@ -26,8 +26,7 @@ do not create official Catalyst scores or receipts.
 Prerequisites: Git, uv, uvx, Docker and access to the pinned task source. Linux
 is required for Harbor's clean no-network verification. macOS supports development
 and agent/sidecar runs, but does not establish equivalent final verification.
-The starter uses up to 4 GiB for its agent and 8 GiB for its verifier, plus runtime
-and build overhead.
+The assigned task declares its agent and verifier resource requirements.
 
 ### 1. Configure your workspace and model access
 
@@ -51,23 +50,22 @@ All supported harnesses use this same credential boundary.
 
 ### 2. Prepare a committed run
 
+Install a trusted challenge package containing its task, problem, checkpoint and
+verifier into the corresponding record directories. Dungeness ships the runtime
+and a command-agent example; challenge definitions belong to the challenge owner.
+Catalyst's public CLI prepares these inputs for its local and remote runs.
+
+Write a run spec under `run-specs/users/alice/` selecting the installed task,
+agent, checkpoint, model access and limits. See the
+[run-spec reference](docs/cli-reference.md). Install agent dependencies into its
+image before execution; the research container cannot download them.
+
+Commit the trusted inputs and run spec on your experiment branch:
+
 ```sh
-cp run-specs/projects/dungeness/ecdsa-starter.yaml run-specs/users/alice/ecdsa-starter.yaml
-```
-
-Edit this copy to choose your agent, provider/model, normalized spending cap,
-token cap and time limit. The maintained starter uses a no-model smoke command
-that prints the task. Replace its agent reference with your own
-[command harness](docs/command-harness.md) for research. The example declares
-OpenAI access, a $1 cap and no web access. Agent-owned tools must be installed
-before execution; the research container cannot download dependencies.
-
-Commit the intended inputs before running, on your own experiment branch:
-
-```sh
-git switch -c research/alice-starter
-git add run-specs/users/alice/ecdsa-starter.yaml
-git commit -m "Configure ECDSA starter run"
+git switch -c research/alice-run
+git add tasks/ problems/ checkpoints/ verifiers/ scaffolds/ agents/ run-specs/
+git commit -m "Configure trusted task and run inputs"
 git status --short
 ```
 
@@ -79,8 +77,8 @@ Keep unrelated changes separate from experiment inputs.
 The following command starts model usage under the limits you selected:
 
 ```sh
-./dungeness run run-specs/users/alice/ecdsa-starter.yaml
-./dungeness runs run-specs/users/alice/ecdsa-starter.yaml
+./dungeness run run-specs/users/alice/run.yaml
+./dungeness runs run-specs/users/alice/run.yaml
 ./dungeness evals RUN_ID
 ```
 
@@ -99,9 +97,9 @@ the optional transcript tools and cleanup commands still work on retained local 
 | --- | --- |
 | `dungeness`, [`src/`](src/README.md) | CLI, compiler, records and execution lifecycle |
 | `adapters/`, `services/`, `policies/` | Trusted execution, metering and isolation |
-| `agents/projects/dungeness/`, `tasks/projects/dungeness/` | Command example and starter task |
-| `run-specs/projects/dungeness/` | Small maintained run examples |
-| `verifiers/`, `checkpoints/`, `problems/` | Grading and pinned task identities |
+| `agents/projects/dungeness/` | Generic command-agent example |
+| `tasks/`, `run-specs/` | Operator-installed task definitions and run inputs |
+| `verifiers/`, `checkpoints/`, `problems/`, `scaffolds/` | Trusted challenge assets installed by the caller |
 | `tools/transcripts/` | Optional local transcript viewer; excluded from default runtime bundles |
 | `runs/` | Generated local output; not committed |
 

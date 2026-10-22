@@ -147,13 +147,13 @@ allowed model URLs; they never receive native credentials or a refresh proxy.
 The preferred input is an authored run specification:
 
 ```bash
-./dungeness run ecdsa-starter.yaml
+./dungeness run sample-starter.yaml
 ```
 
 CLI options override values in the YAML:
 
 ```bash
-./dungeness run ecdsa-starter.yaml \
+./dungeness run sample-starter.yaml \
   --max-usd 2 \
   --label purpose=comparison
 ```
@@ -192,7 +192,7 @@ copied into the agent workspace.
 Find every canonical run produced from a run spec:
 
 ```bash
-./dungeness runs ecdsa-starter.yaml
+./dungeness runs sample-starter.yaml
 ```
 
 The result includes status, reasoning effort, score, and run ID. Repeated and
@@ -226,7 +226,7 @@ labels:
   status: planned
 
 relations:
-  task: task:projects/dungeness/ecdsa-starter
+  task: task:projects/dungeness/sample-starter
   claims:
     - claim:users/bx/runtime-effect
 
@@ -235,7 +235,7 @@ design:
   repetitions: 3
 
   controls:
-    task: task:projects/dungeness/ecdsa-starter
+    task: task:projects/dungeness/sample-starter
     model_access:
       models:
         - provider: openai
@@ -258,7 +258,7 @@ design:
     agents:
       - ref: agent:projects/dungeness/command
     checkpoints:
-      - ref: checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
+      - ref: checkpoint:public/examples/sample-challenge/62ae3d00d1e01d7bc640b5163cfea8dabffd8392
 
 run_labels:
   purpose: harness-comparison
@@ -442,7 +442,7 @@ Experiment-generated run-spec IDs already include the experiment and matrix
 cell identity. A run directory such as:
 
 ```text
-ecdsa-harness-sweep-command-c6f6d2c-r1-20260821T190000Z-a1b2c3d4
+sample-harness-sweep-command-c6f6d2c-r1-20260821T190000Z-a1b2c3d4
 ```
 
 can therefore be associated with its run spec and experiment without opening
@@ -479,10 +479,10 @@ their fully qualified form:
 Examples:
 
 ```text
-problem:public/ecdsafail-challenge/ecdsa-fail
-task:projects/dungeness/ecdsa-starter
+problem:public/sample-challenge/sample-problem
+task:projects/dungeness/sample-starter
 agent:projects/dungeness/command
-run-spec:users/bx/ecdsa-starter-1usd
+run-spec:users/bx/sample-starter-1usd
 run:users/bx/<run-id>
 ```
 
@@ -516,8 +516,8 @@ Important record types:
 System manifests additionally use `policy`, `service`, and `adapter`.
 
 Physical directories are organized for humans and do not define identity. For
-example, files under `checkpoints/ecdsafail-challenge/` retain the logical
-namespace `public/github/layr-labs/ecdsafail-challenge`.
+example, files under `checkpoints/sample-challenge/` retain the logical
+namespace `public/examples/sample-challenge`.
 Physical paths conventionally mirror namespaces for human organization, but
 the CLI infers that prefix from the configured default. For example,
 `experiment run runtime-sweep` resolves beneath
@@ -593,11 +593,11 @@ The universal envelope is:
   "published_at": "2026-08-20T21:00:00.000Z",
   "labels": {"purpose": "baseline"},
   "relations": {
-    "task": "task:projects/dungeness/ecdsa-starter",
-    "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
-    "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
+    "task": "task:projects/dungeness/sample-starter",
+    "problem": "problem:public/sample-challenge/sample-problem",
+    "checkpoint": "checkpoint:public/examples/sample-challenge/<commit>",
     "agent": "agent:projects/dungeness/command",
-    "run_spec": "run-spec:users/bx/ecdsa-starter-1usd"
+    "run_spec": "run-spec:users/bx/sample-starter-1usd"
   },
   "data": {}
 }
@@ -652,18 +652,15 @@ adapters/       execution-system manifests and compatibility entry points
 runs/           persistent run records, usage, and Harbor results
 ```
 
-## Current Task
+## Challenge assets
 
-| Task | Candidate | Metric | Direction |
-|---|---|---|---|
-| `ecdsa-fail` | Rust secp256k1 point-add implementation | `avg_toffoli * peak_qubits` | minimize |
+Dungeness ships no benchmark. Operators install trusted tasks, checkpoints,
+scaffolds and verifiers from their challenge package. Examples in this document
+use synthetic record names; they are not runnable bundled challenges. Resource
+limits belong to the installed task and the resolved run configuration.
 
 ## Caveats
 
-- Current module-interface `ecdsa-fail` runs use a 4 GB agent cap and an 8 GB
-  evaluation/verifier cap. The caps are upper bounds, not reservations. The
-  historical single-file checkpoint retains its 20 GB verifier cap because its
-  single-process evaluator was measured near 15 GB.
 - `dungeness verify` reuses the verifier memory limit recorded in the retained
   run. `--memory` remains available as an explicit override.
 - Harbor's clean `no-network` verifier is supported on Linux. On macOS, the

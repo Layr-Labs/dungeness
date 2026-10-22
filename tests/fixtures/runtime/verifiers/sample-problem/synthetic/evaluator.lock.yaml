@@ -1,0 +1,5 @@
+schema_version: 1
+repository:
+  url: https://example.invalid/source.git
+include_paths:
+  - check.txt

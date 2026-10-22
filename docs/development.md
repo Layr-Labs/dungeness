@@ -68,8 +68,8 @@ validation and generic compilation remain in the compiler.
 `scaffolds.py` materializes schema-v2 scaffold manifests using explicit file
 mappings and text edits that must match an expected number of times. It knows
 no language filenames or problem-specific validation stages. Catalyst owns its
-ECDSA scaffold under `src/catalyst/problem-set/ecdsa-fail/` and installs it into
-the disposable runtime. Candidate files and trusted edits remain separate;
+ECDSA scaffold and verifier bundles under `src/catalyst/problem-set/ecdsa-fail/`
+and installs them into the disposable runtime. Candidate files and trusted edits remain separate;
 submitted harnesses cannot choose the manifest or load preparation code.
 See [trusted scaffolds](scaffolds.md).
 
@@ -94,3 +94,7 @@ retired, test explicit rejection rather than silently ignoring its old settings.
 Update exports, documentation links and Catalyst consumer tests with each
 affected boundary. Changes to model credentials, accounting, isolation or
 candidate verification need their own focused validation.
+
+Compiler and record tests use a disposable runtime populated from synthetic
+records under `tests/fixtures/runtime/`. Challenge grader tests live with the
+Catalyst problem assets. No Dungeness check requires a Catalyst checkout.

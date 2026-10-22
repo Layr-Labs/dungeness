@@ -1,7 +1,7 @@
-# Trusted problem verification
+# Trusted verification bundles
 
-Problem-specific evaluator implementations, images and locked dependencies
-live here. They grade candidate artifacts independently of harness claims.
+Operators install challenge-owned verifier images, graders and evaluator locks
+here. Dungeness runs the selected bundle independently of the harness. Catalyst
+ships its ECDSA verifiers in its public problem package.
 
-Start with [ECDSA verification](ecdsa-fail/README.md). Generic execution belongs
-in [`src/dungeness/execution/`](../src/dungeness/execution/).
+Generic execution lives in [`src/dungeness/execution/`](../src/dungeness/execution/).

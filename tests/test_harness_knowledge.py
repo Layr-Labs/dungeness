@@ -20,7 +20,7 @@ class HarnessKnowledgeTests(unittest.TestCase):
                     cli.load_run_spec(str(path))
                 with patch.object(build, "checkout") as checkout:
                     with self.assertRaisesRegex(ValueError, "bundle knowledge"):
-                        build.build_task("ecdsa-fail", "legacy-kb", namespace="users/test", run_spec=str(path))
+                        build.build_task("sample-problem", "legacy-kb", namespace="users/test", run_spec=str(path))
                     checkout.assert_not_called()
 
     def test_current_specs_do_not_require_a_knowledge_manifest(self):

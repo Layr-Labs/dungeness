@@ -20,6 +20,7 @@ FILES = {
     "script/export_runtime.py", "runtime-contract.json",
     "pyproject.toml", "uv.lock",
     "agents/README.md", "tasks/README.md", "run-specs/README.md",
+    "checkpoints/README.md", "problems/README.md", "verifiers/README.md", "scaffolds/README.md",
     "docs/README.md", "script/README.md", "tools/README.md",
     "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
     "docs/problem-service.md", "docs/runtime-contract.md", "docs/development.md", "docs/scaffolds.md",
@@ -30,10 +31,7 @@ TRANSCRIPT_TOOLS = {
 }
 PREFIXES = (
     "src/", "adapters/", "agents/common/", "agents/projects/dungeness/",
-    "services/", "policies/", "checkpoints/", "problems/", "verifiers/",
-    "scaffolds/",
-    "tasks/projects/dungeness/",
-    "run-specs/projects/dungeness/", "assets/",
+    "services/", "policies/", "assets/",
 )
 
 
@@ -60,8 +58,6 @@ def export_runtime(repository: Path, revision: str, output: Path, *,
     required = {
         "dungeness", "src/dungeness/compiler.py",
         "adapters/harbor/command_agent.py", "services/gateway/gateway.py",
-        "tasks/projects/dungeness/ecdsa-starter/task.yaml",
-        "run-specs/projects/dungeness/ecdsa-starter.yaml",
     }
     if not required <= set(paths):
         raise ValueError(f"Revision lacks runtime files: {', '.join(sorted(required - set(paths)))}")

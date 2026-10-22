@@ -1,7 +1,9 @@
 # Runtime distribution and research history
 
 The maintained runtime consists of the CLI/compiler, trusted gateway and
-services, Harbor adapters, shared agent/task definitions and policies.
+services, Harbor adapters, the generic command-agent example and policies.
+Challenge-owned tasks, verifiers, checkpoints and scaffolds must be installed
+separately; the default source bundle does not contain a benchmark.
 Personal run specs, knowledge bases, experiment reports and recorded outputs
 are research material, not installation dependencies.
 

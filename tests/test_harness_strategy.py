@@ -38,7 +38,7 @@ class HarnessStrategyTests(unittest.TestCase):
                         cli.load_run_spec(str(path))
                     with patch.object(build, "checkout") as checkout:
                         with self.assertRaises(ValueError):
-                            build.build_task("ecdsa-starter", "invalid-strategy",
+                            build.build_task("sample-starter", "invalid-strategy",
                                              agent_id="command", checkpoint="62ae3d0",
                                              namespace="users/bx", run_spec=str(path))
                         checkout.assert_not_called()
@@ -57,17 +57,17 @@ class HarnessStrategyTests(unittest.TestCase):
             path = Path(directory) / "run.yaml"
             write_run_spec(path)
             with self.assertRaisesRegex(ValueError, "split evaluator has been retired"):
-                build.build_task("ecdsa-starter", "invalid-split",
+                build.build_task("sample-starter", "invalid-split",
                                  agent_id="command", checkpoint="62ae3d0", namespace="users/bx", run_spec=str(path))
             checkout.assert_not_called()
 
     def test_runtime_discloses_tools_and_limits_without_selecting_strategy(self):
         notice = (
-            build.build_workspace_notice("src/point_add", evaluation_available=True)
-            + build.build_eval_notice("src/point_add", "minimize")
+            build.build_workspace_notice("solution", evaluation_available=True)
+            + build.build_eval_notice("solution", "minimize")
             + build.build_timebox_notice(900)
         )
-        for required in ("src/point_add", "evaluate", "900 seconds", "run-status",
+        for required in ("solution", "evaluate", "900 seconds", "run-status",
                          "final verifier", "lower is better"):
             self.assertIn(required, notice)
         for retired in ("Within the first", "Before changing", "research-worker",

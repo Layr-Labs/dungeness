@@ -1,22 +1,22 @@
 schema_version: 1
 type: task
 namespace: projects/dungeness
-id: ecdsa-starter
+id: sample-starter
 instruction: statement.txt
 
 relations:
-  problem: problem:public/ecdsafail-challenge/ecdsa-fail
+  problem: problem:public/sample-challenge/sample-problem
 
 workspace:
   include:
     - .
 
 interfaces:
-  point-add-module-v1:
+  sample-directory-v1:
     candidate:
       allowed_paths:
-        - src/point_add
-    verifier: ecdsa-fail/benchmark-sh
+        - solution
+    verifier: sample-problem/synthetic
 
 policies:
   network: policies/network/mediated.yaml

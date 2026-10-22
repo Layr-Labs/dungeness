@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import importlib.machinery
 import importlib.util
 import os
@@ -9,14 +8,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from adapters.harbor import build
+from runtime_fixture import ROOT as FIXTURE_ROOT
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_cli():
-    path = REPOSITORY_ROOT / "dungeness"
+    path = FIXTURE_ROOT / "dungeness"
     loader = importlib.machinery.SourceFileLoader("dungeness_scaffold_cli", str(path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -29,7 +26,7 @@ class ScaffoldInitializationTests(unittest.TestCase):
         cli = load_cli()
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "run.yaml"
-            path.write_text((REPOSITORY_ROOT / "run-specs/projects/dungeness/ecdsa-starter.yaml")
+            path.write_text((FIXTURE_ROOT / "run-specs/projects/dungeness/sample-starter.yaml")
                             .read_text().replace("mode: checkpoint", "mode: scaffold"))
             args = cli.run_arguments_for_spec(path, namespace="users/test", env_file=None, labels=[])
             with patch.dict(os.environ, {
@@ -39,7 +36,7 @@ class ScaffoldInitializationTests(unittest.TestCase):
                 resolved = cli.resolve_run_spec_arguments(args)
             self.assertTrue(resolved.scaffold_start)
             self.assertFalse(resolved.fresh_start)
-            self.assertEqual(resolved.run_spec_ref, "run-spec:users/test/ecdsa-starter")
+            self.assertEqual(resolved.run_spec_ref, "run-spec:users/test/sample-starter")
             _, run_spec = cli.load_run_spec(resolved.target)
             self.assertEqual(run_spec["web_search"], {"mode": "disabled"})
 

@@ -4,6 +4,9 @@ This document defines Dungeness's record model, naming conventions, execution
 lifecycle, and persistence rules. See [README.md](README.md) for the
 copy-paste quick start and command reference.
 
+Examples below use synthetic records. Operators install their own trusted
+challenge records and verifier assets before running them.
+
 ## Design Goals
 
 Dungeness should:
@@ -47,7 +50,7 @@ First-class records use a common envelope:
 schema_version: 1
 type: run
 namespace: users/bx
-id: ecdsa-fail-62ae3d00-command-20260820T120000Z-a1b2c3d4
+id: sample-problem-62ae3d00-command-20260820T120000Z-a1b2c3d4
 
 created_at: "2026-08-20T12:00:00.000Z"
 published_at: "2026-08-20T13:00:00.000Z"
@@ -104,9 +107,9 @@ For example:
 
 ```text
 agent:projects/dungeness/command
-task:projects/dungeness/ecdsa-starter
-checkpoint:public/github/layr-labs/ecdsafail-challenge/62ae3d00...
-run-spec:users/bx/ecdsa-fail-command-1usd
+task:projects/dungeness/sample-starter
+checkpoint:public/examples/sample-challenge/62ae3d00...
+run-spec:users/bx/sample-problem-command-1usd
 run:users/bx/<run-id>
 ```
 
@@ -143,8 +146,8 @@ Current namespace conventions are:
 Examples:
 
 ```text
-problem:public/ecdsafail-challenge/ecdsa-fail
-task:projects/dungeness/ecdsa-starter
+problem:public/sample-challenge/sample-problem
+task:projects/dungeness/sample-starter
 agent:projects/dungeness/command
 policy:system/dungeness/gateway-only
 ```
@@ -192,14 +195,14 @@ without changing project-maintained definitions under
 For example:
 
 ```text
-checkpoints/ecdsafail-challenge/<commit>.yaml
+checkpoints/sample-challenge/<commit>.yaml
 ```
 
 may contain:
 
 ```yaml
 type: checkpoint
-namespace: public/github/layr-labs/ecdsafail-challenge
+namespace: public/examples/sample-challenge
 id: <commit>
 ```
 
@@ -234,16 +237,16 @@ language, verifier, or instruction:
 
 ```yaml
 type: problem
-namespace: public/ecdsafail-challenge
-id: ecdsa-fail
+namespace: public/sample-challenge
+id: sample-problem
 
 labels:
-  domain: quantum-resource-estimation
+  domain: synthetic-example
 
 data:
-  objective: minimize the reversible quantum resource cost of secp256k1 point addition
+  objective: minimize the measured cost of a valid candidate
   metric:
-    name: ecdsafail_score
+    name: sample_score
     direction: minimize
 ```
 
@@ -264,16 +267,16 @@ A task defines how Dungeness makes a problem executable:
 ```yaml
 type: task
 namespace: users/bx
-id: ecdsa-fail
+id: sample-problem
 
 relations:
-  problem: problem:public/ecdsafail-challenge/ecdsa-fail
+  problem: problem:public/sample-challenge/sample-problem
 
 interfaces:
-  point-add-module-v1:
+  sample-directory-v1:
     candidate:
-      allowed_paths: [src/point_add]
-    verifier: ecdsa-fail/benchmark-sh
+      allowed_paths: [solution]
+    verifier: sample-problem/synthetic
 ```
 
 A task does not own a checkpoint. A run binds a task to a compatible public
@@ -285,7 +288,7 @@ A checkpoint records facts about one immutable source state:
 
 ```yaml
 type: checkpoint
-namespace: public/github/layr-labs/ecdsafail-challenge
+namespace: public/examples/sample-challenge
 id: 62ae3d00d1e01d7bc640b5163cfea8dabffd8392
 
 created_at: null
@@ -296,14 +299,14 @@ labels:
 
 data:
   repository:
-    url: https://github.com/Layr-Labs/ecdsafail-challenge.git
+    url: https://example.invalid/source.git
     commit: 62ae3d00d1e01d7bc640b5163cfea8dabffd8392
   history:
     anchor: c6f6d2c7f50353259241e296458afb0e651e6c37
     distance_from_anchor: 868
     counting_method: git-rev-list-ancestry-path-count
   web_cutoff: "2026-05-28T23:59:59.999Z"
-  interface: point-add-module-v1
+  interface: sample-directory-v1
 ```
 
 The commit SHA provides stable identity. `history.distance_from_anchor`
@@ -343,11 +346,11 @@ A run spec is a reviewable input for one execution:
 schema_version: 1
 type: run-spec
 namespace: users/bx
-id: ecdsa-fail-command-1usd
+id: sample-problem-command-1usd
 
-task: task:projects/dungeness/ecdsa-starter
+task: task:projects/dungeness/sample-starter
 agent: agent:projects/dungeness/command
-checkpoint: checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>
+checkpoint: checkpoint:public/examples/sample-challenge/<commit>
 
 budget:
   max_usd: 1
@@ -401,12 +404,12 @@ new run ID and record:
   "schema_version": 1,
   "type": "run",
   "namespace": "users/alice",
-  "id": "ecdsa-fail-command-1usd-20260820T120000Z-a1b2c3d4",
+  "id": "sample-problem-command-1usd-20260820T120000Z-a1b2c3d4",
   "relations": {
-    "run_spec": "run-spec:users/bx/ecdsa-fail-command-1usd",
-    "task": "task:projects/dungeness/ecdsa-starter",
-    "problem": "problem:public/ecdsafail-challenge/ecdsa-fail",
-    "checkpoint": "checkpoint:public/github/layr-labs/ecdsafail-challenge/<commit>",
+    "run_spec": "run-spec:users/bx/sample-problem-command-1usd",
+    "task": "task:projects/dungeness/sample-starter",
+    "problem": "problem:public/sample-challenge/sample-problem",
+    "checkpoint": "checkpoint:public/examples/sample-challenge/<commit>",
     "agent": "agent:projects/dungeness/command"
   },
   "data": {
@@ -543,7 +546,7 @@ Labels should describe facts useful for filtering:
 ```yaml
 labels:
   purpose: baseline
-  domain: quantum-resource-estimation
+  domain: synthetic-example
 ```
 
 Do not encode a type, namespace, or security decision as a label. A label is
@@ -553,7 +556,7 @@ Relations use qualified references:
 
 ```yaml
 relations:
-  problem: problem:public/ecdsafail-challenge/ecdsa-fail
+  problem: problem:public/sample-challenge/sample-problem
 ```
 
 Use `created_at` for creation time and `published_at` for discoverability when
@@ -570,7 +573,7 @@ time view.
 The preferred command is:
 
 ```bash
-./dungeness run ecdsa-fail-command.yaml
+./dungeness run sample-problem-command.yaml
 ```
 
 Dungeness then:
@@ -590,7 +593,7 @@ Dungeness then:
 The flag-only form is supported for ad hoc runs:
 
 ```bash
-./dungeness run projects/dungeness/ecdsa-starter \
+./dungeness run projects/dungeness/sample-starter \
   --agent command \
   --checkpoint 62ae3d0 \
   --max-usd 1

@@ -19,7 +19,7 @@ import unittest
 from unittest.mock import patch
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+from runtime_fixture import ROOT as REPOSITORY_ROOT
 
 
 def load_module(name: str, path: Path):
@@ -61,8 +61,8 @@ def write_run_spec(path: Path, *, namespace: str = "users/bx") -> None:
                 "schema_version: 1",
                 "type: run-spec",
                 f"namespace: {namespace}",
-                "id: ecdsa-fail-command-1usd",
-                "task: task:projects/dungeness/ecdsa-starter",
+                "id: sample-problem-command-1usd",
+                "task: task:projects/dungeness/sample-starter",
                 "agent: agent:projects/dungeness/command",
                 "model_access:",
                 "  models:",
@@ -72,7 +72,7 @@ def write_run_spec(path: Path, *, namespace: str = "users/bx") -> None:
                 "      api: openai-responses",
                 "      name_format: request",
                 "checkpoint: checkpoint:public/github/layr-labs/"
-                "ecdsafail-challenge/"
+                "sample-challenge/"
                 "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
                 "budget:",
                 "  max_usd: 1",
@@ -105,7 +105,7 @@ class CompilerCompatibilityTests(unittest.TestCase):
             REPOSITORY_ROOT / "src/dungeness/compiler.py",
         )
         agent = fixture_agent(build)
-        task = REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter"
+        task = REPOSITORY_ROOT / "tasks/projects/dungeness/sample-starter"
         self.assertEqual(
             build.build_harbor_job("compatibility-test", agent, task),
             compiler.build_harbor_job(
@@ -147,7 +147,7 @@ class CompilerCompatibilityTests(unittest.TestCase):
         outputs = []
         arguments = [
             "build.py",
-            "ecdsa-fail",
+            "sample-problem",
             "--namespace",
             "users/bx",
             "--checkpoint",
@@ -371,12 +371,12 @@ class RecordModelTests(unittest.TestCase):
                 keep_render=None,
             )
             resolved = cli.resolve_run_spec_arguments(args)
-            self.assertEqual(resolved.task, "ecdsa-starter")
+            self.assertEqual(resolved.task, "sample-starter")
             self.assertEqual(resolved.agent, "command")
             self.assertIsNone(resolved.namespace)
             self.assertEqual(
                 resolved.run_spec_ref,
-                "run-spec:users/bx/ecdsa-fail-command-1usd",
+                "run-spec:users/bx/sample-problem-command-1usd",
             )
             self.assertTrue(
                 resolved.checkpoint.endswith(
@@ -472,16 +472,16 @@ class RecordModelTests(unittest.TestCase):
                 resolved = cli.resolve_run_spec_arguments(args)
             self.assertEqual(
                 resolved.run_spec_ref,
-                "run-spec:users/alice/ecdsa-fail-command-1usd",
+                "run-spec:users/alice/sample-problem-command-1usd",
             )
 
     def test_default_run_id_uses_run_spec_identity(self) -> None:
         args = cli.argparse.Namespace(
             run_spec_ref=(
                 "run-spec:users/bx/"
-                "ecdsa-effort-sweep-codex-subscription-c6f6d2c-low"
+                "sample-effort-sweep-codex-subscription-c6f6d2c-low"
             ),
-            task="ecdsa-fail",
+            task="sample-problem",
             checkpoint="c6f6d2c7f50353259241e296458afb0e651e6c37",
             agent="codex-subscription",
         )
@@ -489,7 +489,7 @@ class RecordModelTests(unittest.TestCase):
         self.assertRegex(
             run_id,
             (
-                r"^ecdsa-effort-sweep-codex-subscription-c6f6d2c-low-"
+                r"^sample-effort-sweep-codex-subscription-c6f6d2c-low-"
                 r"\d{8}T\d{6}Z-[0-9a-f]{8}$"
             ),
         )
@@ -512,7 +512,7 @@ class RecordModelTests(unittest.TestCase):
         local_id = "experiment-" + ("long-section-" * 10) + "xhigh"
         args = cli.argparse.Namespace(
             run_spec_ref=f"run-spec:users/bx/{local_id}",
-            task="ecdsa-fail",
+            task="sample-problem",
             checkpoint="c6f6d2c7f50353259241e296458afb0e651e6c37",
             agent="codex-subscription",
         )
@@ -608,10 +608,10 @@ class RecordModelTests(unittest.TestCase):
                         "type: run-spec",
                         "namespace: users/bx",
                         "id: wrong-agent-scope",
-                        "task: task:projects/dungeness/ecdsa-starter",
+                        "task: task:projects/dungeness/sample-starter",
                         "agent: agent:users/bx/command",
                         "checkpoint: checkpoint:public/github/layr-labs/"
-                        "ecdsafail-challenge/"
+                        "sample-challenge/"
                         "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
                     )
                 )
@@ -641,7 +641,7 @@ class RecordModelTests(unittest.TestCase):
         )
         self.assertEqual(
             checkpoint["namespace"],
-            "public/github/layr-labs/ecdsafail-challenge",
+            "public/github/layr-labs/sample-challenge",
         )
         self.assertEqual(
             checkpoint["id"],
@@ -649,32 +649,32 @@ class RecordModelTests(unittest.TestCase):
         )
         self.assertEqual(
             checkpoint["ref"],
-            "checkpoint:public/github/layr-labs/ecdsafail-challenge/"
+            "checkpoint:public/github/layr-labs/sample-challenge/"
             "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
         )
         self.assertEqual(
             checkpoint["path"].relative_to(REPOSITORY_ROOT).parent.as_posix(),
-            "checkpoints/ecdsafail-challenge",
+            "checkpoints/sample-challenge",
         )
 
     def test_problem_is_semantic_and_publicly_scoped(self) -> None:
         problem = build.resolve_problem(
-            "problem:public/ecdsafail-challenge/ecdsa-fail"
+            "problem:public/sample-challenge/sample-problem"
         )
-        self.assertEqual(problem["id"], "ecdsa-fail")
-        self.assertEqual(problem["namespace"], "public/ecdsafail-challenge")
+        self.assertEqual(problem["id"], "sample-problem")
+        self.assertEqual(problem["namespace"], "public/sample-challenge")
         self.assertEqual(
             problem["ref"],
-            "problem:public/ecdsafail-challenge/ecdsa-fail",
+            "problem:public/sample-challenge/sample-problem",
         )
         self.assertEqual(
             problem["data"]["metric"]["name"],
-            "ecdsafail_score",
+            "sample_score",
         )
 
     def test_task_binds_problem_checkpoint_interface_and_verifier(self) -> None:
         task = build.load_yaml(
-            REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter/task.yaml"
+            REPOSITORY_ROOT / "tasks/projects/dungeness/sample-starter/task.yaml"
         )
         problem = build.resolve_problem(task["relations"]["problem"])
         checkpoint = build.resolve_checkpoint("62ae3d0")
@@ -683,11 +683,11 @@ class RecordModelTests(unittest.TestCase):
 
         self.assertEqual(
             problem["ref"],
-            "problem:public/ecdsafail-challenge/ecdsa-fail",
+            "problem:public/sample-challenge/sample-problem",
         )
         self.assertEqual(
             interface["candidate"]["allowed_paths"],
-            ["src/point_add"],
+            ["solution"],
         )
         self.assertTrue((verifier / "evaluator.lock.yaml").is_file())
 
@@ -899,7 +899,7 @@ class RecordModelTests(unittest.TestCase):
             self.assertNotIn("relations", manifest)
             self.assertIn(
                 checkpoint["interface"],
-                {"point-add-file-v1", "point-add-module-v1"},
+                {"sample-file-v1", "sample-directory-v1"},
             )
             self.assertNotIn("verifier", manifest["data"])
         with self.assertRaisesRegex(ValueError, "commit prefix"):
@@ -907,15 +907,15 @@ class RecordModelTests(unittest.TestCase):
 
     def test_harbor_metadata_uses_checkpoint_identity(self) -> None:
         checkpoint_id = (
-            "checkpoint:public/github/layr-labs/ecdsafail-challenge/"
+            "checkpoint:public/github/layr-labs/sample-challenge/"
             "62ae3d00d1e01d7bc640b5163cfea8dabffd8392"
         )
         task = build.build_task_toml(
-            "ecdsa-fail",
+            "sample-problem",
             "users/bx",
             "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
             "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
-            [PurePosixPath("src/point_add")],
+            [PurePosixPath("solution")],
             "command",
             "test",
             ["test"],
@@ -972,26 +972,26 @@ class RecordModelTests(unittest.TestCase):
         agent = fixture_agent(build)
         self.assertIsNotNone(agent)
         checkpoint = build.resolve_checkpoint(
-            "public/github/layr-labs/ecdsafail-challenge/62ae3d0",
+            "public/github/layr-labs/sample-challenge/62ae3d0",
         )
         record = build.build_run_record(
             run_id="test-run",
             run_namespace="users/bx",
             labels={"purpose": "test"},
-            task_id="ecdsa-starter",
+            task_id="sample-starter",
             task_namespace="projects/dungeness",
-            task_path=REPOSITORY_ROOT / "tasks/projects/dungeness/ecdsa-starter/task.yaml",
+            task_path=REPOSITORY_ROOT / "tasks/projects/dungeness/sample-starter/task.yaml",
             problem_spec=build.resolve_problem(
-                "problem:public/ecdsafail-challenge/ecdsa-fail"
+                "problem:public/sample-challenge/sample-problem"
             ),
             checkpoint_spec=checkpoint,
-            interface_id="point-add-module-v1",
-            verifier_ref="ecdsa-fail/benchmark-sh",
+            interface_id="sample-directory-v1",
+            verifier_ref="sample-problem/synthetic",
             fresh_start=False,
             start_url=checkpoint["url"],
             start_commit=checkpoint["commit"],
             web_cutoff=checkpoint["web_cutoff"],
-            candidate_paths=[PurePosixPath("src/point_add")],
+            candidate_paths=[PurePosixPath("solution")],
             evaluator_url=checkpoint["url"],
             evaluator_commit=checkpoint["commit"],
             agent_id="command",
@@ -1001,7 +1001,7 @@ class RecordModelTests(unittest.TestCase):
             ),
             agent=agent,
             agent_options={},
-            metric_name="ecdsafail_score",
+            metric_name="sample_score",
             direction="minimize",
             budget_policy={},
             max_usd=1.0,
@@ -1020,11 +1020,11 @@ class RecordModelTests(unittest.TestCase):
         self.assertEqual(record["labels"], {"purpose": "test"})
         self.assertEqual(
             record["relations"]["task"],
-            "task:projects/dungeness/ecdsa-starter",
+            "task:projects/dungeness/sample-starter",
         )
         self.assertEqual(
             record["relations"]["problem"],
-            "problem:public/ecdsafail-challenge/ecdsa-fail",
+            "problem:public/sample-challenge/sample-problem",
         )
         self.assertEqual(
             record["relations"]["agent"],
@@ -1032,7 +1032,7 @@ class RecordModelTests(unittest.TestCase):
         )
         self.assertEqual(
             record["relations"]["checkpoint"],
-            "checkpoint:public/github/layr-labs/ecdsafail-challenge/"
+            "checkpoint:public/github/layr-labs/sample-challenge/"
             "62ae3d00d1e01d7bc640b5163cfea8dabffd8392",
         )
         self.assertEqual(
@@ -1045,11 +1045,11 @@ class RecordModelTests(unittest.TestCase):
         )
         self.assertEqual(
             record["data"]["task"]["interface"],
-            "point-add-module-v1",
+            "sample-directory-v1",
         )
         self.assertEqual(
             record["data"]["task"]["verifier"],
-            "ecdsa-fail/benchmark-sh",
+            "sample-problem/synthetic",
         )
         self.assertNotIn("verifier", record["data"]["checkpoint"])
         self.assertEqual(record["data"]["initialization"]["mode"], "checkpoint")
@@ -1139,7 +1139,7 @@ class RecordModelTests(unittest.TestCase):
             with patch.object(build, "checkout") as checkout:
                 with self.assertRaisesRegex(ValueError, "research_state has been removed"):
                     build.build_task(
-                        "ecdsa-starter", "legacy-spec", namespace="users/bx",
+                        "sample-starter", "legacy-spec", namespace="users/bx",
                         run_spec=str(path),
                     )
                 checkout.assert_not_called()
@@ -1155,13 +1155,13 @@ class RecordModelTests(unittest.TestCase):
             def fake_checkout(_url: str, _commit: str, destination: Path) -> None:
                 destination.mkdir(parents=True)
                 if destination.name == "start":
-                    candidate = destination / "src/point_add"
+                    candidate = destination / "solution"
                     candidate.mkdir(parents=True)
                     (candidate / "mod.rs").write_text("", encoding="utf-8")
                     return
                 evaluator_lock = build.load_yaml(
                     REPOSITORY_ROOT
-                    / "verifiers/ecdsa-fail/benchmark-sh/evaluator.lock.yaml"
+                    / "verifiers/sample-problem/synthetic/evaluator.lock.yaml"
                 )
                 for relative in evaluator_lock["include_paths"]:
                     path = destination / relative
@@ -1181,8 +1181,8 @@ class RecordModelTests(unittest.TestCase):
                                 ],
                                 "file": build.file_snapshot(
                                     REPOSITORY_ROOT
-                                    / "verifiers/ecdsa-fail/benchmark-sh/"
-                                    "low-memory-ops-streaming.patch"
+                                    / "verifiers/sample-problem/synthetic/"
+                                    "fixture.patch"
                                 ),
                             }
                         ],
@@ -1199,7 +1199,7 @@ class RecordModelTests(unittest.TestCase):
                     ),
                 ):
                     rendered_path = build.build_task(
-                        "ecdsa-starter",
+                        "sample-starter",
                         "configuration-test",
                         agent_id="command",
                         checkpoint="62ae3d0",
@@ -1231,7 +1231,7 @@ class RecordModelTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     record["relations"]["run_spec"],
-                    "run-spec:users/bx/ecdsa-fail-command-1usd",
+                    "run-spec:users/bx/sample-problem-command-1usd",
                 )
                 self.assertEqual(
                     configuration["resolved"]["resources"]["agent"]["memory_mb"],
@@ -1366,7 +1366,7 @@ class RecordModelTests(unittest.TestCase):
                         "generated": {},
                     },
                     "metric": {
-                        "name": "ecdsafail_score",
+                        "name": "sample_score",
                         "direction": "minimize",
                     },
                 },
@@ -1465,7 +1465,7 @@ class RecordModelTests(unittest.TestCase):
             self.assertIsNone(record["data"]["usage"]["billed_usd"])
             self.assertEqual(record["data"]["usage"]["accounting_method"], "gateway")
             self.assertEqual(
-                record["data"]["metrics"]["ecdsafail_score"], 42.0
+                record["data"]["metrics"]["sample_score"], 42.0
             )
             self.assertIsNotNone(record["created_at"])
             self.assertIsNotNone(record["published_at"])
@@ -1556,7 +1556,7 @@ class RecordModelTests(unittest.TestCase):
                         "generated": {},
                     },
                     "metric": {
-                        "name": "ecdsafail_score",
+                        "name": "sample_score",
                         "direction": "minimize",
                     },
                 },
@@ -1696,15 +1696,15 @@ class RecordModelTests(unittest.TestCase):
                             "labels": {"reasoning_effort": effort},
                             "relations": {
                                 "run_spec": (
-                                    "run-spec:users/bx/ecdsa-fail-command-1usd"
+                                    "run-spec:users/bx/sample-problem-command-1usd"
                                 )
                             },
                             "data": {
                                 "run_id": run_id,
                                 "status": status,
-                                "metric": {"name": "ecdsafail_score"},
+                                "metric": {"name": "sample_score"},
                                 "metrics": (
-                                    {"ecdsafail_score": score}
+                                    {"sample_score": score}
                                     if score is not None
                                     else {}
                                 ),
@@ -1818,17 +1818,17 @@ class RecordModelTests(unittest.TestCase):
             root = Path(directory)
             dockerfile = root / "Dockerfile"
             dockerfile.write_text(
-                "ENV CANDIDATE_PATH=/workspace/repo/src/point_add \\\n"
+                "ENV CANDIDATE_PATH=/workspace/repo/solution \\\n"
                 "    SCORE_PATH=/logs/verifier/score.json\n",
                 encoding="utf-8",
             )
             relative = cli.verifier_candidate_path(dockerfile)
-            self.assertEqual(relative.as_posix(), "src/point_add")
+            self.assertEqual(relative.as_posix(), "solution")
 
             run_dir = root / "runs/test-run"
             artifact = (
                 run_dir
-                / "harbor/job/trial/artifacts/workspace/repo/src/point_add"
+                / "harbor/job/trial/artifacts/workspace/repo/solution"
             )
             artifact.mkdir(parents=True)
             task_root = run_dir / "debug/harbor-task"

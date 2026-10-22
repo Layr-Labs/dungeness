@@ -77,7 +77,7 @@ gateway allowlist, budget and concurrency envelope.
 
 `evaluate --json PATH` prints the existing sidecar's structured response. Each
 call uploads candidate bytes; workers need not overwrite one shared path.
-ECDSA verification is serialized while model work may proceed concurrently.
+Evaluation concurrency is controlled by the challenge-owned sidecar.
 The evaluator and gateway logs are the authoritative evidence, not harness logs.
 
 The runner terminates remaining process-group children on exit and forwards

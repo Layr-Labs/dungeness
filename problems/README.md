@@ -1,7 +1,6 @@
 # Problem identities
 
-Trusted problem records define the metric and source identity used by tasks and
-checkpoints. Grading implementations live in [`verifiers/`](../verifiers/);
-research knowledge belongs to the assigned resources or harness.
+Operators install trusted problem identities and metrics here. Challenge owners
+supply their own definitions and verifiers; Dungeness has no built-in benchmark.
 
 See [the record model](../DESIGN.md).

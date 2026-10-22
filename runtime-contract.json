@@ -7,7 +7,6 @@
     "priced-model-requests-v1",
     "command-exit-status-v1",
     "rejected-request-accounting-v1",
-    "ecdsa-readable-verifier-results-v1",
     "assigned-problem-service-v1",
     "optional-model-token-limit-v1",
     "declarative-scaffolds-v2"
