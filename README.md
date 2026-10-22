@@ -15,13 +15,13 @@ provides the shared execution machinery.
 
 ## Use through Catalyst
 
-For a local integration check, use Git, uv, Docker and a clean Dungeness checkout
-at `../dungeness`. From your Catalyst checkout, with your harness and its
-`evaluation.json` configured:
+For a local integration check, install Git, uv and Docker. Replace the paths below
+with your Catalyst checkout, configured harness and clean Dungeness checkout.
+The directories can live anywhere; the harness must include `evaluation.json`.
 
 ```sh
-uv run catalyst local run ./my-harness \
-  --dungeness ../dungeness --prepare-only
+uv run --project /path/to/catalyst catalyst local run /path/to/harness \
+  --dungeness /path/to/dungeness --prepare-only
 ```
 
 This builds the harness and prepares the runtime without model calls. Catalyst
