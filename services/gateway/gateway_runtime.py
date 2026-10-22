@@ -60,6 +60,21 @@ EXA_CONTENTS_URL = "https://api.exa.ai/contents"
 BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
+def transport_failure_category(error: BaseException) -> str:
+    """Fixed diagnostic labels only; exception messages can contain URLs or secrets."""
+    for kind, label in (
+        (asyncio.CancelledError, "gateway_cancelled"),
+        (httpx.ReadTimeout, "upstream_read_timeout"),
+        (httpx.ConnectTimeout, "upstream_connect_timeout"),
+        (httpx.TimeoutException, "upstream_transport_timeout"),
+        (httpx.RemoteProtocolError, "upstream_protocol_error"),
+        (httpx.NetworkError, "upstream_connection_error"),
+    ):
+        if isinstance(error, kind):
+            return label
+    return "transport_failure_unknown"
+
+
 def rejected_before_generation(
     body: bytes, content_type: str, http_status: int | None,
 ) -> bool:
@@ -441,6 +456,8 @@ class Gateway:
         request_id = request.state.request_id
         finalized = False
         upstream_status = None
+        failure_category = None
+        failure_stage = None
 
         def finalize(response_body: bytes, content_type: str) -> None:
             """Account for one model request exactly once, including streams."""
@@ -568,6 +585,8 @@ class Gateway:
                     "http_status": upstream_status,
                     "duration_ms": duration_ms,
                     "status": status,
+                    **({"failure_category": failure_category, "failure_stage": failure_stage}
+                       if failure_category else {}),
                 },
             )
             METRICS.increment(
@@ -686,13 +705,15 @@ class Gateway:
                 relay: asyncio.Queue[bytes | None] = asyncio.Queue()
 
                 async def pump() -> None:
-                    nonlocal status
+                    nonlocal status, failure_category, failure_stage
                     try:
                         async for chunk in upstream.aiter_raw():
                             response_body.extend(chunk)
                             relay.put_nowait(chunk)
-                    except BaseException:
+                    except BaseException as error:
                         status = "stream_interrupted"
+                        failure_category = transport_failure_category(error)
+                        failure_stage = "upstream_stream"
                     finally:
                         relay.put_nowait(None)
                         await upstream.aclose()
@@ -719,8 +740,10 @@ class Gateway:
 
             try:
                 response_body.extend(await upstream.aread())
-            except BaseException:
+            except BaseException as error:
                 status = "stream_interrupted"
+                failure_category = transport_failure_category(error)
+                failure_stage = "upstream_response_body"
                 raise
             finally:
                 await upstream.aclose()
@@ -730,6 +753,9 @@ class Gateway:
                 status_code=upstream.status_code,
                 headers=response_headers,
             )
-        except BaseException:
+        except BaseException as error:
+            if failure_category is None:
+                failure_category = transport_failure_category(error)
+                failure_stage = "upstream_request"
             finalize(bytes(response_body), content_type)
             raise

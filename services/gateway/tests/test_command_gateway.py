@@ -15,6 +15,44 @@ from gateway_runtime import Gateway
 
 
 class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupted_stream_reports_safe_category_and_preserves_accounting_rules(self):
+        for has_usage in (False, True):
+            with self.subTest(has_usage=has_usage), tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+                "TESTBED_USAGE_DIR": temp, "DUNGENESS_ALLOWED_MODELS": '[["openai","gpt-5.6-sol"]]',
+                "MAX_MODEL_REQUESTS": "20", "MAX_MODEL_TOKENS": "100000",
+            }):
+                runtime = Gateway()
+                await runtime.client.aclose()
+                class Stream(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        yield b'data: {"type":"response.in_progress"}\n\n'
+                        if has_usage:
+                            yield b'data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":10}}}\n\n'
+                        raise httpx.RemoteProtocolError("private-token-canary at https://private-upstream")
+
+                runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, stream=Stream(), headers={"content-type":"text/event-stream"})))
+                try:
+                    with patch.object(gateway, "gateway", runtime):
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app),
+                                base_url="http://gateway") as client:
+                            payload = {"model":"gpt-5.6-sol", "input":"fixture", "stream":True}
+                            response = await client.post("/model/openai/v1/responses", json=payload)
+                            self.assertEqual(response.status_code,200)
+                            next_response = await client.post("/model/openai/v1/responses", json=payload)
+                            self.assertEqual(next_response.status_code, 200 if has_usage else 429)
+                    contents = (Path(temp)/"events.jsonl").read_text()
+                    receipts = [e['data'] for e in map(json.loads,contents.splitlines()) if e['kind']=='model.accounting']
+                    self.assertEqual(receipts[0]['failure_category'],'upstream_protocol_error')
+                    self.assertEqual(receipts[0]['failure_stage'],'upstream_stream')
+                    self.assertEqual(receipts[0]['status'],'stream_interrupted')
+                    self.assertEqual(receipts[0]['accounting_method'],'gateway' if has_usage else 'unavailable')
+                    self.assertEqual(runtime.ledger.model_accounting_incomplete,not has_usage)
+                    self.assertNotIn('private-token-canary',contents)
+                    self.assertNotIn('private-upstream',contents)
+                finally:
+                    await runtime.client.aclose()
+
     async def test_explicit_input_rejection_settles_zero_and_allows_corrected_request(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             "TESTBED_USAGE_DIR": temp, "DUNGENESS_ALLOWED_MODELS": '[["openai","gpt-5.6-sol"]]',

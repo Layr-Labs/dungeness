@@ -5,5 +5,6 @@ Start with the [local operator guide](quick-start.md) for setup, [development](d
 [the CLI reference](cli-reference.md) for commands.
 
 [Evaluation events](evaluation-events.md) describes challenge-defined metrics.
+[Model failures](model-failures.md) explains transport diagnostics and incomplete usage.
 [Runtime compatibility](runtime-contract.md) and
 [distribution](runtime-distribution.md) describe integration and release contracts.
