@@ -28,4 +28,4 @@ gateway = [
     "typing-extensions==4.16.0",
     "uvicorn==0.35.0",
 ]
-harbor = ["harbor==0.18.0", "litellm==1.86.2"]
+harbor = ["harbor==0.18.0", "litellm==1.88.6"]

@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["litellm==1.86.2"]
+# dependencies = ["litellm==1.88.6"]
 # ///
 """Estimate a run's model cost in USD from its captured token usage.
 

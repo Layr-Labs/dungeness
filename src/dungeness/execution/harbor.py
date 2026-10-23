@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 HARBOR_VERSION = "0.18.0"
-LITELLM_VERSION = "1.86.2"
+LITELLM_VERSION = "1.88.6"
 
 # Preserve the existing control-plane credential filtering policy. Credential
 # selection and model request authentication belong to the gateway, not Harbor.
