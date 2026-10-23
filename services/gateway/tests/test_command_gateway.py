@@ -48,6 +48,9 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(receipts[0]['status'],'stream_interrupted')
                     self.assertEqual(receipts[0]['accounting_method'],'gateway' if has_usage else 'unavailable')
                     self.assertEqual(runtime.ledger.model_accounting_incomplete,not has_usage)
+                    summary = json.loads((Path(temp)/'summary.json').read_text())
+                    self.assertEqual(summary['usage']['model_accounting_state'],
+                                     'settled' if has_usage else 'incomplete')
                     self.assertNotIn('private-token-canary',contents)
                     self.assertNotIn('private-upstream',contents)
                 finally:

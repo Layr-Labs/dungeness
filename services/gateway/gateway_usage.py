@@ -286,6 +286,8 @@ class UsageLedger:
                 else round(self.billed_usd_spent, 6)
             ),
             "accounting_method": "gateway",
+            "model_accounting_state": ("incomplete" if self.model_accounting_incomplete
+                                       else "pending" if self.model_inflight else "settled"),
         }
 
     def _write_summary_locked(self) -> None:
@@ -500,12 +502,14 @@ class UsageLedger:
                 raise BudgetExceeded("model credits are reserved or exhausted")
             self.reserve("model_requests")
             self.model_inflight[request_id] = min(available, self.request_reservation_usd)
+            self._write_summary_locked()
 
     def finish_model(self, request_id: str, *, accounted: bool) -> None:
         with self.lock:
             self.model_inflight.pop(request_id, None)
             if not accounted:
                 self.model_accounting_incomplete = True
+            self._write_summary_locked()
 
     def add_model_tokens(self, total: int) -> None:
         with self.lock:
