@@ -24,7 +24,7 @@ gateway = [
     "httpcore==1.0.9",
     "httpx==0.28.1",
     "idna==3.18",
-    "starlette==0.47.3",
+    "starlette==1.9.0",
     "typing-extensions==4.16.0",
     "uvicorn==0.35.0",
 ]
