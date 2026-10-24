@@ -1440,6 +1440,13 @@ def build_compose(
             "main": main_service,
             "gateway": {
                 "build": {"context": "./gateway"},
+                "read_only": True,
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
+                "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777"],
+                "pids_limit": 128,
+                "mem_limit": "1g",
+                "cpus": 2,
                 "environment": {
                     "TESTBED_RUN_ID": run_id,
                     "MAX_SEARCHES": str(budget["web"]["searches"]),
@@ -1515,6 +1522,7 @@ def build_compose(
         providers = {model["provider"] for model in models}
         gateway_environment = document["services"]["gateway"]["environment"]
         # No ambient provider can be used, even if a key was accidentally present.
+        gateway_environment["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"] = "1"
         gateway_environment["DUNGENESS_ALLOWED_MODELS"] = json.dumps(
             [[model["provider"], model["request_model"]] for model in models])
         gateway_environment["DUNGENESS_MAX_PARALLEL_REQUESTS"] = str(

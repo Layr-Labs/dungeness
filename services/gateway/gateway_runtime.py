@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 import httpx
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
@@ -30,6 +31,7 @@ from gateway_models import (
     provider_auth_headers,
     usage_extractor,
 )
+from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
 import gateway_pricing
 from gateway_pricing import (
     CACHED_TOKEN_WEIGHT,
@@ -64,6 +66,7 @@ def transport_failure_category(error: BaseException) -> str:
     """Fixed diagnostic labels only; exception messages can contain URLs or secrets."""
     for kind, label in (
         (asyncio.CancelledError, "gateway_cancelled"),
+        (ResponseLimitExceeded, "upstream_response_too_large"),
         (httpx.ReadTimeout, "upstream_read_timeout"),
         (httpx.ConnectTimeout, "upstream_connect_timeout"),
         (httpx.TimeoutException, "upstream_transport_timeout"),
@@ -109,7 +112,14 @@ class Gateway:
         # exact search-time decision rather than authorizing a raw URL forever.
         self.allowed_fetch_targets: dict[str, dict[str, Any]] = {}
         allowed = os.environ.get("DUNGENESS_ALLOWED_MODELS")
-        self.allowed_models = {tuple(pair) for pair in json.loads(allowed)} if allowed else None
+        pairs = json.loads(allowed) if allowed else None
+        if pairs is not None and (not isinstance(pairs, list) or not pairs or any(
+                not isinstance(pair, list) or len(pair) != 2
+                or not all(isinstance(item, str) and item for item in pair) for pair in pairs)):
+            raise ValueError("Invalid model allowlist")
+        if os.environ.get("DUNGENESS_REQUIRE_MODEL_ALLOWLIST") == "1" and not pairs:
+            raise ValueError("Hosted command gateway requires an explicit model allowlist")
+        self.allowed_models = {tuple(pair) for pair in pairs} if pairs else None
         # OpenRouter can force account-default plugins even when a request
         # disables them. This assertion belongs to the trusted operator, never
         # a run spec or agent request. Leave the route closed until configured.
@@ -118,7 +128,7 @@ class Gateway:
         # request. Responses are streamed to the agent as they arrive, while a
         # bounded overall timeout still prevents abandoned provider calls.
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(600.0, connect=30.0)
+            timeout=httpx.Timeout(600.0, connect=30.0), trust_env=False, follow_redirects=False
         )
 
 
@@ -616,7 +626,23 @@ class Gateway:
             if self.allowed_models is not None:
                 self.ledger.finish_model(request_id, accounted=bool(usage))
 
+        private_values = set()
+        auth_headers = provider_auth_headers(provider, private_values=private_values)
+        response_filter = SecretFilter(private_values)
         response_body = bytearray()
+        received_bytes = 0
+
+        def accept_chunk(chunk, *, final=False):
+            nonlocal received_bytes
+            received_bytes += len(chunk)
+            if received_bytes > MAX_RESPONSE_BYTES:
+                raise ResponseLimitExceeded()
+            safe = response_filter.feed(chunk, final=final)
+            if len(response_body) + len(safe) > MAX_RESPONSE_BYTES:
+                raise ResponseLimitExceeded()
+            response_body.extend(safe)
+            return safe
+
         content_type = "application/json"
         try:
             model = bounded_model_name(payload.get("model"))
@@ -631,7 +657,9 @@ class Gateway:
             # Record how this agent composed the prompt (profile always; full
             # body only under TESTBED_CAPTURE_PROMPTS) -- lets us measure
             # cross-agent presentation bias from what actually hit the model.
-            capture_prompt(request_id, provider, normalized, model, body, payload)
+            safe_body = SecretFilter(private_values).feed(body, final=True)
+            safe_payload = json.loads(safe_body)
+            capture_prompt(request_id, provider, normalized, model, safe_body, safe_payload)
             self.ledger.timeline(
                 {
                     "kind": "model.request",
@@ -640,7 +668,7 @@ class Gateway:
                     "operation": normalized,
                     "model": model,
                     "prompt_profile": prompt_profile(payload, body),
-                    "request": payload,
+                    "request": safe_payload,
                 }
             )
             upstream_base = os.environ.get(
@@ -672,14 +700,16 @@ class Gateway:
                         if name in request.headers
                     },
                     # Trusted credentials win over any allowed client metadata.
-                    **provider_auth_headers(provider),
+                    **auth_headers,
                 },
                 params=request.query_params,
                 content=body,
             )
             upstream = await self.client.send(upstream_request, stream=True)
             upstream_status = upstream.status_code
-            content_type = upstream.headers.get("content-type", "application/json")
+            # Do not reflect arbitrary upstream headers, even Content-Type.
+            raw_type = upstream.headers.get("content-type", "application/json").partition(";")[0].strip().lower()
+            content_type = raw_type if raw_type in {"application/json", "text/event-stream"} else "text/plain"
             status = "success" if upstream.is_success else "provider_error"
             # ChatGPT's Codex backend currently returns Responses SSE framing
             # with application/json. The request's stream flag is the reliable
@@ -693,53 +723,90 @@ class Gateway:
                 content_type = "text/event-stream"
             response_headers = {"content-type": content_type}
 
-            if "text/event-stream" in content_type:
-                # Decouple upstream draining from the client connection. A pump
-                # task reads the WHOLE upstream so the provider's final usage
-                # event is captured for accounting even if the agent disconnects
-                # early (common with Codex -- `stream_interrupted`). Chunks are
-                # relayed to the agent via an unbounded queue; if the agent goes
-                # away, the pump keeps draining upstream to completion and then
-                # finalizes. Without this, an interrupted request logs zero tokens
-                # yet the provider still billed it.
-                relay: asyncio.Queue[bytes | None] = asyncio.Queue()
+            if "text/event-stream" in content_type and upstream.is_success:
+                # Bounded relay with backpressure. On disconnect, drain upstream
+                # for accounting but discard client output rather than buffering it.
+                relay: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=16)
+                disconnected = asyncio.Event()
+
+                async def relay_chunk(chunk):
+                    if disconnected.is_set():
+                        return
+                    put = asyncio.create_task(relay.put(chunk))
+                    gone = asyncio.create_task(disconnected.wait())
+                    try:
+                        done, _ = await asyncio.wait((put, gone), timeout=30,
+                                                     return_when=asyncio.FIRST_COMPLETED)
+                        if not done:
+                            # A stalled consumer must not pin a provider pump.
+                            # End its stream and continue draining for accounting.
+                            disconnected.set()
+                            while not relay.empty():
+                                relay.get_nowait()
+                            relay.put_nowait(None)
+                    finally:
+                        for pending in (put, gone):
+                            if not pending.done(): pending.cancel()
+                        await asyncio.gather(put, gone, return_exceptions=True)
 
                 async def pump() -> None:
                     nonlocal status, failure_category, failure_stage
                     try:
-                        async for chunk in upstream.aiter_raw():
-                            response_body.extend(chunk)
-                            relay.put_nowait(chunk)
+                        async for chunk in upstream.aiter_bytes():
+                            # Bound individual queue entries as well as total
+                            # retained response bytes.
+                            for offset in range(0, len(chunk), 64 * 1024):
+                                safe = accept_chunk(chunk[offset:offset + 64 * 1024])
+                                if safe:
+                                    await relay_chunk(safe)
+                        tail = accept_chunk(b"", final=True)
+                        if tail:
+                            await relay_chunk(tail)
                     except BaseException as error:
                         status = "stream_interrupted"
                         failure_category = transport_failure_category(error)
                         failure_stage = "upstream_stream"
                     finally:
-                        relay.put_nowait(None)
-                        await upstream.aclose()
-                        finalize(bytes(response_body), content_type)
+                        # Preserve a complete final usage event even if the
+                        # transport fails after delivering it. Never treat a
+                        # missing event as zero usage.
+                        try:
+                            if failure_category != "upstream_response_too_large":
+                                accept_chunk(b"", final=True)
+                        except ResponseLimitExceeded:
+                            status = "stream_interrupted"
+                            failure_category = "upstream_response_too_large"
+                            failure_stage = "upstream_stream"
+                        try:
+                            await upstream.aclose()
+                        finally:
+                            try:
+                                finalize(bytes(response_body), content_type)
+                            finally:
+                                await relay_chunk(None)
 
                 pump_task = asyncio.ensure_future(pump())
                 BACKGROUND_TASKS.add(pump_task)
                 pump_task.add_done_callback(BACKGROUND_TASKS.discard)
 
                 async def stream_chunks() -> AsyncIterator[bytes]:
-                    # The agent may stop reading (disconnect); that cancels this
-                    # generator but NOT the pump, which finishes accounting.
-                    while True:
-                        chunk = await relay.get()
-                        if chunk is None:
-                            break
-                        yield chunk
+                    try:
+                        while True:
+                            chunk = await relay.get()
+                            if chunk is None:
+                                break
+                            yield chunk
+                    finally:
+                        disconnected.set()
 
-                return StreamingResponse(
-                    stream_chunks(),
-                    status_code=upstream.status_code,
-                    headers=response_headers,
-                )
+                return StreamingResponse(stream_chunks(), status_code=upstream.status_code,
+                                         headers=response_headers,
+                                         background=BackgroundTask(disconnected.set))
 
             try:
-                response_body.extend(await upstream.aread())
+                async for chunk in upstream.aiter_bytes():
+                    accept_chunk(chunk)
+                accept_chunk(b"", final=True)
             except BaseException as error:
                 status = "stream_interrupted"
                 failure_category = transport_failure_category(error)
@@ -748,14 +815,16 @@ class Gateway:
             finally:
                 await upstream.aclose()
             finalize(bytes(response_body), content_type)
-            return Response(
-                bytes(response_body),
-                status_code=upstream.status_code,
-                headers=response_headers,
-            )
+            if not upstream.is_success:
+                return safe_provider_error(upstream.status_code, request_id)
+            return Response(bytes(response_body), status_code=upstream.status_code,
+                            headers=response_headers)
         except BaseException as error:
             if failure_category is None:
                 failure_category = transport_failure_category(error)
                 failure_stage = "upstream_request"
             finalize(bytes(response_body), content_type)
+            if isinstance(error, ResponseLimitExceeded):
+                return JSONResponse({"error": {"code": "upstream_response_too_large",
+                    "request_id": request_id, "retryable": False}}, status_code=502)
             raise

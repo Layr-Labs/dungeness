@@ -24,3 +24,11 @@ jobs:
       - name: Harbor adapter contract
         if: matrix.python == '3.12'
         run: make check-harbor
+
+  gateway-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gateway isolation with synthetic credentials
+        run: python3 script/check-gateway-isolation.py

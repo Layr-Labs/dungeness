@@ -40,7 +40,7 @@ def _value(spec, document):
     return spec.get("prefix", "") + value
 
 
-def authentication_headers(recipe):
+def authentication_headers(recipe, *, private_values=None):
     """Render a trusted recipe from environment, credential file, or fixed values."""
     selected = None
     document = {}
@@ -58,6 +58,13 @@ def authentication_headers(recipe):
                 document = json.loads(raw)
                 if not isinstance(document, dict):
                     raise ValueError
+                if private_values is not None:
+                    def collect(value):
+                        if isinstance(value, str) and value:
+                            private_values.add(value)
+                        elif isinstance(value, dict):
+                            for item in value.values(): collect(item)
+                    collect(document)
             except (OSError, ValueError, UnicodeError):
                 raise ValueError("Gateway credential file is unavailable or invalid.") from None
         selected = source
@@ -77,4 +84,6 @@ def authentication_headers(recipe):
         if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
             raise ValueError("Invalid configured authentication header.")
         headers[name] = _value(spec, document)
+        if private_values is not None and ("path" in spec or ("env" in spec and "default" not in spec)):
+            private_values.add(_value({**spec, "prefix": ""}, document))
     return headers

@@ -6,6 +6,7 @@ code live in the ``gateway_*`` modules beside this file.
 """
 
 from __future__ import annotations
+from gateway_security import RequestBoundsMiddleware
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -597,6 +598,7 @@ app = Starlette(
     lifespan=lifespan,
 )
 app.add_middleware(RequestInstrumentationMiddleware)
+app.add_middleware(RequestBoundsMiddleware)
 
 
 if __name__ == "__main__":

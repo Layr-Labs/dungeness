@@ -153,6 +153,14 @@ class CommandHarnessTests(unittest.TestCase):
                 command_policy={"models": [{**MODEL,
                     "base_url": "http://gateway:8080/model/chatgpt/v1"}]}))
         gateway_service = compose["services"]["gateway"]
+        self.assertTrue(gateway_service["read_only"])
+        self.assertEqual(gateway_service["cap_drop"], ["ALL"])
+        self.assertIn("no-new-privileges:true", gateway_service["security_opt"])
+        self.assertEqual(gateway_service["mem_limit"], "1g")
+        self.assertEqual(gateway_service["pids_limit"], 128)
+        self.assertTrue(any(mount.startswith("/tmp:") for mount in gateway_service["tmpfs"]))
+        self.assertEqual(gateway_service["environment"]["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"], "1")
+        self.assertNotIn("read_only", compose["services"]["main"])
         self.assertEqual(gateway_service["user"], "1234:5678")
         self.assertIn("${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:"
                       "/run/dungeness/auth.json:ro", gateway_service["volumes"])

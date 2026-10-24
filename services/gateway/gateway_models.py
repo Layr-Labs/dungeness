@@ -549,13 +549,13 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
 }
 
 
-def provider_auth_headers(provider: str) -> dict[str, str]:
+def provider_auth_headers(provider: str, *, private_values=None) -> dict[str, str]:
     """Resolve upstream authentication without ever logging credential values."""
 
     cfg = MODEL_PROVIDERS.get(provider)
     if cfg is None:
         raise ValueError("Unknown authentication provider.")
-    return authentication_headers(cfg["authentication"])
+    return authentication_headers(cfg["authentication"], private_values=private_values)
 
 
 def configured_provider_config(name, profile):

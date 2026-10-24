@@ -55,7 +55,12 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
                             payload = {'model': name, 'messages': [{'role': 'user', 'content': 'solve'}]}
                             first = await client.post(route, json=payload)
                             self.assertEqual(first.status_code, status)
-                            self.assertEqual(first.content, body)
+                            if status >= 400:
+                                self.assertEqual(first.json()['error']['upstream_status'], status)
+                                self.assertTrue(first.json()['error']['request_id'])
+                                self.assertNotIn(rejection.decode(), first.text)
+                            else:
+                                self.assertEqual(first.content, body)
                             self.assertEqual(runtime.ledger.model_inflight, {})
                             second = await client.post(route, json=payload)
                             self.assertEqual(second.status_code, 200 if recoverable else 429, second.text)
