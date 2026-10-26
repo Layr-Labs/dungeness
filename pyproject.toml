@@ -3,7 +3,7 @@ name = "dungeness"
 version = "0.1.0"
 description = "Isolated research harness execution and trusted evaluation evidence"
 requires-python = ">=3.11"
-dependencies = ["PyYAML==6.0.3"]
+dependencies = ["PyYAML==6.0.3", "python-dotenv==1.2.4"]
 
 # Runtime assets still require a source checkout. This manifest establishes a
 # locked developer environment; it does not claim wheel installation support.

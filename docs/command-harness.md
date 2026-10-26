@@ -6,7 +6,9 @@ import, and cannot select a built-in agent. This is the only supported execution
 Research strategy, memory and completion decisions belong to the harness.
 The former `research_state` controller is removed; old specs that request it
 fail explicitly, as do run-spec evaluation and web-research strategy profiles.
-Configure only `web_search.mode` (`disabled` or `optional`) as an access control.
+External web search and fetch are disabled. Omitted settings and legacy
+`web_search.mode: optional` both resolve to `disabled`; assigned problem resources
+remain available through the internal problem service.
 Historical experiments must use their original revision.
 
 An agent descriptor has the ordinary identity fields, `execution_mode: installed`,

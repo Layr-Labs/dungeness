@@ -15,6 +15,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -107,7 +108,8 @@ def build_disabled_web_notice() -> str:
 ## Network isolation
 
 Direct internet access, web search, and web fetch are unavailable in this
-run. The harness can use the sanitized workspace and its own bundled files.
+run. The harness can use the sanitized workspace, its own bundled files, and
+assigned problem resources when provided through the internal problem service.
 """
 
 
@@ -1249,10 +1251,8 @@ def apply_web_search_mode_to_budget(
     budget: dict[str, Any],
     web_search_mode: str,
 ) -> dict[str, Any]:
-    """Return the effective budget after enforcing disabled web access."""
+    """External web access is disabled regardless of legacy requested budgets."""
 
-    if web_search_mode != "disabled":
-        return budget
     return {
         **budget,
         "web": {
@@ -1360,7 +1360,6 @@ def build_compose(
 ) -> str:
     """Build the per-run agent/gateway topology consumed by Harbor Docker."""
 
-    cutoff = web["historical_cutoff"]
     resolved_run_dir = (run_dir or (RUNS_ROOT / run_id)).resolve()
     usage_mount = f"{resolved_run_dir / 'usage'}:/var/lib/testbed/usage"
     main_depends: dict[str, Any] = {"gateway": {"condition": "service_healthy"}}
@@ -1418,12 +1417,6 @@ def build_compose(
     usd_env: dict[str, str] = {}
     if max_usd is not None:
         usd_env["MAX_MODEL_USD"] = str(max_usd)
-    web_budget = budget["web"]
-    exa_secret_env = (
-        {"EXA_API_KEY": "${EXA_API_KEY:?EXA_API_KEY is required}"}
-        if web_budget["searches"] > 0 or web_budget["fetches"] > 0
-        else {}
-    )
     main_service: dict[str, Any] = {
         "depends_on": main_depends,
         "environment": main_environment,
@@ -1440,6 +1433,9 @@ def build_compose(
             "main": main_service,
             "gateway": {
                 "build": {"context": "./gateway"},
+                # The host and trusted gateway own the private accounting bind.
+                # This applies to every provider, not only file-based logins.
+                "user": f"{os.geteuid()}:{os.getegid()}",
                 "read_only": True,
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
@@ -1449,13 +1445,10 @@ def build_compose(
                 "cpus": 2,
                 "environment": {
                     "TESTBED_RUN_ID": run_id,
-                    "MAX_SEARCHES": str(budget["web"]["searches"]),
-                    "MAX_FETCHES": str(budget["web"]["fetches"]),
+                    "MAX_SEARCHES": "0",
+                    "MAX_FETCHES": "0",
                     "MAX_MODEL_REQUESTS": str(budget["model"]["requests"]),
                     "MAX_MODEL_TOKENS": str(budget["model"].get("total_tokens") or ""),
-                    "EXA_MAX_RESULTS": str(web["search"]["max_results"]),
-                    "EXA_END_PUBLISHED_DATE": cutoff["end_published_date"],
-                    **exa_secret_env,
                     **provider_secret_env,
                     **usd_env,
                     # Trusted operator assertion; never supplied by the run
@@ -1549,10 +1542,6 @@ def build_compose(
                 if profile['credential_kind'] == 'session-token':
                     gateway_environment[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
         if "openai-chatgpt" in providers:
-            # Run the trusted gateway as the invoking host user so a private
-            # 0600 credential remains readable through its read-only bind mount.
-            # The submitted agent receives neither this mount nor the credential.
-            document["services"]["gateway"]["user"] = f"{os.geteuid()}:{os.getegid()}"
             gateway_environment["DUNGENESS_CHATGPT_AUTH_FILE"] = "/run/dungeness/auth.json"
             document["services"]["gateway"]["volumes"].append(
                 "${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:/run/dungeness/auth.json:ro")
@@ -1604,6 +1593,25 @@ def build_compose(
         if dev_scorer.get("memory_mb"):
             sidecar_service["mem_limit"] = f"{dev_scorer['memory_mb']}m"
         document["services"]["dev-scorer"] = sidecar_service
+    # Keep credential *names* in the trusted render, never their values in
+    # Docker Config.Env. The launcher resolves these into a private bind file.
+    gateway = document["services"]["gateway"]
+    credential_names = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"}
+    for profile in CONFIGURED_PROVIDERS.values():
+        credential_names.add(profile["credential_env"])
+        credential_names.add(profile["credential_env"] + "_EXPIRES_AT")
+        credential_names.update(profile.get("credential_headers", {}).values())
+    credential_sources = {}
+    for name in sorted(credential_names & gateway["environment"].keys()):
+        expression = gateway["environment"].pop(name)
+        credential_sources[name] = expression[2:].split(":", 1)[0]
+    gateway["x-dungeness-credential-env"] = credential_sources
+    gateway["environment"]["DUNGENESS_CREDENTIALS_FILE"] = "/run/dungeness/credentials.json"
+    gateway["volumes"].append({
+        "type": "bind", "source": "${DUNGENESS_CREDENTIALS_FILE:?Launch with dungeness run}",
+        "target": "/run/dungeness/credentials.json", "read_only": True,
+        "bind": {"create_host_path": False},
+    })
     return yaml.safe_dump(document, sort_keys=False)
 
 
@@ -2386,10 +2394,21 @@ def build_task(
             encoding="utf-8",
         )
         usage_directory = resolved_run_dir / "usage"
-        usage_directory.mkdir(parents=True, exist_ok=True)
-        # The gateway runs as UID 10001. The host-created bind directory must be
-        # writable by that UID; it is never mounted into the untrusted agent.
-        usage_directory.chmod(0o777)
+        usage_directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+        if usage_directory.is_symlink():
+            raise ValueError("Usage directory must not be a symlink")
+        usage_directory.chmod(0o700)
+        # Pre-create as the invoking UID so a root scorer's fallback append
+        # cannot create a root-owned ledger that the gateway cannot update.
+        fd = os.open(usage_directory / "events.jsonl",
+                     os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("Event ledger must be a regular file without hard links")
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
 
         checkout(evaluator_url, evaluator_commit, evaluator_checkout)
         applied_evaluator_patches = apply_evaluator_patches(

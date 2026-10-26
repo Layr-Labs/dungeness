@@ -5,6 +5,7 @@ This layer owns orchestration, not record schemas, CLI arguments or model policy
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import shutil
@@ -13,8 +14,9 @@ import tempfile
 from typing import Protocol
 
 from . import environments
+from .credentials import gateway_credentials
 from .harbor import harbor_launch_environment, launch_command, validate_command_job
-from .process import stream_command
+from .process import stream_command, termination_as_interrupt
 
 
 class StartRecord(Protocol):
@@ -59,6 +61,7 @@ def dispose_render(
     return retained_path
 
 
+@termination_as_interrupt()
 def execute(
     *, repository_root: Path, render_command: list[str], run_id: str,
     run_dir: Path, environment_file: str, keep_render: bool, keep_images: bool,
@@ -71,6 +74,7 @@ def execute(
     record_path: Path | None = None
     final_status = "failed"
     failure: str | None = None
+    credentials = ExitStack()
     try:
         print(">> rendering temporary run task", flush=True)
         rendered_text = stream_command(render_command, cwd=repository_root)
@@ -106,7 +110,9 @@ def execute(
         for key, value in control_plane_env.items():
             print(f">> exporting {key}={value} to the Harbor control plane", flush=True)
         print(f">> executing run from {job_path}", flush=True)
-        stream_command(launch_command(job_path, environment_file), cwd=repository_root, env=environment)
+        environment, safe_env_file = credentials.enter_context(gateway_credentials(
+            rendered_path, repository_root / environment_file, environment))
+        stream_command(launch_command(job_path, safe_env_file), cwd=repository_root, env=environment)
         final_status = "completed"
     except KeyboardInterrupt:
         final_status = "cancelled"
@@ -122,6 +128,12 @@ def execute(
         except Exception as error:
             cleanup_error = error
             print(f">> warning: could not tear down run environments: {error}", file=sys.stderr)
+        finally:
+            try:
+                credentials.close()
+            except Exception as error:
+                cleanup_error = cleanup_error or error
+                print(f">> warning: could not remove staged credentials: {error}", file=sys.stderr)
         if record_path is not None:
             try:
                 finalize_record(

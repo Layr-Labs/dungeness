@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SECRET = 'synthetic-isolation-access-token-0123456789'
 ID_TOKEN = 'synthetic-isolation-id-token-0123456789'
 ACCOUNT = 'synthetic-isolation-account-id-0123456789'
+API_KEYS = {name + '_API_KEY': 'synthetic-' + name.lower() + '-key-0123456789'
+            for name in ('OPENAI', 'ANTHROPIC', 'OPENROUTER')}
 
 
 def main():
@@ -41,6 +43,8 @@ def main():
         auth = root / 'auth.json'
         auth.write_text(json.dumps({'tokens': {'access_token': SECRET,
             'account_id': ACCOUNT, 'id_token': ID_TOKEN}})); auth.chmod(0o600)
+        credentials = root / 'credentials.json'
+        credentials.write_text(json.dumps(API_KEYS)); credentials.chmod(0o600)
         mock = root / 'mock.py'
         mock.write_text('''from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json, threading
@@ -55,8 +59,10 @@ class Handler(BaseHTTPRequestHandler):
   self.end_headers(); self.wfile.write(body)
  def do_POST(self):
   self.rfile.read(int(self.headers.get('content-length','0')))
-  assert self.headers['authorization'] == 'Bearer '+SECRET
-  body=json.dumps({'output_text':SECRET+' '+ID_TOKEN+' '+ACCOUNT,
+  access=self.headers.get('authorization','').removeprefix('Bearer ') or self.headers.get('x-api-key')
+  assert access in [SECRET,*API_KEYS.values()]
+  echo=SECRET+' '+ID_TOKEN+' '+ACCOUNT if access==SECRET else access
+  body=json.dumps({'output_text':echo,
                    'usage':{'input_tokens':100,'output_tokens':10}}).encode()
   self.send_response(200); self.send_header('Content-Type','application/json')
   self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -65,7 +71,7 @@ ThreadingHTTPServer(('0.0.0.0',8081),Handler).serve_forever()
 ''')
         task={'schema_version':1,'attachments':[{'name':'fixture.bin','bytes':2*1024*1024,
               'sha256':hashlib.sha256(b'x'*(2*1024*1024)).hexdigest(),'media_type':'application/octet-stream'}]}
-        mock.write_text('TASK='+repr(task)+'\n'+'SECRET='+repr(SECRET)+'\nID_TOKEN='+repr(ID_TOKEN)+'\nACCOUNT='+repr(ACCOUNT)+'\n'+mock.read_text())
+        mock.write_text('API_KEYS='+repr(API_KEYS)+'\nTASK='+repr(task)+'\n'+'SECRET='+repr(SECRET)+'\nID_TOKEN='+repr(ID_TOKEN)+'\nACCOUNT='+repr(ACCOUNT)+'\n'+mock.read_text())
         try:
             run('build', '-q', '-t', tag, str(ROOT / 'services/gateway'))
             run('network', 'create', '--internal', tag, stdout=subprocess.DEVNULL)
@@ -75,18 +81,29 @@ ThreadingHTTPServer(('0.0.0.0',8081),Handler).serve_forever()
             env = {'TESTBED_RUN_ID': 'synthetic-isolation', 'TESTBED_USAGE_DIR':'/var/lib/testbed/usage',
                    'MAX_SEARCHES':'0','MAX_FETCHES':'0','MAX_MODEL_REQUESTS':'5',
                    'MAX_MODEL_TOKENS':'10000','MAX_MODEL_USD':'1',
-                   'EXA_END_PUBLISHED_DATE':'2026-10-23T00:00:00Z',
                    'DUNGENESS_TASK_SHA256':hashlib.sha256(json.dumps(task,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
                    'DUNGENESS_REQUIRE_MODEL_ALLOWLIST':'1',
-                   'DUNGENESS_ALLOWED_MODELS':'[["openai-chatgpt","gpt-6-astra"]]',
+                   'DUNGENESS_ALLOWED_MODELS':json.dumps([['openai-chatgpt','gpt-6-astra'],
+                       ['openai','gpt-6-astra'], ['anthropic','claude-opus-5'],
+                       ['openrouter','openai/gpt-5.6-sol']]),
+                   'DUNGENESS_OPENROUTER_INFERENCE_ONLY':'1',
+                   'DUNGENESS_CREDENTIALS_FILE':'/run/dungeness/credentials.json',
+                   'OPENAI_UPSTREAM_BASE_URL':'http://mock:8081/v1',
+                   'ANTHROPIC_UPSTREAM_BASE_URL':'http://mock:8081/v1',
+                   'OPENROUTER_UPSTREAM_BASE_URL':'http://mock:8081/v1',
                    'DUNGENESS_CHATGPT_AUTH_FILE':'/run/dungeness/auth.json',
                    'CHATGPT_UPSTREAM_BASE_URL':'http://mock:8081/v1'}
             command = ['run','-d','--name',names[1],'--network',tag,*hardening,
                        '--user',f'{os.getuid()}:{os.getgid()}',
                        '--mount',f'type=bind,src={usage},dst=/var/lib/testbed/usage',
-                       '--mount',f'type=bind,src={auth},dst=/run/dungeness/auth.json,readonly']
+                       '--mount',f'type=bind,src={auth},dst=/run/dungeness/auth.json,readonly',
+                       '--mount',f'type=bind,src={credentials},dst=/run/dungeness/credentials.json,readonly']
             for key,value in env.items(): command += ['-e',key+'='+value]
             run(*command,tag,stdout=subprocess.DEVNULL)
+            inspection=json.loads(run('inspect',names[1],capture_output=True).stdout)[0]
+            config_env=json.dumps(inspection['Config']['Env'])
+            for value in (SECRET,ID_TOKEN,ACCOUNT,*API_KEYS.values()): assert value not in config_env
+            for name in API_KEYS: assert not any(v.startswith(name+'=') for v in inspection['Config']['Env'])
             # Query from inside the container, avoiding any public port exposure.
             request_code = '''import json,urllib.request
 r=urllib.request.Request('http://localhost:8080/model/chatgpt/v1/responses',
@@ -94,9 +111,27 @@ r=urllib.request.Request('http://localhost:8080/model/chatgpt/v1/responses',
  headers={'Content-Type':'application/json'})
 body=urllib.request.urlopen(r).read().decode()
 assert body.count('[REDACTED]')==3,body
+for route,model in [('openai/v1/responses','gpt-6-astra'),
+                    ('anthropic/v1/messages','claude-opus-5'),
+                    ('openrouter/v1/chat/completions','openai/gpt-5.6-sol')]:
+ payload={'model':model,'stream':False}
+ if route.endswith('/responses'): payload.update(input='fixture',max_output_tokens=10)
+ else: payload.update(messages=[{'role':'user','content':'fixture'}],max_tokens=10)
+ r=urllib.request.Request('http://localhost:8080/model/'+route,
+  data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
+ try: body=urllib.request.urlopen(r).read().decode()
+ except urllib.error.HTTPError as error: raise AssertionError(route+': '+error.read().decode()) from error
+ assert body.count('[REDACTED]')==1,body
 status=json.load(urllib.request.urlopen('http://localhost:8080/status'))
 assert status['usage']['normalized_usd']>0
 assert urllib.request.urlopen('http://localhost:8080/task/files/fixture.bin').read()==b'x'*(2*1024*1024)
+for route in ('search','fetch'):
+ r=urllib.request.Request('http://localhost:8080/web/'+route,data=b'{}',headers={'Content-Type':'application/json'})
+ try: urllib.request.urlopen(r)
+ except urllib.error.HTTPError as error:
+  assert error.code==410
+  assert json.loads(error.read())['error']['code']=='external_web_disabled'
+ else: raise AssertionError('External web access was not disabled')
 print('Inference, accounting and a resource download that spills to temporary disk work; credentials redacted.')
 '''
             for attempt in range(60):
@@ -115,19 +150,36 @@ else: raise AssertionError('Gateway root is writable')
 Path('/tmp/probe').write_text('temporary workspace works')
 s=Path('/proc/self/status').read_text()
 assert 'NoNewPrivs:\\t1' in s and 'CapEff:\\t0000000000000000' in s
-try: Path('/run/dungeness/auth.json').write_text('no')
-except OSError: pass
-else: raise AssertionError('Credential mount is writable')
+for name in ('auth.json','credentials.json'):
+ try: Path('/run/dungeness',name).write_text('no')
+ except OSError: pass
+ else: raise AssertionError('Credential mount is writable')
 print('Root and credential mount read-only; temporary writes work; no capabilities or privilege escalation.')
 ''')
             assert (usage/'events.jsonl').is_file() and (usage/'summary.json').is_file()
+            assert usage.stat().st_mode & 0o777 == 0o700
+            for filename in ('.event-token', 'events.jsonl', 'summary.json'):
+                assert (usage/filename).stat().st_mode & 0o777 == 0o600
+            # Even an accidental read-only mount does not make accounting
+            # readable by a different, unprivileged candidate UID.
+            denied_uid = 10002 if os.getuid() == 10001 else 10001
+            run('run', '--rm', '--network', 'none', '--user', f'{denied_uid}:{denied_uid}',
+                *hardening, '--mount', f'type=bind,src={usage},dst=/usage,readonly',
+                '--mount', f'type=bind,src={credentials},dst=/credentials.json,readonly',
+                tag, 'python', '-c', '''from pathlib import Path
+for name in ('/usage/.event-token', '/usage/events.jsonl', '/usage/summary.json', '/credentials.json'):
+ try: Path(name).read_bytes()
+ except PermissionError: pass
+ else: raise AssertionError('Untrusted UID read accounting data')
+print('Untrusted UID cannot read event token, ledger, summary or provider credential file.')
+''')
             for path in usage.rglob('*'):
                 if path.is_file():
                     raw=path.read_bytes()
-                    for value in (SECRET,ID_TOKEN,ACCOUNT): assert value.encode() not in raw
+                    for value in (SECRET,ID_TOKEN,ACCOUNT,*API_KEYS.values()): assert value.encode() not in raw
             logs=run('logs',names[1],capture_output=True)
-            for value in (SECRET,ID_TOKEN,ACCOUNT): assert value not in logs.stdout+logs.stderr
-            print('PASS: local hardened gateway, read-only secret file, inference, accounting and non-disclosure.')
+            for value in (SECRET,ID_TOKEN,ACCOUNT,*API_KEYS.values()): assert value not in logs.stdout+logs.stderr
+            print('PASS: ChatGPT, OpenAI, Anthropic and OpenRouter synthetic inference; private credentials absent from Docker environment, logs and accounting.')
         finally:
             for name in names:
                 subprocess.run([*docker,'rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

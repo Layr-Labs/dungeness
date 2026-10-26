@@ -393,7 +393,7 @@ class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 ("/web/fetch", {"url": "https://example.invalid/paper"}),
             ):
                 reply = await client.post(path, json=payload)
-                self.assertEqual(reply.status_code, 429, reply.text)
+                self.assertEqual(reply.status_code, 410, reply.text)
             self.assertEqual(calls, [])
 
 

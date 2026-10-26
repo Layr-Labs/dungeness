@@ -6,10 +6,11 @@ from typing import Any
 
 def resolve_web_access(value: Any) -> dict[str, str]:
     if value is None:
-        return {"mode": "optional"}
+        return {"mode": "disabled"}
     if not isinstance(value, dict):
         raise ValueError("run spec web_search must be a mapping")
-    # Older Catalyst releases still emit these two access-only references.
+    # External web access is retired. Accept old access-only settings but never
+    # let optional mode re-enable it. Older Catalyst releases emit these references.
     # They resolve without loading a profile, prompt, or other repository file.
     if set(value) == {"profile"}:
         aliases = {
@@ -18,14 +19,14 @@ def resolve_web_access(value: Any) -> dict[str, str]:
         }
         profile = value["profile"]
         if isinstance(profile, str) and profile in aliases:
-            return {"mode": aliases[profile]}
+            return {"mode": "disabled"}
         raise ValueError(
             "Research-strategy web profiles have been removed; put search strategy "
             "in the harness and use web_search.mode: optional or disabled."
         )
     if set(value) != {"mode"} or value["mode"] not in ("optional", "disabled"):
         raise ValueError("web_search must contain only mode: optional or disabled")
-    return {"mode": value["mode"]}
+    return {"mode": "disabled"}
 
 
 def reject_evaluation_strategy(document: dict[str, Any]) -> None:

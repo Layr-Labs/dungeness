@@ -1,5 +1,5 @@
 """Run lifecycle regressions using synthetic renders and no container daemon."""
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 import io
@@ -31,6 +31,10 @@ class ExecutionLifecycleTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix=f"dungeness-{self.run_id}-")))
         self.render = self.render_root / "task"
         self.render.mkdir()
+        (self.render / "environment").mkdir()
+        (self.render / "environment/docker-compose.yaml").write_text(
+            "services:\n  gateway:\n    x-dungeness-credential-env: {}\n")
+        (self.root / "synthetic.env").write_text("")
         (self.render / "harbor-job.yaml").write_text(
             "agents:\n  - import_path: command_agent:CommandAgent\n    env: {}\n")
         (self.render / "resolved-run.json").write_text(json.dumps({
@@ -70,6 +74,34 @@ class ExecutionLifecycleTests(unittest.TestCase):
         self.assertEqual(self.commands.call_args.kwargs["cwd"], self.root)
         self.assertEqual(self.commands.call_args.kwargs["env"]["PYTHONPATH"],
                          str(self.root / "adapters/harbor"))
+        self.assertFalse(Path(self.commands.call_args.kwargs["env"]["DUNGENESS_CREDENTIALS_FILE"]).exists())
+
+    def test_credentials_remain_until_container_teardown_then_are_removed(self):
+        files = []
+        def command(argv, **kwargs):
+            if argv == ["synthetic-compiler"]:
+                return str(self.render)
+            files.append(Path(kwargs["env"]["DUNGENESS_CREDENTIALS_FILE"]))
+            self.assertTrue(files[0].is_file())
+            self.assertNotIn(str(self.root / "synthetic.env"), argv)
+            return "completed"
+        self.commands.side_effect = command
+        self.teardown.side_effect = lambda *args, **kwargs: self.assertTrue(files[0].exists())
+        self.execute()
+        self.assertFalse(files[0].parent.exists())
+
+    def test_credential_cleanup_error_does_not_skip_record_finalization(self):
+        original = runner.gateway_credentials
+        @contextmanager
+        def failed_cleanup(*args):
+            with original(*args) as staged:
+                yield staged
+            raise OSError("synthetic credential cleanup failure")
+        with patch.object(runner, "gateway_credentials", failed_cleanup):
+            with self.assertRaisesRegex(OSError, "credential cleanup failure"):
+                self.execute()
+        self.finish.assert_called_once()
+        self.assertFalse(self.render_root.exists())
 
     def test_failed_launch_records_original_error_and_still_cleans(self):
         error = subprocess.CalledProcessError(7, ["synthetic-harbor"])

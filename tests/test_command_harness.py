@@ -33,6 +33,14 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_provider_discovery_does_not_import_execution_only_dependencies(self):
+        code = ("import runpy,sys; sys.modules['dotenv']=None; "
+                "sys.argv=[sys.argv[1],'providers']; runpy.run_path(sys.argv[0],run_name='__main__')")
+        result = subprocess.run([sys.executable, "-c", code, str(ROOT / "dungeness")],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("anthropic", result.stdout)
+
     def test_retired_native_providers_cannot_compile(self):
         for provider in ("kimi-code", "moonshot"):
             with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, "unsupported model provider"):
@@ -113,8 +121,9 @@ class CommandHarnessTests(unittest.TestCase):
                         }]}))
                     env = compose["services"]["gateway"]["environment"]
                     if selected == "example-api":
-                        self.assertEqual(env["EXAMPLE_API_KEY_ACCOUNT"],
-                                         "${TESTBED_EXAMPLE_API_KEY_ACCOUNT:?provider metadata required}")
+                        self.assertEqual(compose["services"]["gateway"]["x-dungeness-credential-env"]["EXAMPLE_API_KEY_ACCOUNT"],
+                                         "TESTBED_EXAMPLE_API_KEY_ACCOUNT")
+                        self.assertNotIn("EXAMPLE_API_KEY_ACCOUNT", env)
                     else:
                         self.assertNotIn("EXAMPLE_API_KEY_ACCOUNT", env)
                     self.assertNotIn("EXAMPLE_API_KEY_ACCOUNT", json.dumps(compose["services"]["main"]))
@@ -138,6 +147,30 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertNotIn("DUNGENESS_OPENROUTER_INFERENCE_ONLY", compose["services"]["main"]["environment"])
         self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
         self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
+
+    def test_all_api_credentials_use_gateway_only_readonly_mount(self):
+        providers = ("openai", "anthropic", "openrouter")
+        compose = yaml.safe_load(compiler.build_compose(
+            "credential-boundary",
+            {"historical_cutoff": {"end_published_date": "2026-05-28T23:59:59Z"},
+             "search": {"max_results": 25}},
+            {"web": {"searches": 1, "fetches": 1}, "model": {"requests": 10}},
+            provider="openai", command_policy={"models": [
+                {"provider": p, "request_model": "fixture", "base_url": f"http://gateway:8080/model/{p}/v1"}
+                for p in providers]}, max_usd=1))
+        gateway = compose["services"]["gateway"]
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+            self.assertNotIn(key, gateway["environment"])
+            self.assertIn(key, gateway["x-dungeness-credential-env"])
+        mounts = [m for m in gateway["volumes"] if isinstance(m, dict)]
+        self.assertEqual(len(mounts), 1)
+        self.assertTrue(mounts[0]["read_only"])
+        self.assertFalse(mounts[0]["bind"]["create_host_path"])
+        main = compose["services"]["main"]
+        self.assertEqual(main["environment"]["OPENAI_API_KEY"], "testbed")
+        self.assertEqual(main["environment"]["ANTHROPIC_API_KEY"], "testbed")
+        self.assertNotIn("credentials.json", json.dumps(main))
+        self.assertNotIn("DUNGENESS_CREDENTIALS_FILE", json.dumps(main))
         self.assertNotIn("DUNGENESS_KNOWLEDGE_BASE", json.dumps(compose))
 
     def test_chatgpt_gateway_can_read_private_host_credentials(self):
@@ -304,8 +337,12 @@ class ConfiguredProviderCompilerTests(unittest.TestCase):
             {'web': {'searches': 0, 'fetches': 0}, 'model': {'requests': 10, 'total_tokens': 10000}},
             provider='example-session', max_usd=3, command_policy={'models': [model]}))
         env = compose['services']['gateway']['environment']
-        self.assertIn('EXAMPLE_SESSION_TOKEN', env)
-        self.assertIn('EXAMPLE_SESSION_TOKEN_EXPIRES_AT', env)
+        sources = compose['services']['gateway']['x-dungeness-credential-env']
+        self.assertEqual(sources, {
+            'EXAMPLE_SESSION_TOKEN': 'TESTBED_EXAMPLE_SESSION_TOKEN',
+            'EXAMPLE_SESSION_TOKEN_EXPIRES_AT': 'TESTBED_EXAMPLE_SESSION_TOKEN_EXPIRES_AT'})
+        self.assertNotIn('EXAMPLE_SESSION_TOKEN', env)
+        self.assertNotIn('EXAMPLE_SESSION_TOKEN_EXPIRES_AT', env)
         self.assertNotIn('EXAMPLE_API_KEY', env)
         self.assertNotIn('OPENAI_API_KEY', env)
         main = json.dumps(compose['services']['main'])

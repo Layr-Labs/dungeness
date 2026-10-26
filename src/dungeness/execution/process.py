@@ -1,8 +1,26 @@
 """Subprocess streaming with an explicit working directory."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+import signal
 import subprocess
+import threading
+
+
+@contextmanager
+def termination_as_interrupt():
+    """Let the CLI's SIGTERM cancellation unwind container/credential cleanup."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def stream_command(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:

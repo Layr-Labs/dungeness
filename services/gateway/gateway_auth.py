@@ -8,6 +8,34 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
+
+
+def credential_value(name, *, private_values=None):
+    """Resolve a credential name; file mode never falls back to environment."""
+    filename = os.environ.get("DUNGENESS_CREDENTIALS_FILE")
+    if filename is None:
+        # Standalone gateway compatibility. Compiled runs always require a file.
+        return os.environ.get(name)
+    try:
+        fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_nlink != 1:
+                raise ValueError
+            raw = stream.read(128 * 1024 + 1)
+        if len(raw) > 128 * 1024:
+            raise ValueError
+        values = json.loads(raw)
+        if not isinstance(values, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str) for k, v in values.items()
+        ):
+            raise ValueError
+    except (OSError, ValueError, UnicodeError):
+        raise ValueError("Gateway credential file is unavailable or invalid.") from None
+    if private_values is not None:
+        private_values.update(v for v in values.values() if v)
+    return values.get(name)
 
 
 def profile_authentication(profile):
@@ -25,9 +53,10 @@ def profile_authentication(profile):
     return {"sources": [source]}
 
 
-def _value(spec, document):
+def _value(spec, document, private_values=None):
     if "env" in spec:
-        value = os.environ.get(spec["env"], spec.get("default"))
+        value = (os.environ.get(spec["env"], spec["default"]) if "default" in spec
+                 else credential_value(spec["env"], private_values=private_values))
     elif "path" in spec:
         value = document
         for part in spec["path"]:
@@ -73,7 +102,7 @@ def authentication_headers(recipe, *, private_values=None):
         raise ValueError("Gateway authentication source is unavailable.")
     if "expires_at" in selected:
         try:
-            stamp = _value(selected["expires_at"], document)
+            stamp = _value(selected["expires_at"], document, private_values)
             expiry = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
             if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
                 raise ValueError
@@ -83,7 +112,7 @@ def authentication_headers(recipe, *, private_values=None):
     for name, spec in selected["headers"].items():
         if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
             raise ValueError("Invalid configured authentication header.")
-        headers[name] = _value(spec, document)
+        headers[name] = _value(spec, document, private_values)
         if private_values is not None and ("path" in spec or ("env" in spec and "default" not in spec)):
             private_values.add(_value({**spec, "prefix": ""}, document))
     return headers

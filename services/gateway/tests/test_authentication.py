@@ -10,13 +10,55 @@ from unittest.mock import patch
 import httpx
 import test_gateway
 import gateway
-from gateway_auth import authentication_headers
+from gateway_auth import authentication_headers, credential_value
 from gateway_models import MODEL_PROVIDERS, provider_auth_headers, configured_provider_config
 from configured_fixture import FIXTURES
 from gateway_runtime import Gateway
 
 
 class AuthenticationTests(unittest.TestCase):
+    def test_file_credentials_cover_all_builtin_keys_and_configured_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "credentials.json"
+            values = {"OPENAI_API_KEY": "openai-fixture", "ANTHROPIC_API_KEY": "anthropic-fixture",
+                      "OPENROUTER_API_KEY": "openrouter-fixture", "EXA_API_KEY": "search-fixture",
+                      "EXAMPLE_TOKEN": "configured-fixture", "EXAMPLE_ACCOUNT": "account-fixture",
+                      "EXAMPLE_EXPIRY": "2099-01-01T00:00:00Z"}
+            path.write_text(json.dumps(values)); path.chmod(0o600)
+            with patch.dict(os.environ, {"DUNGENESS_CREDENTIALS_FILE": str(path),
+                                        "OPENAI_API_KEY": "must-not-use"}):
+                for provider, header, expected in (("openai", "authorization", "Bearer openai-fixture"),
+                        ("anthropic", "x-api-key", "anthropic-fixture"),
+                        ("openrouter", "authorization", "Bearer openrouter-fixture")):
+                    private = set()
+                    self.assertEqual(provider_auth_headers(provider, private_values=private)[header], expected)
+                    self.assertEqual(private, set(values.values()))
+                recipe = {"sources": [{"headers": {
+                    "x-api-key": {"env": "EXAMPLE_TOKEN"}, "account-id": {"env": "EXAMPLE_ACCOUNT"}},
+                    "expires_at": {"env": "EXAMPLE_EXPIRY"}}]}
+                self.assertEqual(authentication_headers(recipe), {
+                    "x-api-key": "configured-fixture", "account-id": "account-fixture"})
+                self.assertEqual(credential_value("EXA_API_KEY"), "search-fixture")
+
+    def test_file_mode_fails_closed_even_with_environment_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "credentials.json"
+            with patch.dict(os.environ, {"DUNGENESS_CREDENTIALS_FILE": str(path),
+                                        "OPENAI_API_KEY": "must-not-use"}):
+                for content in (None, "{", "{}", '[]', '{"OPENAI_API_KEY":42}',
+                                '{"OPENAI_API_KEY":"bad\\nvalue"}', 'x' * (128 * 1024 + 1)):
+                    if content is not None:
+                        path.write_text(content); path.chmod(0o600)
+                    with self.subTest(content=str(content)[:30]), self.assertRaises(ValueError):
+                        provider_auth_headers("openai")
+                path.write_text('{"OPENAI_API_KEY":"private"}'); path.chmod(0o644)
+                with self.assertRaises(ValueError):
+                    provider_auth_headers("openai")
+                target = Path(temp) / "target"
+                path.rename(target); target.chmod(0o600); path.symlink_to(target)
+                with self.assertRaises(ValueError):
+                    provider_auth_headers("openai")
+
     def test_same_resolver_handles_bearer_api_key_and_account_metadata(self):
         for header, prefix in (("authorization", "Bearer "), ("x-api-key", "")):
             recipe = {"sources": [{"headers": {

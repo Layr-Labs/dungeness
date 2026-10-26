@@ -1,16 +1,13 @@
-"""Run-scoped gateway implementation for web and model traffic."""
+"""Run-scoped gateway implementation for model traffic."""
 
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from collections.abc import AsyncIterator
-import hashlib
 import json
 from provider_profiles import PROFILES, upstream_model
 import os
 from pathlib import Path
-import re
 import time
 from typing import Any
 
@@ -45,20 +42,9 @@ from gateway_usage import (
     METRICS,
     UsageLedger,
     bounded_model_name,
-    bounded_text,
     log_event,
     set_active_ledger,
 )
-from gateway_web import (
-    CONTENT_BEARING_RESULT_FIELDS,
-    approve_historical_result,
-    make_search_payload,
-    parse_utc,
-)
-
-
-EXA_SEARCH_URL = "https://api.exa.ai/search"
-EXA_CONTENTS_URL = "https://api.exa.ai/contents"
 BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -99,18 +85,11 @@ class Gateway:
 
     def __init__(self) -> None:
         self.run_id = os.environ["TESTBED_RUN_ID"]
-        self.max_results = int(os.environ.get("EXA_MAX_RESULTS", "25"))
-        self.end_published_date = os.environ["EXA_END_PUBLISHED_DATE"]
         self.ledger = UsageLedger(
             self.run_id,
             Path(os.environ.get("TESTBED_USAGE_DIR", "/var/lib/testbed/usage")),
         )
         set_active_ledger(self.ledger)
-        # Fetch is intentionally not an arbitrary URL reader. A target becomes
-        # eligible only after the gateway independently validates an Exa result.
-        # Keep the approval metadata so retrieval can be checked against the
-        # exact search-time decision rather than authorizing a raw URL forever.
-        self.allowed_fetch_targets: dict[str, dict[str, Any]] = {}
         allowed = os.environ.get("DUNGENESS_ALLOWED_MODELS")
         pairs = json.loads(allowed) if allowed else None
         if pairs is not None and (not isinstance(pairs, list) or not pairs or any(
@@ -132,276 +111,11 @@ class Gateway:
         )
 
 
-    async def search(
-        self,
-        query: str,
-        options: dict[str, Any] | None = None,
-        request_id: str = "internal",
-    ) -> dict[str, Any]:
-        self.ledger.reserve("searches")
-        started = time.monotonic()
-        status = "error"
-        provider_called = False
-        self.ledger.timeline(
-            {
-                "kind": "web.search.request",
-                "request_id": request_id,
-                "query": bounded_text(query),
-                "options": options or {},
-            }
-        )
-        try:
-            payload = make_search_payload(
-                query,
-                options or {},
-                max_results=self.max_results,
-                end_published_date=self.end_published_date,
-            )
-            provider_called = True
-            response = await self.client.post(
-                EXA_SEARCH_URL,
-                headers={
-                    "x-api-key": os.environ["EXA_API_KEY"],
-                    "content-type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            result = response.json()
-            cutoff = parse_utc(self.end_published_date)
-            kept = []
-            rejected: dict[str, int] = defaultdict(int)
-            results = result.get("results", [])
-            if not isinstance(results, list):
-                raise ValueError("Exa search response results must be a list")
-            for item in results:
-                approval, reason = approve_historical_result(item, cutoff)
-                if approval is None:
-                    rejected[reason or "rejected"] += 1
-                    self.ledger.append(
-                        "web-rejections",
-                        {
-                            "request_id": request_id,
-                            "operation": "search",
-                            "reason": reason or "rejected",
-                            "url": bounded_text(
-                                item.get("url") if isinstance(item, dict) else ""
-                            ),
-                        },
-                    )
-                    continue
+    async def search(self, query, options=None, request_id="internal"):
+        raise ValueError("External web search and fetch are disabled.")
 
-                approved_item = dict(item)
-                if approval["content_access"] != "immutable":
-                    for key in CONTENT_BEARING_RESULT_FIELDS:
-                        approved_item.pop(key, None)
-                approved_item["testbedHistorical"] = {
-                    "effectivePublishedAt": approval["effective_published_at"],
-                    "dateEvidence": approval["date_evidence"],
-                    "contentAccess": approval["content_access"],
-                    "fetchEligible": approval["content_access"] == "immutable",
-                }
-                kept.append(approved_item)
-                if approval["content_access"] == "immutable":
-                    for key in ("id", "url"):
-                        if isinstance(item.get(key), str):
-                            self.allowed_fetch_targets[item[key]] = approval
-            result["results"] = kept
-            result["testbedPolicy"] = {
-                "endPublishedDate": self.end_published_date,
-                "maxAgeHours": -1,
-                "mode": "strict-historical",
-                "missingDate": "reject",
-                "mutableUrl": "reject",
-                "mutableContent": "metadata-only",
-                "rejectedResults": dict(sorted(rejected.items())),
-            }
-            status = "success"
-            METRICS.increment(
-                "testbed_gateway_web_results_total",
-                labels={"operation": "search"},
-                value=len(kept),
-            )
-            self.ledger.timeline(
-                {
-                    "kind": "web.search.response",
-                    "request_id": request_id,
-                    "status": status,
-                    "response": result,
-                }
-            )
-            return result
-        except BaseException as error:
-            self.ledger.timeline(
-                {
-                    "kind": "web.search.response",
-                    "request_id": request_id,
-                    "status": status,
-                    "error_type": type(error).__name__,
-                }
-            )
-            raise
-        finally:
-            duration_ms = round((time.monotonic() - started) * 1000)
-            # The canonical web.accounting event records the actual query so a
-            # reviewer can see what the agent researched. Metrics labels and
-            # the operational stderr log stay query-free.
-            self.ledger.record(
-                "web",
-                {
-                    "request_id": request_id,
-                    "operation": "search",
-                    "query": bounded_text(query),
-                    "duration_ms": duration_ms,
-                    "status": status,
-                },
-            )
-            if provider_called:
-                METRICS.increment(
-                    "testbed_gateway_provider_requests_total",
-                    labels={"provider": "exa", "operation": "search", "status": status},
-                )
-                METRICS.increment(
-                    "testbed_gateway_provider_duration_seconds_sum",
-                    labels={"provider": "exa", "operation": "search"},
-                    value=duration_ms / 1000,
-                )
-            log_event(
-                "web_request_completed",
-                run_id=self.run_id,
-                request_id=request_id,
-                operation="search",
-                provider="exa",
-                provider_called=provider_called,
-                duration_ms=duration_ms,
-                status=status,
-            )
-
-    async def fetch(
-        self,
-        url: str,
-        options: dict[str, Any] | None = None,
-        request_id: str = "internal",
-    ) -> dict[str, Any]:
-        self.ledger.reserve("fetches")
-        started = time.monotonic()
-        status = "error"
-        provider_called = False
-        self.ledger.timeline(
-            {
-                "kind": "web.fetch.request",
-                "request_id": request_id,
-                "url": bounded_text(url),
-                "options": options or {},
-            }
-        )
-        try:
-            approval = self.allowed_fetch_targets.get(url)
-            if approval is None:
-                raise ValueError(
-                    "fetch target was not approved by an earlier historical search"
-                )
-            options = options or {"highlights": True}
-            if not isinstance(options, dict):
-                raise ValueError("options must be an object")
-            unknown = sorted(set(options) - {"highlights", "text"})
-            if unknown:
-                raise ValueError(f"unsupported fetch options: {', '.join(unknown)}")
-            provider_called = True
-            response = await self.client.post(
-                EXA_CONTENTS_URL,
-                headers={
-                    "x-api-key": os.environ["EXA_API_KEY"],
-                    "content-type": "application/json",
-                },
-                json={"urls": [url], **options, "maxAgeHours": -1},
-            )
-            response.raise_for_status()
-            result = response.json()
-            results = result.get("results")
-            if not isinstance(results, list) or len(results) != 1:
-                raise ValueError("Exa fetch response must contain exactly one result")
-            fetched = results[0]
-            fetched_approval, reason = approve_historical_result(
-                fetched, parse_utc(self.end_published_date)
-            )
-            if fetched_approval is None:
-                raise ValueError(
-                    f"fetched content failed historical validation: {reason}"
-                )
-            if fetched_approval["url"] != approval["url"]:
-                raise ValueError("fetched content URL differs from approved result")
-            if (
-                fetched_approval["effective_published_at"]
-                != approval["effective_published_at"]
-            ):
-                raise ValueError(
-                    "fetched content publication metadata differs from approved result"
-                )
-
-            content_digest = hashlib.sha256(
-                json.dumps(
-                    fetched, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-                ).encode("utf-8")
-            ).hexdigest()
-            result["testbedPolicy"] = {
-                "maxAgeHours": -1,
-                "mode": "strict-historical",
-                "effectivePublishedAt": approval["effective_published_at"],
-                "contentSha256": content_digest,
-            }
-            status = "success"
-            self.ledger.timeline(
-                {
-                    "kind": "web.fetch.response",
-                    "request_id": request_id,
-                    "status": status,
-                    "response": result,
-                }
-            )
-            return result
-        except BaseException as error:
-            self.ledger.timeline(
-                {
-                    "kind": "web.fetch.response",
-                    "request_id": request_id,
-                    "status": status,
-                    "error_type": type(error).__name__,
-                }
-            )
-            raise
-        finally:
-            duration_ms = round((time.monotonic() - started) * 1000)
-            self.ledger.record(
-                "web",
-                {
-                    "request_id": request_id,
-                    "operation": "fetch",
-                    "url": bounded_text(url),
-                    "duration_ms": duration_ms,
-                    "status": status,
-                },
-            )
-            if provider_called:
-                METRICS.increment(
-                    "testbed_gateway_provider_requests_total",
-                    labels={"provider": "exa", "operation": "fetch", "status": status},
-                )
-                METRICS.increment(
-                    "testbed_gateway_provider_duration_seconds_sum",
-                    labels={"provider": "exa", "operation": "fetch"},
-                    value=duration_ms / 1000,
-                )
-            log_event(
-                "web_request_completed",
-                run_id=self.run_id,
-                request_id=request_id,
-                operation="fetch",
-                provider="exa",
-                provider_called=provider_called,
-                duration_ms=duration_ms,
-                status=status,
-            )
+    async def fetch(self, url, options=None, request_id="internal"):
+        raise ValueError("External web search and fetch are disabled.")
 
     async def admit_model(self, provider: str, request: Request, operation: str) -> dict:
         validate_model_transport(operation, request.method, list(request.query_params.multi_items()),

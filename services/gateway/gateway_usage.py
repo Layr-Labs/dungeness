@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import sys
 import threading
 from typing import Any
@@ -42,19 +43,40 @@ def utc_now() -> str:
     ).replace("+00:00", "Z")
 
 
+def private_directory(path: Path) -> None:
+    path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if path.is_symlink():
+        raise ValueError("Usage directory must not be a symlink.")
+    path.chmod(0o700)
+
+
+def private_file(path: Path, *, append=False):
+    """Create privately and repair existing modes on the opened inode, without following links."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+    flags |= os.O_APPEND if append else 0
+    fd = os.open(path, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Usage output must be an ordinary, unlinked file.")
+        os.fchmod(fd, 0o600)
+        if not append:
+            os.ftruncate(fd, 0)
+        return os.fdopen(fd, "a" if append else "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def append_jsonl_locked(path: Path, record: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    private_directory(path.parent)
     encoded = json.dumps(
         record,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    with path.open("a", encoding="utf-8") as output:
-        try:
-            path.chmod(0o666)
-        except OSError:
-            pass
+    with private_file(path, append=True) as output:
         fcntl.flock(output.fileno(), fcntl.LOCK_EX)
         try:
             output.write(encoded + "\n")
@@ -242,7 +264,7 @@ class UsageLedger:
     def __init__(self, run_id: str, directory: Path):
         self.run_id = run_id
         self.directory = directory
-        self.directory.mkdir(parents=True, exist_ok=True)
+        private_directory(self.directory)
         self.lock = threading.RLock()
         self.limits = {
             "searches": int(os.environ["MAX_SEARCHES"]),
@@ -271,8 +293,8 @@ class UsageLedger:
         self.external_event_ids: set[tuple[str, str]] = set()
         self.event_token = secrets.token_urlsafe(32)
         token_path = self.directory / EVENT_TOKEN_FILENAME
-        token_path.write_text(self.event_token + "\n", encoding="utf-8")
-        token_path.chmod(0o644)
+        with private_file(token_path) as output:
+            output.write(self.event_token + "\n")
         self.flush_summary()
 
     def _usage_snapshot_locked(self) -> dict[str, Any]:
@@ -293,8 +315,8 @@ class UsageLedger:
     def _write_summary_locked(self) -> None:
         # Replace the summary atomically so observers never see partial JSON.
         temporary = self.directory / ".summary.json.tmp"
-        temporary.write_text(
-            json.dumps(
+        with private_file(temporary) as output:
+            output.write(json.dumps(
                 {
                     "run_id": self.run_id,
                     "usage": self._usage_snapshot_locked(),
@@ -302,9 +324,7 @@ class UsageLedger:
                 },
                 indent=2,
             )
-            + "\n",
-            encoding="utf-8",
-        )
+            + "\n")
         temporary.replace(self.directory / "summary.json")
 
     def flush_summary(self) -> None:

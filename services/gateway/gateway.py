@@ -67,8 +67,6 @@ from gateway_pricing import (
 from gateway_runtime import (
     BACKGROUND_TASKS,
     CACHED_TOKEN_WEIGHT,
-    EXA_CONTENTS_URL,
-    EXA_SEARCH_URL,
     Gateway,
 )
 from gateway_usage import (
@@ -379,45 +377,13 @@ async def internal_event(request: Request) -> Response:
     return JSONResponse(gateway.ledger.ingest(event))
 
 
-async def web_search(request: Request) -> Response:
-    payload: dict[str, Any] = {}
-    try:
-        payload = await request.json()
-        return JSONResponse(
-            await gateway.search(
-                payload.get("query"),
-                payload.get("options"),
-                request.state.request_id,
-            )
-        )
-    except BudgetExceeded as error:
-        return budget_rejected(request, "web.search", error)
-    except (ValueError, TypeError, KeyError) as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
-    except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"Exa request failed: {type(error).__name__}"}, status_code=502
-        )
-
-
-async def web_fetch(request: Request) -> Response:
-    try:
-        payload = await request.json()
-        return JSONResponse(
-            await gateway.fetch(
-                payload.get("url"),
-                payload.get("options"),
-                request.state.request_id,
-            )
-        )
-    except BudgetExceeded as error:
-        return budget_rejected(request, "web.fetch", error)
-    except (ValueError, TypeError, KeyError) as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
-    except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"Exa request failed: {type(error).__name__}"}, status_code=502
-        )
+async def external_web_disabled(_request: Request) -> Response:
+    # Keep an actionable answer for older harnesses, without any outbound path.
+    return JSONResponse({"error": {
+        "code": "external_web_disabled",
+        "message": "External web search and fetch are disabled. Use the assigned problem resources.",
+        "retryable": False,
+    }}, status_code=410)
 
 
 async def model_openai(request: Request) -> Response:
@@ -543,7 +509,7 @@ async def lifespan(_app: Starlette):
     log_event(
         "gateway_started",
         run_id=gateway.run_id,
-        end_published_date=gateway.end_published_date,
+        external_web_enabled=False,
         limits=gateway.ledger.limits,
     )
     try:
@@ -573,8 +539,8 @@ app = Starlette(
         Route("/{problem_slug}/resources/{resource_id}", assigned_resource, methods=["GET"]),
         Route("/metrics", metrics, methods=["GET"]),
         Route("/internal/events", internal_event, methods=["POST"]),
-        Route("/web/search", web_search, methods=["POST"]),
-        Route("/web/fetch", web_fetch, methods=["POST"]),
+        Route("/web/search", external_web_disabled, methods=["POST"]),
+        Route("/web/fetch", external_web_disabled, methods=["POST"]),
         Route(
             "/model/openai/v1/{path:path}", model_openai, methods=["GET", "POST"]
         ),

@@ -187,12 +187,12 @@ class RecordModelTests(unittest.TestCase):
             authored["web"],
             {"searches": 100, "fetches": 200},
         )
-        self.assertIs(
-            build.apply_web_search_mode_to_budget(authored, "optional"),
-            authored,
+        self.assertEqual(
+            build.apply_web_search_mode_to_budget(authored, "optional")["web"],
+            {"searches": 0, "fetches": 0},
         )
 
-    def test_compose_requires_exa_key_only_with_a_nonzero_web_budget(self) -> None:
+    def test_compose_never_forwards_exa_key_even_with_legacy_web_budget(self) -> None:
         web = {
             "historical_cutoff": {
                 "end_published_date": "2026-05-28T23:59:59.999Z",
@@ -225,10 +225,11 @@ class RecordModelTests(unittest.TestCase):
                 },
             )
         )
-        self.assertEqual(
-            with_web["services"]["gateway"]["environment"]["EXA_API_KEY"],
-            "${EXA_API_KEY:?EXA_API_KEY is required}",
-        )
+        gateway = with_web["services"]["gateway"]
+        self.assertNotIn("EXA_API_KEY", gateway["x-dungeness-credential-env"])
+        self.assertNotIn("EXA_API_KEY", gateway["environment"])
+        self.assertEqual(gateway["environment"]["MAX_SEARCHES"], "0")
+        self.assertEqual(gateway["environment"]["MAX_FETCHES"], "0")
 
 
     def test_candidate_state_round_trips_directory_candidate(self) -> None:
@@ -1304,7 +1305,7 @@ class RecordModelTests(unittest.TestCase):
                     configuration["generated"]["instruction"],
                 )
                 self.assertIn(
-                    "## Stable web-tool contract",
+                    "## Network isolation",
                     configuration["generated"]["instruction"],
                 )
                 self.assertNotIn(
@@ -1312,10 +1313,10 @@ class RecordModelTests(unittest.TestCase):
                     configuration["generated"]["instruction"],
                 )
                 self.assertIn(
-                    "untrusted external content",
+                    "web search, and web fetch are unavailable",
                     configuration["generated"]["instruction"],
                 )
-                self.assertEqual(configuration["resolved"]["web_search"], {"mode": "optional"})
+                self.assertEqual(configuration["resolved"]["web_search"], {"mode": "disabled"})
                 self.assertNotIn("web_search_profile", configuration["sources"])
                 self.assertNotIn("evaluation_profile", configuration["sources"])
                 self.assertNotIn("prompt_profile", configuration["resolved"]["evaluation"])

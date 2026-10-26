@@ -91,7 +91,8 @@ are rejected before source checkout or model execution. Put evaluation cadence,
 search planning and worker orchestration in the harness. The runtime reports
 interfaces, budgets and deadlines without prescribing a research loop.
 
-Use `web_search: {mode: disabled}` or `{mode: optional}` for access control.
+External web search and fetch are disabled. `web_search: {mode: disabled}` is
+the effective setting; legacy `optional` requests also resolve to disabled.
 Only the old `disabled-v1` and `optional-v1` profile references remain accepted
 as compatibility aliases, without loading profile files. Disabled access still
 zeros search and fetch budgets. Direct agent egress remains blocked.

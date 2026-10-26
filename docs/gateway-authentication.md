@@ -31,13 +31,16 @@ remains named `provider` for compatibility.
 ## Authentication recipes
 
 `services/gateway/gateway_auth.py` resolves authentication recipes. Recipes
-specify headers whose values come from an environment variable, a field in a
+specify headers whose values come from a credential name, a field in a
 credential JSON file, or a fixed value. An optional expiry source is checked
 before request admission. The resolver has no provider-name branches and does
 not use billing status to choose an authentication mechanism.
 
 Built-in recipes live beside the provider destinations in `gateway_models.py`.
-They preserve the existing environment names and credential-file mounts.
+They preserve the existing operator input names. The launcher reads those
+inputs from the run's env file (taking precedence over host values) and stages
+only the required credentials in a private JSON file. Generated containers never
+receive API keys or account metadata as environment-variable values.
 ChatGPT's recipe reads its access token and account ID from the staged file.
 A missing, malformed, or incomplete credential file fails closed. Caller-supplied
 bearer tokens are never used to authenticate upstream requests.
@@ -57,10 +60,10 @@ default. These optional fields configure different authentication headers:
 ```
 
 This is a fragment of a complete trusted provider profile. Additional credential
-variables must be namespaced under `credential_env` and must not collide with
+names must be namespaced under `credential_env` and must not collide with
 other credentials or transport headers. Operators supply the corresponding
-`TESTBED_EXAMPLE_API_KEY_ACCOUNT` variable; the compiler exposes it only to the
-gateway, for a run that permits this provider. These fields are not a new
+`TESTBED_EXAMPLE_API_KEY_ACCOUNT` variable; the launcher stages its value only
+for the gateway, for a run that permits this provider. These fields are not a new
 solver-controlled credential-grant format.
 
 Session-token profiles require their existing `*_EXPIRES_AT` value. Credential
@@ -76,6 +79,14 @@ resolved authentication values.
 Usage parsing, pricing, allowed models, request restrictions, and budget
 enforcement remain separate from authentication. Streaming requests still
 request usage where required. The harness owns reasoning preferences.
+
+## External web access
+
+Exa search and fetch are disabled. Both `/web/search` and `/web/fetch` return
+HTTP 410 with `external_web_disabled`, regardless of supplied keys or budgets.
+Generated runs set search/fetch budgets to zero and never forward `EXA_API_KEY`.
+There is no outbound Exa implementation in the gateway. Assigned problem
+descriptions and knowledge-base resources remain available.
 
 ## Credential non-disclosure and container boundary
 
@@ -104,8 +115,28 @@ Generated gateway containers use a read-only root, no Linux capabilities,
 Only the usage volume is persistent and writable; `/tmp` is a bounded 128 MiB
 tmpfs for task-file spooling. Credential files remain read-only. These settings
 apply to the gateway, not the agent's writable workspace or evaluator containers.
-The ChatGPT gateway retains the invoking UID/GID so its private 0600 credential
-mount remains readable without granting extra capabilities.
+Every gateway retains the invoking UID/GID so private 0600 credential mounts
+remain readable without granting extra capabilities. Accounting directories are
+0700; the event token, canonical ledger and summary are 0600. Trusted scorer
+fallback writes retain those permissions and the pre-created ledger's ownership.
+
+The launcher stages API keys and configured-provider authentication metadata
+in a 0600 JSON file inside a 0700 directory. Linux uses
+`/dev/shm` when available; other local platforms use a private temporary directory.
+Only the gateway receives the read-only mount. The staged file and its containing
+directory are outside run records and retained renders. Harbor receives a
+sanitized environment and an empty env file, never the original credential file.
+Missing or malformed staged credentials fail closed, without environment fallback.
+Standalone gateway fixtures still support environment authentication; generated
+Dungeness runs always select the file path.
+
+Staged files are removed after container teardown on completion, failure,
+Ctrl-C and SIGTERM cancellation. SIGKILL or host failure cannot run cleanup;
+operators should clear abandoned private staging directories after confirming
+their runs have stopped. The caller's original credential inputs are not deleted.
+ChatGPT keeps its existing private read-only access-file mount. This does not
+protect credentials from the trusted gateway process, host root or Docker-daemon
+administrators, who can read mounted files.
 
 Requests are limited to 32 MiB and 30 seconds to receive their body, with eight
 active non-probe requests. Health, status and metrics accept at most 1 KiB bodies.
@@ -122,8 +153,10 @@ access:
 python3 script/check-gateway-isolation.py  # add --sudo if Docker requires it
 ```
 
-It verifies inference, usage records, credential redaction, read-only root and
-credential mounts, temporary-file spooling, dropped capabilities and
+It verifies synthetic inference on all four built-in access routes, absence of
+credentials from Docker's environment, usage records, credential redaction,
+read-only root and credential mounts, private accounting permissions,
+temporary-file spooling, dropped capabilities and
 `no-new-privileges`. CI runs this check on pushes and pull requests.
 
 ### Live integration evidence (2026-10-24)

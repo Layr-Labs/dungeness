@@ -10,6 +10,9 @@ from test_record_model import build, cli, write_run_spec
 class HarnessStrategyTests(unittest.TestCase):
     def test_existing_catalyst_web_alias_still_disables_all_web_spending(self):
         for setting in (
+            None,
+            {"mode": "optional"},
+            {"profile": "web-search-profile:system/dungeness/optional-v1"},
             {"mode": "disabled"},
             {"profile": "web-search-profile:system/dungeness/disabled-v1"},
         ):
