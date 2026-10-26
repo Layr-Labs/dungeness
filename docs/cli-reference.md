@@ -680,3 +680,9 @@ Use `--max-model-tokens N` for an explicit ceiling, or `--no-model-token-limit`
 to disable one inherited from a custom policy. In a run spec,
 `budget.max_model_tokens: null` explicitly disables the policy ceiling.
 The gateway represents an unlimited token allowance as JSON `null` in `/status`.
+
+## Provider discovery
+
+`./dungeness providers` prints the gateway's implemented provider IDs as JSON.
+It requires no Docker, credentials, user configuration or model calls. See the
+[runtime contract](runtime-contract.md) for schema and availability semantics.

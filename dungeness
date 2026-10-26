@@ -2012,6 +2012,10 @@ def main() -> int:
         "capabilities", help="print the versioned runtime contract as JSON"
     )
     capabilities_parser.set_defaults(handler=show_capabilities)
+    providers_parser = subparsers.add_parser(
+        "providers", help="print the trusted gateway's implemented provider IDs as JSON"
+    )
+    providers_parser.set_defaults(handler=show_providers)
     init_parser = subparsers.add_parser(
         "init", help="configure the namespace used for new records"
     )
@@ -2174,6 +2178,13 @@ def main() -> int:
         return error.returncode
     except KeyboardInterrupt:
         return 130
+
+
+def show_providers(_args: argparse.Namespace) -> int:
+    from dungeness.contracts import model_providers
+
+    print(json.dumps(model_providers(REPO_ROOT), sort_keys=True, indent=2))
+    return 0
 
 
 def show_capabilities(_args: argparse.Namespace) -> int:

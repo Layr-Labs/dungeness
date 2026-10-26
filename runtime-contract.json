@@ -9,6 +9,7 @@
     "rejected-request-accounting-v1",
     "assigned-problem-service-v1",
     "optional-model-token-limit-v1",
-    "declarative-scaffolds-v2"
+    "declarative-scaffolds-v2",
+    "model-provider-registry-v1"
   ]
 }

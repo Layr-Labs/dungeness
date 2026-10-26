@@ -3,6 +3,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import runpy
+
+
+def model_providers(root: Path) -> dict:
+    """Describe the actual gateway registry; no credentials or model calls.
+
+    Used by the standalone CLI in a fresh process, so gateway imports cannot
+    share module state with a different runtime checkout.
+    """
+    gateway = runpy.run_path(str(root / "services/gateway/gateway_models.py"))
+    return {"schema_version": 1, "runtime": "dungeness",
+            "providers": sorted(gateway["MODEL_PROVIDERS"])}
 
 
 def runtime_contract(root: Path) -> dict:

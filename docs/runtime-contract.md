@@ -21,12 +21,20 @@ additive changes do not require an envelope version change.
 | `assigned-problem-service-v1` | A pinned read-only task service and declared attachments/resources are accessible through the gateway; attachment integrity and path constraints are checked during compilation. |
 | `optional-model-token-limit-v1` | An explicit null model-token cap disables that ceiling while preserving USD and execution limits and token accounting. |
 | `declarative-scaffolds-v2` | Trusted schema-v2 scaffolds declare candidate files, support files and checked text edits without problem-specific compiler code or executable host hooks. |
+| `model-provider-registry-v1` | `dungeness providers` reports provider IDs from the gateway's actual registry, including trusted runtime extensions, without credentials or model calls. |
 
 This declaration is a compatibility interface, not a security attestation.
 Consumers must still select a trusted runtime revision and verify that the
 checkout matches their pin. It must never be loaded from a submitted harness.
 The capability file is committed and included in runtime exports. Existing
 run-spec, command-agent, gateway and record schemas remain unchanged.
+
+`./dungeness providers` returns `{"schema_version": 1, "runtime": "dungeness",
+"providers": [...]}`. Consumers use it to check provider availability for their
+selected runtime instead of maintaining a second allowlist. It describes
+implemented routes, not credential validity, model prices or operator-dependent
+features such as OpenRouter inference-only routing. Configure extensions only
+in the trusted runtime; harnesses must not supply or replace that registry.
 
 ## Catalyst migration
 
