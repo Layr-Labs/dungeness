@@ -13,6 +13,7 @@ import sys
 import tempfile
 from typing import Protocol
 
+from .timing import StartupTiming
 from . import environments
 from .credentials import gateway_credentials
 from .harbor import harbor_launch_environment, launch_command, validate_command_job
@@ -75,12 +76,16 @@ def execute(
     final_status = "failed"
     failure: str | None = None
     credentials = ExitStack()
+    timing = StartupTiming(run_dir / "startup.jsonl")
     try:
         print(">> rendering temporary run task", flush=True)
+        timing.mark("render_started")
         rendered_text = stream_command(render_command, cwd=repository_root)
         rendered_path = Path(rendered_text)
         if not rendered_path.is_absolute():
             rendered_path = repository_root / rendered_path
+        timing.mark("render_finished")
+        timing.watch_containers(rendered_path)
         job_path = rendered_path / "harbor-job.yaml"
         if not job_path.is_file():
             raise RuntimeError(
@@ -112,7 +117,9 @@ def execute(
         print(f">> executing run from {job_path}", flush=True)
         environment, safe_env_file = credentials.enter_context(gateway_credentials(
             rendered_path, repository_root / environment_file, environment))
+        timing.mark("harbor_started")
         stream_command(launch_command(job_path, safe_env_file), cwd=repository_root, env=environment)
+        timing.mark("harbor_finished")
         final_status = "completed"
     except KeyboardInterrupt:
         final_status = "cancelled"
@@ -122,6 +129,7 @@ def execute(
         failure = f"{type(error).__name__}: {error}"
         raise
     finally:
+        timing.close()
         cleanup_error: Exception | None = None
         try:
             environments.teardown_run_environments(run_dir, remove_images=not keep_images)

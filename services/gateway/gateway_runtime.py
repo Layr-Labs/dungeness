@@ -160,6 +160,7 @@ class Gateway:
             self.ledger.reserve("model_requests")
         else:
             self.ledger.admit_model(request.state.request_id)
+        log_event("model_request_admitted", request_id=request.state.request_id)
         return payload
 
     async def proxy_model(

@@ -3,6 +3,7 @@
 Solver code is executed only in the container, never imported by the host.
 The run's model policy and the evaluator remain outside the harness.
 """
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
@@ -32,7 +33,12 @@ class CommandAgent(BaseInstalledAgent):
     def parse_version(self, stdout):
         return None
 
+    def mark_startup(self, phase):
+        with (self.logs_dir / "startup.jsonl").open("a") as output:
+            output.write(json.dumps({"phase": phase, "at": datetime.now(timezone.utc).isoformat()}) + "\n")
+
     async def install(self, environment):
+        self.mark_startup("environment_ready")
         result = await self.exec_as_agent(environment, command="command -v python3")
         if result.return_code:
             raise RuntimeError("Command harness images must include Python 3.")
@@ -53,6 +59,7 @@ class CommandAgent(BaseInstalledAgent):
             path = self.logs_dir / "dungeness-task.json"
             path.write_text(json.dumps(task))
             await environment.upload_file(path, "/tmp/dungeness-task.json")
+            self.mark_startup("agent_started" if attempt == 0 else "agent_resumed")
             result = await self.exec_as_agent(
                 environment, command="python3 /tmp/dungeness-launch.py /tmp/dungeness-task.json",
                 cwd=task["workspace"],

@@ -476,6 +476,15 @@ def repository_spec(manifest: dict[str, Any], source: Path) -> tuple[str, str]:
 
 
 def checkout(repository_url: str, commit: str, destination: Path) -> None:
+    # Operator-owned, read-only Git objects. Always materialize a fresh checkout
+    # and verify the exact requested commit; never reuse a previous workspace.
+    cache_root = os.environ.get("DUNGENESS_REPOSITORY_CACHE")
+    fetch_source = "origin"
+    if cache_root:
+        key = hashlib.sha256((repository_url + "\n" + commit).encode()).hexdigest()
+        cached = Path(cache_root) / key
+        if cached.exists():
+            fetch_source = str(cached.resolve())
     subprocess.run(["git", "init", "--quiet", str(destination)], check=True)
     subprocess.run(
         ["git", "-C", str(destination), "remote", "add", "origin", repository_url],
@@ -489,7 +498,7 @@ def checkout(repository_url: str, commit: str, destination: Path) -> None:
             "fetch",
             "--quiet",
             "--depth=1",
-            "origin",
+            fetch_source,
             commit,
         ],
         check=True,
