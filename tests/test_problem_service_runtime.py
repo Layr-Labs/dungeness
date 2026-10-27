@@ -79,7 +79,49 @@ class ProblemServiceRuntimeTests(unittest.TestCase):
         self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
         self.assertEqual(gateway["environment"]["DUNGENESS_TASK_SHA256"], "a" * 64)
         self.assertTrue(all(v.endswith(":ro") for v in problem["volumes"]))
-        self.assertEqual(set(problem["environment"]), {"TASK_SHA256", "TASK_DOCUMENT"})
+        proxy_names = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}
+        self.assertEqual(set(problem["environment"]), {"TASK_SHA256", "TASK_DOCUMENT", "NO_PROXY", "no_proxy"} | proxy_names)
+        for service in compose["services"].values():
+            self.assertTrue(all(service["environment"][name] == "" for name in proxy_names))
+            self.assertEqual(service["environment"]["NO_PROXY"], "*")
+
+    def test_health_probe_ignores_ambient_proxy(self):
+        import os
+        import subprocess
+        import sys
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        class Healthy(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200); self.end_headers()
+            def log_message(self, *args): pass
+        compose = yaml.safe_load(compiler.build_compose(
+            "health-probe", {}, {"model": {"requests": 1}},
+            problem_service={"context": "problem-service", "sha256": "a" * 64}))
+        with ThreadingHTTPServer(('127.0.0.1', 0), Healthy) as server:
+            thread = threading.Thread(target=server.serve_forever); thread.start()
+            try:
+                code = compose['services']['problem']['healthcheck']['test'][-1]
+                code = code.replace('localhost:8091', '127.0.0.1:' + str(server.server_port))
+                env = {**os.environ, 'HTTP_PROXY': 'http://127.0.0.1:1',
+                       'http_proxy': 'http://127.0.0.1:1', 'NO_PROXY': '', 'no_proxy': ''}
+                result = subprocess.run([sys.executable, '-c', code], env=env, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            finally:
+                server.shutdown(); thread.join()
+
+    def test_public_task_context_permissions_do_not_inherit_private_umask(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);context=root/'source';context.mkdir(mode=0o700)
+            payload=b'{"schema_version":1,"statement":"public task"}'
+            for name,data in [('task.json',payload),('server.py',b'pass'),('Dockerfile',b'FROM trusted')]:
+                (context/name).write_bytes(data);(context/name).chmod(0o600)
+            binding={'context':'source','sha256':hashlib.sha256(payload).hexdigest()}
+            destination=root/'rendered'
+            compiler.resolve_problem_service(root,binding,destination)
+            self.assertEqual(destination.stat().st_mode & 0o777,0o755)
+            self.assertEqual((destination/'task.json').stat().st_mode & 0o777,0o444)
+            self.assertEqual((context/'task.json').stat().st_mode & 0o777,0o600)
 
     def test_compile_copies_only_a_pinned_regular_context(self):
         with tempfile.TemporaryDirectory() as temp:

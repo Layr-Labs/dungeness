@@ -141,12 +141,38 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertEqual(set(compose["services"]), {"main", "gateway", "dev-scorer"})
         self.assertTrue(compose["networks"]["agent_internal"]["internal"])
         self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
+
         self.assertEqual(compose["services"]["gateway"]["environment"]["MAX_MODEL_USD"], "1")
         self.assertEqual(compose["services"]["gateway"]["environment"]["DUNGENESS_OPENROUTER_INFERENCE_ONLY"],
                          "${TESTBED_OPENROUTER_INFERENCE_ONLY:-}")
         self.assertNotIn("DUNGENESS_OPENROUTER_INFERENCE_ONLY", compose["services"]["main"]["environment"])
         self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
         self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
+
+    def test_run_networks_cannot_supply_a_host_bridge_or_packet_bypass(self):
+        compose = yaml.safe_load(compiler.build_compose(
+            "network-boundary", {}, {"model": {"requests": 5}},
+            problem_service={"context": "problem", "sha256": "a" * 64}))
+        for name in ("agent_internal", "problem_internal"):
+            network = compose["networks"][name]
+            self.assertTrue(network["internal"])
+            self.assertNotIn("name", network)
+            self.assertNotIn("external", network)
+            for family in ("ipv4", "ipv6"):
+                self.assertEqual(network["driver_opts"][
+                    f"com.docker.network.bridge.gateway_mode_{family}"], "isolated")
+        main = compose["services"]["main"]
+        self.assertIn("NET_RAW", main["cap_drop"])
+        self.assertIn("NET_ADMIN", main["cap_drop"])
+        self.assertIn("no-new-privileges:true", main["security_opt"])
+        gateway = compose["services"]["gateway"]
+        self.assertEqual(gateway["sysctls"]["net.ipv4.ip_forward"], "0")
+        self.assertEqual(gateway["sysctls"]["net.ipv6.conf.all.forwarding"], "0")
+        self.assertIn("external_egress", gateway["networks"])
+        for name, service in compose["services"].items():
+            self.assertNotIn("ports", service)
+            if name != "gateway":
+                self.assertNotIn("external_egress", service["networks"])
 
     def test_all_api_credentials_use_gateway_only_readonly_mount(self):
         providers = ("openai", "anthropic", "openrouter")

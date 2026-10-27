@@ -80,6 +80,20 @@ def rejected_before_generation(
             and document["error"].get("type") == "invalid_request_error")
 
 
+def trusted_model_proxy():
+    """Only the operator's explicit model proxy; ignore ambient HTTP_PROXY."""
+    from urllib.parse import urlsplit
+    value = os.environ.get("DUNGENESS_MODEL_HTTPS_PROXY")
+    if not value:
+        return None
+    target = urlsplit(value)
+    if (target.scheme != "http" or not target.hostname or target.port is None
+            or target.username or target.password or target.path not in ("", "/")
+            or target.query or target.fragment):
+        raise ValueError("Invalid trusted model proxy")
+    return value
+
+
 class Gateway:
     """One trusted gateway instance and budget ledger for one benchmark run."""
 
@@ -107,7 +121,8 @@ class Gateway:
         # request. Responses are streamed to the agent as they arrive, while a
         # bounded overall timeout still prevents abandoned provider calls.
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(600.0, connect=30.0), trust_env=False, follow_redirects=False
+            timeout=httpx.Timeout(600.0, connect=30.0), trust_env=False, follow_redirects=False,
+            proxy=trusted_model_proxy()
         )
 
 

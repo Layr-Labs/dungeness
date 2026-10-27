@@ -20,7 +20,8 @@ COPY gateway_usage.py /app/gateway_usage.py
 COPY gateway_web.py /app/gateway_web.py
 COPY pricing.yaml /app/pricing.yaml
 
-RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 gateway \
+RUN chmod -R a+rX /app \
+    && useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 gateway \
     && mkdir -p /var/lib/testbed/usage \
     && chown -R gateway:gateway /var/lib/testbed
 

@@ -1336,7 +1336,24 @@ def resolve_problem_service(task_dir, value, destination):
     if ("files" in names) != bool(entries) or (entries and {p.name for p in files.iterdir()} != declared):
         raise ValueError("Problem service attachment set differs from declaration")
     shutil.copytree(context, destination)
+    # These are validated public task resources, not credentials. The problem
+    # service runs as nobody even when the controller uses a restrictive umask.
+    destination.chmod(0o755)
+    for path in destination.rglob("*"):
+        path.chmod(0o755 if path.is_dir() else 0o444)
     return {"context": "problem-service", "sha256": binding["sha256"]}
+
+
+def isolated_internal_network() -> dict[str, Any]:
+    """Docker-owned isolation, with no host-facing bridge address in either family.
+
+    Keep networks project-scoped: no explicit shared name or external network.
+    Unsupported engines must reject these options rather than weaken isolation.
+    """
+    return {"driver": "bridge", "internal": True, "driver_opts": {
+        "com.docker.network.bridge.gateway_mode_ipv4": "isolated",
+        "com.docker.network.bridge.gateway_mode_ipv6": "isolated",
+    }}
 
 
 def build_compose(
@@ -1420,9 +1437,11 @@ def build_compose(
     main_service: dict[str, Any] = {
         "depends_on": main_depends,
         "environment": main_environment,
-        # `main` cannot route to the public internet because this is an
-        # internal Docker network. Subscription model calls go to the gateway;
-        # its narrow proxy is available only for OAuth token refresh.
+        # No host bridge address or direct egress; only this run's services.
+        # Drop packet injection and network administration even for a root
+        # harness, and prevent setuid/file capabilities from restoring them.
+        "cap_drop": ["NET_RAW", "NET_ADMIN"],
+        "security_opt": ["no-new-privileges:true"],
         "networks": ["agent_internal"],
     }
     if main_volumes:
@@ -1439,6 +1458,9 @@ def build_compose(
                 "read_only": True,
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                # Dual-homing is for application proxying, never IP routing.
+                "sysctls": {"net.ipv4.ip_forward": "0",
+                            "net.ipv6.conf.all.forwarding": "0"},
                 "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777"],
                 "pids_limit": 128,
                 "mem_limit": "1g",
@@ -1459,21 +1481,22 @@ def build_compose(
                     # request body for prompt-bias debugging. Default off.
                     "TESTBED_CAPTURE_PROMPTS": "${TESTBED_CAPTURE_PROMPTS:-}",
                     "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
+                    "DUNGENESS_MODEL_HTTPS_PROXY": "${TESTBED_MODEL_HTTPS_PROXY:-}",
                 },
                 "healthcheck": {
                     "test": [
                         "CMD",
                         "python",
                         "-c",
-                        "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=2)",
+                        "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://localhost:8080/healthz', timeout=2)",
                     ],
                     "interval": "2s",
                     "timeout": "5s",
                     "retries": 15,
                     "start_period": "5s",
                 },
-                # Only the trusted gateway is dual-homed. The application itself
-                # exposes fixed Exa/OpenAI routes rather than a generic proxy.
+                # Only the trusted gateway has egress. It exposes fixed model
+                # and assigned-resource routes, never a generic HTTP proxy.
                 "networks": ["agent_internal", "external_egress"],
                 "volumes": [
                     usage_mount
@@ -1481,13 +1504,13 @@ def build_compose(
             },
         },
         "networks": {
-            "agent_internal": {"internal": True},
+            "agent_internal": isolated_internal_network(),
             "external_egress": {},
         },
     }
     if problem_service is not None:
         binding = problem_service_binding(problem_service)
-        document["networks"]["problem_internal"] = {"internal": True}
+        document["networks"]["problem_internal"] = isolated_internal_network()
         document["services"]["problem"] = {
             "build": {"context": "./" + binding["context"]},
             "environment": {"TASK_SHA256": binding["sha256"], "TASK_DOCUMENT": "/data/task.json"},
@@ -1501,7 +1524,7 @@ def build_compose(
             "mem_limit": "64m",
             "healthcheck": {
                 "test": ["CMD", "python3", "-c",
-                         "import urllib.request; urllib.request.urlopen('http://localhost:8091/healthz', timeout=2)"],
+                         "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://localhost:8091/healthz', timeout=2)"],
                 "interval": "2s", "timeout": "3s", "retries": 15,
             },
         }
@@ -1574,7 +1597,7 @@ def build_compose(
                     "CMD",
                     "python3",
                     "-c",
-                    f"import urllib.request; urllib.request.urlopen('http://localhost:{dev_scorer['port']}/healthz', timeout=2)",
+                    f"import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({{}})).open('http://localhost:{dev_scorer['port']}/healthz', timeout=2)",
                 ],
                 "interval": "2s",
                 "timeout": "5s",
@@ -1612,6 +1635,14 @@ def build_compose(
         "target": "/run/dungeness/credentials.json", "read_only": True,
         "bind": {"create_host_path": False},
     })
+    # Docker client configuration can automatically inject build proxies into
+    # containers. Runtime traffic uses this run's gateway; dependency proxies
+    # must not capture localhost health checks or internal service requests.
+    for service in document["services"].values():
+        environment = service.setdefault("environment", {})
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            environment[name] = ""
+        environment.update({"NO_PROXY": "*", "no_proxy": "*"})
     return yaml.safe_dump(document, sort_keys=False)
 
 
