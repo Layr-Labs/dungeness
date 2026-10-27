@@ -174,6 +174,26 @@ class CommandHarnessTests(unittest.TestCase):
             if name != "gateway":
                 self.assertNotIn("external_egress", service["networks"])
 
+    def test_claude_subscription_mounts_only_token_and_expiry_in_gateway(self):
+        compose = yaml.safe_load(compiler.build_compose(
+            "claude-session", {"historical_cutoff": {"end_published_date": "2026-05-28T23:59:59Z"},
+                "search": {"max_results": 25}},
+            {"web": {"searches": 0, "fetches": 0}, "model": {"requests": 10}},
+            provider="claude-subscription", command_policy={"models": [{
+                "provider":"claude-subscription", "request_model":"claude-test",
+                "base_url":"http://gateway:8080/model/claude-subscription"}]}, max_usd=1))
+        gateway = compose["services"]["gateway"]
+        self.assertEqual(set(gateway["x-dungeness-credential-env"]),
+                         {"CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"})
+        for key in gateway["x-dungeness-credential-env"]:
+            self.assertNotIn(key, gateway["environment"])
+        main = compose["services"]["main"]
+        self.assertNotIn("credentials.json", json.dumps(main))
+        self.assertNotIn("ANTHROPIC_API_KEY", main["environment"])
+        self.assertEqual(main["environment"]["ANTHROPIC_AUTH_TOKEN"], "testbed")
+        self.assertEqual(main["environment"]["ANTHROPIC_BASE_URL"],
+                         "http://gateway:8080/model/claude-subscription")
+
     def test_all_api_credentials_use_gateway_only_readonly_mount(self):
         providers = ("openai", "anthropic", "openrouter")
         compose = yaml.safe_load(compiler.build_compose(

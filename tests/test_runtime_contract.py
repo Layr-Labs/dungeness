@@ -16,7 +16,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_providers_match_gateway_and_use_only_the_selected_checkout(self):
         from dungeness.contracts import model_providers
         expected = model_providers(ROOT)
-        self.assertEqual(expected["providers"], ["anthropic", "openai", "openai-chatgpt", "openrouter"])
+        self.assertEqual(expected["providers"], ["anthropic", "claude-subscription", "openai", "openai-chatgpt", "openrouter"])
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             # Prove registry extensions come from this runtime, not Catalyst or
@@ -47,7 +47,7 @@ class RuntimeContractTests(unittest.TestCase):
                                     capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(result.stdout), {
                 "schema_version": 1, "runtime": "dungeness",
-                "providers": ["anthropic", "openai", "openai-chatgpt", "openrouter"]})
+                "providers": ["anthropic", "claude-subscription", "openai", "openai-chatgpt", "openrouter"]})
             self.assertEqual(list(Path(temp).iterdir()), [])
 
     def test_capabilities_from_an_unrelated_directory_need_no_workspace_or_credentials(self):

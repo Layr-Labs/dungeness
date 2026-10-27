@@ -489,6 +489,22 @@ MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
         "passthrough": ("anthropic-beta", "anthropic-version"),
         "extract_usage": extract_anthropic_usage,
     },
+    "claude-subscription": {
+        "authentication": {"sources": [{
+            "expires_at": {"env": "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
+            "headers": {
+                "authorization": {"env": "CLAUDE_ACCESS_TOKEN", "prefix": "Bearer "},
+                "anthropic-version": {"literal": "2023-06-01"},
+            },
+        }]},
+        "routes": ANTHROPIC_ROUTES,
+        "upstream_env": "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL",
+        "upstream_default": "https://api.anthropic.com/v1",
+        "auth": "gateway_secret",
+        "billed": False,
+        "passthrough": ("anthropic-beta", "anthropic-version"),
+        "extract_usage": extract_anthropic_usage,
+    },
     "openrouter": {
         "authentication": {"sources": [{"headers": {
             "authorization": {"env": "OPENROUTER_API_KEY", "prefix": "Bearer "},

@@ -125,6 +125,8 @@ def instrumentation_route(path: str) -> str:
         return "/{problem}/{release}/resources/{resource}"
     if path.startswith("/model/openai/v1/"):
         return "/model/openai/v1/{operation}"
+    if path.startswith("/model/claude-subscription/v1/"):
+        return "/model/claude-subscription/v1/{operation}"
     if path.startswith("/model/anthropic/v1/"):
         return "/model/anthropic/v1/{operation}"
     if path.startswith("/model/openrouter/v1/"):
@@ -434,7 +436,7 @@ async def model_openrouter(request: Request) -> Response:
 
 async def model_configured(request: Request) -> Response:
     provider = request.path_params['provider']
-    if provider not in PROFILES:
+    if provider not in PROFILES and provider != 'claude-subscription':
         return JSONResponse({'error': 'Unknown configured provider.'}, status_code=404)
     try:
         return await gateway.proxy_model(provider, request.path_params['path'], request)
@@ -559,7 +561,7 @@ app = Starlette(
             model_chatgpt,
             methods=["GET", "POST"],
         ),
-        Route('/model/{provider}/v1/{path:path}', model_configured, methods=['POST']),
+        Route('/model/{provider}/v1/{path:path}', model_configured, methods=['GET', 'POST']),
     ],
     lifespan=lifespan,
 )

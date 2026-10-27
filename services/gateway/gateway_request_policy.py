@@ -48,7 +48,7 @@ SUPPORTED_BETAS = {
         "output-128k-2025-02-19", "interleaved-thinking-2025-05-14",
         "fine-grained-tool-streaming-2025-05-14", "context-1m-2025-08-07",
         "context-management-2025-06-27", "structured-outputs-2025-11-13",
-        "effort-2025-11-24",
+        "effort-2025-11-24", "oauth-2025-04-20", "claude-code-20250219",
     },
 }
 

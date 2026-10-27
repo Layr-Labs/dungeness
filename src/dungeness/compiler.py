@@ -991,6 +991,7 @@ def agent_provider(agent: dict[str, Any]) -> str:
     provider = model.get("provider")
     if provider in CONFIGURED_PROVIDERS or provider in {
         "anthropic",
+        "claude-subscription",
         "openai",
         "openai-chatgpt",
         "openrouter",
@@ -1422,6 +1423,12 @@ def build_compose(
             provider_secret_env[env] = '${TESTBED_' + env + ':?provider metadata required}'
         if profile['credential_kind'] == 'session-token':
             provider_secret_env[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
+    elif provider == "claude-subscription":
+        provider_secret_env = {
+            "CLAUDE_ACCESS_TOKEN": "${TESTBED_CLAUDE_ACCESS_TOKEN:?Claude access required}",
+            "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "${TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT:?Claude expiry required}",
+            "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL": "${CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL:-https://api.anthropic.com/v1}",
+        }
     elif provider == "anthropic":
         provider_secret_env = {
             "ANTHROPIC_API_KEY": "${TESTBED_ANTHROPIC_API_KEY:?TESTBED_ANTHROPIC_API_KEY is required}",
@@ -1561,6 +1568,10 @@ def build_compose(
             gateway_environment.pop(key, None)
             if api_provider in providers:
                 gateway_environment[key] = "${TESTBED_" + key + ":?provider access required}"
+        for key in ("CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"):
+            gateway_environment.pop(key, None)
+            if "claude-subscription" in providers:
+                gateway_environment[key] = "${TESTBED_" + key + ":?Claude access required}"
         for name, profile in CONFIGURED_PROVIDERS.items():
             key = profile['credential_env']
             gateway_environment.pop(key, None)
@@ -1580,6 +1591,9 @@ def build_compose(
         main_environment["DUNGENESS_MODELS"] = json.dumps(models)
         main_environment["OPENAI_API_KEY"] = "testbed"
         main_environment["OPENAI_BASE_URL"] = models[0]["base_url"]
+        if "claude-subscription" in providers:
+            main_environment["ANTHROPIC_AUTH_TOKEN"] = "testbed"
+            main_environment["ANTHROPIC_BASE_URL"] = "http://gateway:8080/model/claude-subscription"
         if "anthropic" in providers:
             main_environment["ANTHROPIC_API_KEY"] = "testbed"
             main_environment["ANTHROPIC_BASE_URL"] = "http://gateway:8080/model/anthropic"
@@ -1628,7 +1642,8 @@ def build_compose(
     # Keep credential *names* in the trusted render, never their values in
     # Docker Config.Env. The launcher resolves these into a private bind file.
     gateway = document["services"]["gateway"]
-    credential_names = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"}
+    credential_names = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
+                        "CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"}
     for profile in CONFIGURED_PROVIDERS.values():
         credential_names.add(profile["credential_env"])
         credential_names.add(profile["credential_env"] + "_EXPIRES_AT")

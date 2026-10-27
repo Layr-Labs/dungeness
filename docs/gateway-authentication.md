@@ -7,7 +7,7 @@ the request or choose research settings.
 
 ## LLM access routes
 
-The gateway ships four access routes. A route identifies an upstream endpoint
+The gateway ships five access routes. A route identifies an upstream endpoint
 and authentication recipe, not a model or a blanket permission to use an account.
 
 | Route | Access mechanism |
@@ -15,6 +15,7 @@ and authentication recipe, not a model or a blanket permission to use an account
 | `openai` | OpenAI API key |
 | `openai-chatgpt` | Temporary ChatGPT account access token and account ID |
 | `anthropic` | Anthropic API key |
+| `claude-subscription` | Claude access token plus an explicit future expiry |
 | `openrouter` | OpenRouter API key; models from multiple vendors |
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
@@ -174,3 +175,22 @@ of settled usage, including in-flight overshoot. This check validates gateway
 compatibility and isolation, not a strict one-dollar spending guarantee. A scan
 of 119 retained output files found no literal credential values. This is local
 test evidence, not an official remote result or proof of a production rollout.
+
+## Claude session route
+
+`claude-subscription` uses the same restricted Anthropic Messages protocol as the
+API-key route. Its fixed origin is `https://api.anthropic.com/v1`. It stages
+`TESTBED_CLAUDE_ACCESS_TOKEN` and `TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT` into the
+private gateway credential file; neither value is exposed in the harness container
+or Docker environment metadata. Expiry is checked before request admission.
+No refresh/account endpoints or API-key fallback are available.
+
+The gateway passes the request body unchanged and does not insert an official
+client identity. The harness is responsible for its client and protocol headers.
+Reported cache/input/output usage is normalized with the run's pinned reference
+prices; subscription billing is not reported as a cash API charge. Supply a pricing
+entry for this access route explicitly; historical pricing files are unchanged.
+
+Synthetic streaming, expiry, no-fallback and container-credential-boundary tests
+cover the route. A live Claude credential validation and hosted AMI rollout are
+still required before claiming production support.

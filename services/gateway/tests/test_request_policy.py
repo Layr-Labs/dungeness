@@ -20,6 +20,7 @@ from gateway_request_policy import validate_model_request
 MODELS = {
     "openai": "gpt-5.6-sol",
     "anthropic": "claude-opus-5",
+    "claude-subscription": "example-model",
     "openrouter": "openai/gpt-5.6-sol",
     "openai-chatgpt": "gpt-6-astra",
     "example-api": "example-model",
@@ -54,13 +55,15 @@ async def harness(*, declared=True, web=False):
         "MAX_MODEL_REQUESTS": "100", "MAX_MODEL_TOKENS": "1000000", "MAX_MODEL_USD": "100",
         "MAX_SEARCHES": "2" if web else "0", "MAX_FETCHES": "2" if web else "0",
         "DUNGENESS_CHATGPT_AUTH_FILE": str(Path(temp) / "auth.json"),
+        "CLAUDE_ACCESS_TOKEN": "unused-claude-access",
+        "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "EXAMPLE_API_KEY": "unused-example-key",
         "EXAMPLE_SESSION_TOKEN": "unused-session",
         "EXAMPLE_SESSION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
     }), patch.object(gateway_pricing, "MODEL_PRICING", [*gateway_pricing.MODEL_PRICING, *[
         {"provider": p, "upstream_id": "example/example-model", "request_models": ["example-model"],
          "input_per_mtok": 2, "output_per_mtok": 6, "cached_read_per_mtok": .5,
-         "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session")]]):
+         "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session", "claude-subscription")]]):
         Path(temp, "auth.json").write_text(json.dumps({
             "tokens": {"access_token": "private-test-token", "account_id": "private-account"}}))
         calls = []
