@@ -672,6 +672,32 @@ def copy_selected(
             raise FileNotFoundError(f"evaluator input does not exist: {relative}")
 
 
+def prepare_workspace_permissions(root: Path) -> None:
+    """Make only the public agent workspace readable under a private host umask.
+
+    A harness may drop privileges after launch. Docker COPY and read-only bind
+    mounts retain host modes, so root-owned 0600 scaffold files would otherwise
+    become unreadable. Keep owner-only writes; trusted-file mounts remain :ro.
+    Never apply this to the runtime root, credentials, usage, or private logs.
+    """
+    if root.is_symlink():
+        raise ValueError("workspace root must not be a symlink")
+    validate_symlinks(root)
+    paths = [root, *root.rglob("*")]
+    for path in paths:
+        mode = path.lstat().st_mode
+        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
+            raise ValueError(f"unsupported workspace file: {path}")
+        if stat.S_ISREG(mode) and path.stat().st_nlink != 1:
+            raise ValueError(f"workspace file must not be hard-linked: {path}")
+    for path in paths:
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            path.chmod(0o755)
+        elif stat.S_ISREG(mode):
+            path.chmod(0o755 if mode & 0o111 else 0o644)
+
+
 def apply_evaluator_patches(
     evaluator_checkout: Path,
     verifier_dir: Path,
@@ -1107,6 +1133,12 @@ def resolve_model_pricing(
                 "long_context.cache_write_per_mtok: "
                 f"{tier_cache_write!r}"
             )
+    for label, rates in (("base", pricing), ("long_context", long_context)):
+        if rates is not None and "cache_write_1h_per_mtok" in rates:
+            import math
+            value = rates["cache_write_1h_per_mtok"]
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"invalid trusted pricing field {label}.cache_write_1h_per_mtok")
     return pricing
 
 
@@ -2341,6 +2373,7 @@ def build_task(
                         destination.unlink()
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_text("")
+        prepare_workspace_permissions(workspace_dest)
         instruction = task_dir.joinpath(*instruction_name.parts).read_text(
             encoding="utf-8"
         )

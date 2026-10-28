@@ -208,6 +208,12 @@ class Gateway:
             finalized = True
             usage = extract(response_body, content_type)
             accounting_basis = "provider_usage" if usage else "unavailable"
+            if usage and request_pricing is not None:
+                try:
+                    request_usd(usage, request_pricing)
+                except ValueError:
+                    usage = {}
+                    accounting_basis = "invalid_or_missing_cache_duration"
             if (not usage and status == "provider_error"
                     and rejected_before_generation(response_body, content_type, upstream_status)):
                 # A rejected input did not generate tokens. Successful,
@@ -294,6 +300,7 @@ class Gateway:
                 "input_tokens",
                 "cached_input_tokens",
                 "cache_write_input_tokens",
+                "cache_write_1h_input_tokens",
                 "output_tokens",
                 "reasoning_tokens",
                 "total_tokens",
