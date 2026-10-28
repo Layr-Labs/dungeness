@@ -52,6 +52,11 @@ def validate_pricing_rates(
             "invalid model pricing field "
             f"{context}.cache_write_per_mtok: {cache_write!r} in {path}"
         )
+    hour = rates.get("cache_write_1h_per_mtok")
+    if "cache_write_1h_per_mtok" in rates and (
+        type(hour) not in (int, float) or not math.isfinite(hour) or hour < 0
+    ):
+        raise ValueError(f"invalid model pricing field {context}.cache_write_1h_per_mtok in {path}")
 
 
 def load_model_pricing(path: Path = PRICING_PATH) -> list[dict[str, Any]]:
@@ -148,6 +153,17 @@ def input_token_buckets(usage: dict[str, int]) -> tuple[int, int, int]:
     return ordinary, cached, cache_write
 
 
+def hour_write_tokens(usage: dict[str, int], rates: dict[str, Any], writes: int) -> int:
+    hour = usage.get("cache_write_1h_input_tokens", 0)
+    if type(hour) is not int or not 0 <= hour <= writes:
+        raise ValueError("Invalid one-hour cache-write usage")
+    if writes and "cache_write_1h_per_mtok" in rates and "cache_write_1h_input_tokens" not in usage:
+        raise ValueError("Missing cache-duration usage for duration-priced cache writes")
+    if hour and "cache_write_1h_per_mtok" not in rates:
+        raise ValueError("Unpriced one-hour cache writes")
+    return hour
+
+
 def request_usd(usage: dict[str, int], pricing: dict[str, Any]) -> float:
     """Calculate one request's USD from disjoint usage buckets and its tier.
 
@@ -162,10 +178,12 @@ def request_usd(usage: dict[str, int], pricing: dict[str, Any]) -> float:
     cache_write_rate = float(
         rates.get("cache_write_per_mtok", rates["input_per_mtok"])
     )
+    hour = hour_write_tokens(usage, rates, cache_write)
     return (
         ordinary * float(rates["input_per_mtok"]) / 1e6
         + cached * float(rates["cached_read_per_mtok"]) / 1e6
-        + cache_write * cache_write_rate / 1e6
+        + (cache_write - hour) * cache_write_rate / 1e6
+        + hour * float(rates.get("cache_write_1h_per_mtok", 0)) / 1e6
         + output * float(rates["output_per_mtok"]) / 1e6
     )
 
@@ -184,10 +202,13 @@ def request_budget_tokens(
         reported_total - ordinary - cached - cache_write - output,
     )
     if pricing is None:
+        hour = 0
+        hour_weight = 1.0
         cached_weight = CACHED_TOKEN_WEIGHT
         cache_write_weight = 1.0
     else:
         rates, _ = request_pricing_rates(usage, pricing)
+        hour = hour_write_tokens(usage, rates, cache_write)
         input_rate = float(rates["input_per_mtok"])
         if input_rate > 0:
             cached_weight = (
@@ -198,15 +219,18 @@ def request_budget_tokens(
             cache_write_weight = float(
                 rates.get("cache_write_per_mtok", input_rate)
             ) / input_rate
+            hour_weight = float(rates.get("cache_write_1h_per_mtok", input_rate)) / input_rate
         else:
             cached_weight = CACHED_TOKEN_WEIGHT
             cache_write_weight = 1.0
+            hour_weight = 1.0
     return max(
         0,
         round(
             ordinary
             + cached * cached_weight
-            + cache_write * cache_write_weight
+            + (cache_write - hour) * cache_write_weight
+            + hour * hour_weight
             + output
             + unclassified
         ),

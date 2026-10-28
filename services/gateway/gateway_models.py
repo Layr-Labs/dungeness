@@ -424,6 +424,7 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
             events.append(value)
 
     inp = cache_read = cache_create = out = 0
+    cache_durations = None
     found = False
     for value in events:
         kind = value.get("type")
@@ -441,12 +442,14 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
             cache_read = int(raw.get("cache_read_input_tokens") or 0)
         if raw.get("cache_creation_input_tokens") is not None:
             cache_create = int(raw.get("cache_creation_input_tokens") or 0)
+        if "cache_creation" in raw:
+            cache_durations = raw["cache_creation"]
         if raw.get("output_tokens") is not None:
             out = int(raw.get("output_tokens") or 0)
     if not found:
         return {}
     total_input = inp + cache_read + cache_create
-    return {
+    result = {
         "input_tokens": total_input,
         "cached_input_tokens": cache_read,
         "cache_write_input_tokens": cache_create,
@@ -454,6 +457,16 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
         "reasoning_tokens": 0,
         "total_tokens": total_input + out,
     }
+    if cache_durations is not None:
+        if not isinstance(cache_durations, dict):
+            return {}
+        five = cache_durations.get("ephemeral_5m_input_tokens")
+        hour = cache_durations.get("ephemeral_1h_input_tokens")
+        if (type(five) is not int or type(hour) is not int or min(five, hour) < 0
+                or five + hour != cache_create):
+            return {}  # Unknown accounting must never become a zero-cost receipt.
+        result["cache_write_1h_input_tokens"] = hour
+    return result
 
 
 # Per-provider proxy configuration. Model calls for every provider share the

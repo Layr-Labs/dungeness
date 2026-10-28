@@ -16,6 +16,7 @@ additive changes do not require an envelope version change.
 | `command-harness-v1` | A `dungeness-command-v1` agent executes its entrypoint in the sandbox; submitted code cannot select host Python imports. |
 | `run-model-access-v1` | The run spec selects the permitted model set and gateway request reservation/concurrency policy. |
 | `priced-model-requests-v1` | Requests are validated against declared models and trusted price configuration. |
+| `cache-duration-accounting-v1` | Native Messages usage distinguishes five-minute and one-hour cache writes; missing duration evidence blocks settlement. |
 | `command-exit-status-v1` | The command adapter uses Harbor's `return_code`; unsuccessful harness exits cannot silently become success. |
 | `rejected-request-accounting-v1` | Recognized pre-generation rejection responses settle with zero tokens and release credit reservations; ambiguous failures are not treated as free success. |
 | `assigned-problem-service-v1` | A pinned read-only task service and declared attachments/resources are accessible through the gateway; attachment integrity and path constraints are checked during compilation. |

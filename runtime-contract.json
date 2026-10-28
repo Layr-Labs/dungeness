@@ -5,6 +5,7 @@
     "command-harness-v1",
     "run-model-access-v1",
     "priced-model-requests-v1",
+    "cache-duration-accounting-v1",
     "command-exit-status-v1",
     "rejected-request-accounting-v1",
     "assigned-problem-service-v1",
