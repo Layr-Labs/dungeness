@@ -98,3 +98,7 @@ candidate verification need their own focused validation.
 Compiler and record tests use a disposable runtime populated from synthetic
 records under `tests/fixtures/runtime/`. Challenge grader tests live with the
 Catalyst problem assets. No Dungeness check requires a Catalyst checkout.
+
+For network-policy changes, also run `make check-run-isolation` with Docker
+access. It exercises two simultaneous runs with synthetic credentials; see
+[per-run isolation](network-isolation.md). This is separate from the offline suite.
