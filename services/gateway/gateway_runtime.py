@@ -396,10 +396,10 @@ class Gateway:
             request_pricing = pricing_for_request(provider, model)
             if normalized == "chat/completions" and payload.get("stream"):
                 payload["stream_options"] = {**(payload.get("stream_options") or {}), "include_usage": True}
-            if provider == "openrouter":
-                # A missing plugins field can inherit an account's default web
-                # plugin. This override is gateway-owned; agents cannot set it.
-                payload["plugins"] = [{"id": "web", "enabled": False}]
+            # OpenRouter rejects even disabled plugin entries when workspace
+            # server-tool policy blocks them. Admission already requires the
+            # operator's disabled-defaults assertion and rejects harness plugins
+            # and server tools, so send no plugin configuration upstream.
             body = json.dumps(payload, separators=(",", ":")).encode()
             # Record how this agent composed the prompt (profile always; full
             # body only under TESTBED_CAPTURE_PROMPTS) -- lets us measure
