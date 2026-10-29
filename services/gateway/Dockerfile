@@ -16,6 +16,7 @@ COPY provider_profiles.py providers.json /app/
 COPY gateway_request_policy.py /app/gateway_request_policy.py
 COPY gateway_pricing.py /app/gateway_pricing.py
 COPY gateway_runtime.py /app/gateway_runtime.py
+COPY gateway_provider_cost.py /app/gateway_provider_cost.py
 COPY gateway_usage.py /app/gateway_usage.py
 COPY gateway_web.py /app/gateway_web.py
 COPY pricing.yaml /app/pricing.yaml

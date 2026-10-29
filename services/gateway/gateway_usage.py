@@ -278,6 +278,7 @@ class UsageLedger:
         # criterion). Unset -> effectively no cap; USD is still recorded.
         self.usd_limit = float(os.environ.get("MAX_MODEL_USD") or "inf")
         self.usd_spent = 0.0
+        self.budget_usd_spent = 0.0
         self.model_inflight: dict[str, float] = {}
         self.model_accounting_incomplete = False
         self.max_parallel_requests = int(os.environ.get("DUNGENESS_MAX_PARALLEL_REQUESTS", "4"))
@@ -302,10 +303,11 @@ class UsageLedger:
             **self.counts,
             "model_usd": round(self.usd_spent, 6),
             "normalized_usd": round(self.usd_spent, 6),
+            "budget_usd": round(self.budget_usd_spent, 9),
             "billed_usd": (
                 None
                 if not self.billed_usd_known
-                else round(self.billed_usd_spent, 6)
+                else round(self.billed_usd_spent, 9)
             ),
             "accounting_method": "gateway",
             "model_accounting_state": ("incomplete" if self.model_accounting_incomplete
@@ -344,16 +346,20 @@ class UsageLedger:
                 "usage": {
                     **self.counts,
                     "normalized_usd": usd_spent,
+                    "budget_usd": round(self.budget_usd_spent, 9),
+                    "billed_usd": round(self.billed_usd_spent, 9) if self.billed_usd_known else None,
                 },
                 "limits": {
                     **self.limits,
                     "normalized_usd": usd_limit,
+                    "budget_usd": usd_limit,
                 },
                 "remaining": {
                     **{
                         name: (None if self.limits[name] is None else max(0, self.limits[name] - self.counts[name]))
                         for name in self.limits
                     },
+                    "budget_usd": (None if usd_limit is None else round(max(0.0, usd_limit - self.budget_usd_spent), 9)),
                     "normalized_usd": (
                         None
                         if usd_limit is None
@@ -498,7 +504,9 @@ class UsageLedger:
                 if (self.limits["model_tokens"] is not None
                         and self.counts["model_tokens"] >= self.limits["model_tokens"]):
                     raise BudgetExceeded("model token budget is exhausted")
-                if self.usd_spent >= self.usd_limit:
+                if self.model_accounting_incomplete:
+                    raise BudgetExceeded("model accounting is incomplete")
+                if max(self.usd_spent, self.budget_usd_spent) >= self.usd_limit:
                     raise BudgetExceeded("model USD budget is exhausted")
             self.counts[name] += 1
             self._write_summary_locked()
@@ -517,7 +525,7 @@ class UsageLedger:
                 raise BudgetExceeded("duplicate active request")
             if len(self.model_inflight) >= self.max_parallel_requests:
                 raise BudgetExceeded("model concurrency limit reached; retry after active calls settle")
-            available = self.usd_limit - self.usd_spent - sum(self.model_inflight.values())
+            available = self.usd_limit - max(self.usd_spent, self.budget_usd_spent) - sum(self.model_inflight.values())
             if available <= 0:
                 raise BudgetExceeded("model credits are reserved or exhausted")
             self.reserve("model_requests")
@@ -544,6 +552,7 @@ class UsageLedger:
         with self.lock:
             normalized = max(0.0, normalized_usd)
             self.usd_spent += normalized
+            self.budget_usd_spent += normalized
             if billed_usd is _BILLED_AS_NORMALIZED:
                 billed_usd = normalized
             if billed_usd is None:
@@ -558,6 +567,7 @@ class UsageLedger:
         billed_tokens: int,
         normalized_usd: float,
         billed_usd: float | None | object = _BILLED_AS_NORMALIZED,
+        budget_usd: float | None | object = _BILLED_AS_NORMALIZED,
     ) -> None:
         """Persist one response's token and cost accounting atomically."""
 
@@ -565,6 +575,12 @@ class UsageLedger:
             self.counts["model_tokens"] += max(0, billed_tokens)
             normalized = max(0.0, normalized_usd)
             self.usd_spent += normalized
+            if budget_usd is _BILLED_AS_NORMALIZED:
+                budget_usd = normalized
+            if budget_usd is None:
+                self.model_accounting_incomplete = True
+            else:
+                self.budget_usd_spent += max(0.0, float(budget_usd))
             if billed_usd is _BILLED_AS_NORMALIZED:
                 billed_usd = normalized
             if billed_usd is None:

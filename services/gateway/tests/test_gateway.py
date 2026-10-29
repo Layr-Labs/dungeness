@@ -766,7 +766,7 @@ class UsageTests(unittest.TestCase):
         stream = (
             b'data: {"type":"response.reasoning.delta","delta":"Inspect"}\n\n'
             b'data: {"type":"response.completed","response":{"usage":'
-            b'{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}\n\n'
+            b'{"cost":0.001,"input_tokens":10,"output_tokens":5,"total_tokens":15}}}\n\n'
             b"data: [DONE]\n\n"
         )
 

@@ -28,6 +28,7 @@ from gateway_models import (
     provider_auth_headers,
     usage_extractor,
 )
+from gateway_provider_cost import openrouter_charge
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
 import gateway_pricing
 from gateway_pricing import (
@@ -199,7 +200,7 @@ class Gateway:
         failure_category = None
         failure_stage = None
 
-        def finalize(response_body: bytes, content_type: str) -> None:
+        async def finalize(response_body: bytes, content_type: str) -> None:
             """Account for one model request exactly once, including streams."""
 
             nonlocal finalized, usage
@@ -236,10 +237,16 @@ class Gateway:
                 else "unavailable"
             )
             billed_usd = usd if cfg.get("billed", True) and not (request_pricing or {}).get("text_only") else None
+            upstream_request_id, billing_source = None, 'reference_estimate'
+            if provider == 'openrouter':
+                upstream_request_id, billed_usd, billing_source = await openrouter_charge(
+                    self.client, response_body, content_type, auth_headers, model)
+            budget_usd = billed_usd if provider == 'openrouter' else usd
             self.ledger.add_model_usage(
                 billed_tokens=billed_tokens,
                 normalized_usd=usd,
                 billed_usd=billed_usd,
+                budget_usd=budget_usd,
             )
             response_documents = decode_response_documents(
                 response_body, content_type
@@ -326,6 +333,9 @@ class Gateway:
                     "usd": usd,
                     "normalized_usd": usd,
                     "billed_usd": billed_usd,
+                    "billing_source": billing_source,
+                    "upstream_request_id": upstream_request_id,
+                    "budget_usd": budget_usd,
                     "pricing_tier": pricing_tier,
                     "accounting_method": "gateway" if usage else "unavailable",
                     "accounting_basis": accounting_basis,
@@ -361,7 +371,7 @@ class Gateway:
                 usage=usage,
             )
             if self.allowed_models is not None:
-                self.ledger.finish_model(request_id, accounted=bool(usage))
+                self.ledger.finish_model(request_id, accounted=bool(usage) and budget_usd is not None)
 
         private_values = set()
         auth_headers = provider_auth_headers(provider, private_values=private_values)
@@ -518,7 +528,7 @@ class Gateway:
                             await upstream.aclose()
                         finally:
                             try:
-                                finalize(bytes(response_body), content_type)
+                                await finalize(bytes(response_body), content_type)
                             finally:
                                 await relay_chunk(None)
 
@@ -551,7 +561,7 @@ class Gateway:
                 raise
             finally:
                 await upstream.aclose()
-            finalize(bytes(response_body), content_type)
+            await finalize(bytes(response_body), content_type)
             if not upstream.is_success:
                 return safe_provider_error(upstream.status_code, request_id)
             return Response(bytes(response_body), status_code=upstream.status_code,
@@ -560,7 +570,7 @@ class Gateway:
             if failure_category is None:
                 failure_category = transport_failure_category(error)
                 failure_stage = "upstream_request"
-            finalize(bytes(response_body), content_type)
+            await finalize(bytes(response_body), content_type)
             if isinstance(error, ResponseLimitExceeded):
                 return JSONResponse({"error": {"code": "upstream_response_too_large",
                     "request_id": request_id, "retryable": False}}, status_code=502)

@@ -70,7 +70,7 @@ async def harness(*, declared=True, web=False):
         response = {"id": "resp-test", "object": "response", "status": "completed",
                     "output": [], "choices": [], "usage": {
                         "input_tokens": 2, "output_tokens": 1, "total_tokens": 3,
-                        "prompt_tokens": 2, "completion_tokens": 1}}
+                        "prompt_tokens": 2, "completion_tokens": 1, "cost": 0.00001}}
 
 
         def upstream(request):
