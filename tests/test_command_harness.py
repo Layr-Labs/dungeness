@@ -149,6 +149,18 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
         self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
 
+    def test_bounded_admission_is_owned_by_gateway(self):
+        compose = yaml.safe_load(compiler.build_compose(
+            "guarded-run", {"historical_cutoff": {}, "search": {"max_results": 25}},
+            {"web": {"searches": 0, "fetches": 0}, "model": {"requests": 10, "total_tokens": 10000}},
+            provider="openai", max_usd=1,
+            command_policy={"models": [{**MODEL, "provider": "openai", "base_url": "http://gateway:8080/model/openai/v1"}],
+                            "bounded_requests": True, "max_output_tokens": 65536}))
+        env = compose["services"]["gateway"]["environment"]
+        self.assertEqual(env["DUNGENESS_BOUNDED_REQUESTS"], "1")
+        self.assertEqual(env["DUNGENESS_MAX_OUTPUT_TOKENS"], "65536")
+        self.assertNotIn("DUNGENESS_BOUNDED_REQUESTS", compose["services"]["main"]["environment"])
+
     def test_run_networks_cannot_supply_a_host_bridge_or_packet_bypass(self):
         compose = yaml.safe_load(compiler.build_compose(
             "network-boundary", {}, {"model": {"requests": 5}},

@@ -29,6 +29,7 @@ from gateway_models import (
     usage_extractor,
 )
 from gateway_provider_cost import openrouter_charge
+from gateway_reservations import bounded_request
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
 import gateway_pricing
 from gateway_pricing import (
@@ -160,7 +161,13 @@ class Gateway:
         if self.allowed_models is None:
             self.ledger.reserve("model_requests")
         else:
-            self.ledger.admit_model(request.state.request_id)
+            if os.environ.get("DUNGENESS_BOUNDED_REQUESTS") == "1":
+                payload, tokens, usd = bounded_request(
+                    payload, operation, pricing_for_request(provider, payload["model"]),
+                    maximum=int(os.environ.get("DUNGENESS_MAX_OUTPUT_TOKENS", "65536")))
+                self.ledger.admit_model(request.state.request_id, tokens=tokens, usd=usd)
+            else:
+                self.ledger.admit_model(request.state.request_id)
         log_event("model_request_admitted", request_id=request.state.request_id)
         return payload
 
