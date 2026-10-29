@@ -125,3 +125,26 @@ A missing charge remains unknown and blocks further model admissions. Actual
 charges and the existing normalized ceiling both constrain the run; in-flight
 requests can still exceed a cap. Other provider routes keep their existing
 accounting. Cost records are not proof that a solver-authored local trace is genuine.
+
+### Bounded request admission
+
+The trusted run-spec can enable `model_access.bounded_requests: true` and set
+`model_access.max_output_tokens` (default 65,536). The compiler puts these only
+in the gateway environment. Harness requests cannot change this policy.
+
+With the guard enabled, text generation gets an explicit output-token limit
+(default 16,384 if omitted), and the ledger atomically reserves both token and
+USD estimates across concurrent requests. Estimates use UTF-8 request bytes plus
+framing allowance and the most expensive configured input/cache/output rates,
+including long-context tiers. Only one completion is permitted. Actual settled
+provider usage remains authoritative; missing accounting blocks further calls.
+
+This is deliberately conservative: large cached histories may be rejected even
+when their eventual bill would be lower. It is not a universal tokenizer or a
+provider-enforced cash guarantee. Opaque encrypted history, provider-side state
+references and operations without a supported output bound are rejected in
+this mode. Use explicit text history and ordinary generation routes. Other
+local runs keep the existing protocol behavior unless this guard is enabled.
+
+A provider-enforced, expiring per-run key is an additional financial boundary;
+gateway estimates do not protect a key stolen from the gateway or host.

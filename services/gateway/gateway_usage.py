@@ -280,6 +280,7 @@ class UsageLedger:
         self.usd_spent = 0.0
         self.budget_usd_spent = 0.0
         self.model_inflight: dict[str, float] = {}
+        self.model_token_inflight: dict[str, int] = {}
         self.model_accounting_incomplete = False
         self.max_parallel_requests = int(os.environ.get("DUNGENESS_MAX_PARALLEL_REQUESTS", "4"))
         self.request_reservation_usd = float(os.environ.get("DUNGENESS_REQUEST_RESERVATION_USD", "1"))
@@ -511,7 +512,7 @@ class UsageLedger:
             self.counts[name] += 1
             self._write_summary_locked()
 
-    def admit_model(self, request_id: str) -> None:
+    def admit_model(self, request_id: str, *, tokens: int = 0, usd: float | None = None) -> None:
         """Reserve shared credits until the upstream stream has fully drained.
 
         A reservation is an admission allowance, not a provider billing promise.
@@ -528,13 +529,25 @@ class UsageLedger:
             available = self.usd_limit - max(self.usd_spent, self.budget_usd_spent) - sum(self.model_inflight.values())
             if available <= 0:
                 raise BudgetExceeded("model credits are reserved or exhausted")
+            if type(tokens) is not int or tokens < 0:
+                raise ValueError("Invalid model token reservation")
+            token_limit = self.limits["model_tokens"]
+            if token_limit is not None and self.counts["model_tokens"] + sum(self.model_token_inflight.values()) + tokens > token_limit:
+                raise BudgetExceeded("model tokens are reserved or insufficient for this request")
+            reservation = min(available, self.request_reservation_usd) if usd is None else usd
+            if not isinstance(reservation, (float, int)) or not 0 <= reservation < float('inf'):
+                raise ValueError("Invalid model cost reservation")
+            if reservation > available:
+                raise BudgetExceeded("insufficient credits for conservative request reservation; shorten input or lower output limit")
             self.reserve("model_requests")
-            self.model_inflight[request_id] = min(available, self.request_reservation_usd)
+            self.model_inflight[request_id] = reservation
+            self.model_token_inflight[request_id] = tokens
             self._write_summary_locked()
 
     def finish_model(self, request_id: str, *, accounted: bool) -> None:
         with self.lock:
             self.model_inflight.pop(request_id, None)
+            self.model_token_inflight.pop(request_id, None)
             if not accounted:
                 self.model_accounting_incomplete = True
             self._write_summary_locked()

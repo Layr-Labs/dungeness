@@ -1589,6 +1589,8 @@ def build_compose(
         gateway_environment["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"] = "1"
         gateway_environment["DUNGENESS_ALLOWED_MODELS"] = json.dumps(
             [[model["provider"], model["request_model"]] for model in models])
+        gateway_environment["DUNGENESS_BOUNDED_REQUESTS"] = "1" if command_policy.get("bounded_requests") else "0"
+        gateway_environment["DUNGENESS_MAX_OUTPUT_TOKENS"] = str(command_policy.get("max_output_tokens", 65536))
         gateway_environment["DUNGENESS_MAX_PARALLEL_REQUESTS"] = str(
             command_policy.get("max_parallel_requests", 4))
         gateway_environment["DUNGENESS_REQUEST_RESERVATION_USD"] = str(
@@ -2049,7 +2051,7 @@ def build_task(
     command_execution(agent)
     policy = (run_spec_manifest or {}).get("model_access")
     if not isinstance(policy, dict) or set(policy) - {
-        "models", "max_parallel_requests", "request_reservation_usd",
+        "models", "max_parallel_requests", "request_reservation_usd", "bounded_requests", "max_output_tokens",
     }:
         raise ValueError("command harnesses require run-spec model_access")
     if not isinstance(policy.get("models"), list) or not policy["models"]:
@@ -2061,6 +2063,11 @@ def build_task(
         raise ValueError("max_parallel_requests must be 1..16")
     if (type(reservation) not in (int, float) or not 0 < reservation < float("inf")):
         raise ValueError("request_reservation_usd must be positive and finite")
+    if type(policy.get("bounded_requests", False)) is not bool:
+        raise ValueError("bounded_requests must be boolean")
+    output_limit = policy.get("max_output_tokens", 65536)
+    if type(output_limit) is not int or not 1 <= output_limit <= 1048576:
+        raise ValueError("max_output_tokens must be 1..1048576")
     command_models(agent)
     model = agent_model(agent)
     agent_option_overrides = {

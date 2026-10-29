@@ -4,6 +4,7 @@
   "capabilities": [
     "command-harness-v1",
     "run-model-access-v1",
+    "bounded-model-admission-v1",
     "priced-model-requests-v1",
     "cache-duration-accounting-v1",
     "command-exit-status-v1",
