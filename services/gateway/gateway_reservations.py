@@ -53,9 +53,9 @@ def bounded_request(payload, operation, pricing, *, maximum=65536):
                      for k in ('input_per_mtok', 'cached_read_per_mtok', 'cache_write_per_mtok', 'cache_write_1h_per_mtok'))
     output_rate = max(float(t['output_per_mtok']) for t in tiers)
     # The optional token ceiling counts weighted cache tokens, not only raw tokens.
-    input_weight = max(1.0, *[float(t.get(k, t['input_per_mtok'])) / float(t['input_per_mtok'])
+    input_weight = max([1.0, *[float(t.get(k, t['input_per_mtok'])) / float(t['input_per_mtok'])
                              for t in tiers if t['input_per_mtok'] > 0
-                             for k in ('cached_read_per_mtok', 'cache_write_per_mtok', 'cache_write_1h_per_mtok')])
+                             for k in ('cached_read_per_mtok', 'cache_write_per_mtok', 'cache_write_1h_per_mtok')]])
     tokens = math.ceil(inputs * input_weight) + limit
     usd = (inputs * input_rate + limit * output_rate) / 1e6
     if not math.isfinite(usd) or usd < 0:

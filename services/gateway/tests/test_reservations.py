@@ -14,6 +14,14 @@ RATES = {'input_per_mtok': 2, 'cached_read_per_mtok': .5, 'output_per_mtok': 10}
 
 
 class ReservationTests(unittest.TestCase):
+    def test_zero_input_pricing_still_reserves_tokens(self):
+        for output in (0, 10):
+            with self.subTest(output=output):
+                _, tokens, usd = bounded_request({'model':'example','input':'hello'}, 'responses',
+                    {'input_per_mtok':0,'cached_read_per_mtok':0,'output_per_mtok':output})
+                self.assertGreater(tokens, 16384)
+                self.assertEqual(usd, 16384*output/1e6)
+
     def test_limit_and_explicit_history_required(self):
         for payload in ({'max_output_tokens': 65537}, {'max_output_tokens': True}, {'n': 2},
                         {'max_tokens': 8},
