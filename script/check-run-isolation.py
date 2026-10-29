@@ -33,7 +33,7 @@ class Handler(BaseHTTPRequestHandler):
   self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
  def do_POST(self):
   self.rfile.read(int(self.headers.get('Content-Length','0')))
-  if PORT==8081: assert self.headers.get('authorization')=='Bearer '+SECRET
+  if PORT==8081: assert self.headers.get('authorization')=='Bearer '+CANARY
   body=json.dumps({'run':RUN,'output_text':'synthetic result','usage':{'input_tokens':100,'output_tokens':10}}).encode()
   self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
 class Server(ThreadingHTTPServer):
@@ -87,9 +87,10 @@ def main():
             run = prefix + '-' + suffix
             folder = root/suffix;folder.mkdir()
             usage = folder/'usage';usage.mkdir()
-            secret = 'synthetic-private-' + run
+            # Public synthetic marker; no real credential is read by this test.
+            canary = 'synthetic-fixture-' + run
             credential = folder/'credentials.json'
-            credential.write_text(json.dumps({'OPENAI_API_KEY':secret}));credential.chmod(0o600)
+            credential.write_text(json.dumps({'OPENAI_API_KEY':canary}));credential.chmod(0o600)
             task = json.dumps({'schema_version':1, 'attachments':[{'name':'paper.txt',
                 'bytes':14,'sha256':hashlib.sha256(b'public-fixture').hexdigest(),
                 'media_type':'text/plain'}]},sort_keys=True,separators=(',',':')).encode()
@@ -100,7 +101,7 @@ def main():
                 command_policy={'models':[{'provider':'openai','request_model':'gpt-6-astra',
                     'base_url':'http://gateway:8080/model/openai/v1'}]}))
             doc['services']['main'].update(image=image,command=['python','-c',
-                f'RUN={run!r}\nPORT=8092\nTASK=b""\nSECRET=None\n'+SERVER])
+                f'RUN={run!r}\nPORT=8092\nTASK=b""\nCANARY=None\n'+SERVER])
             gateway = doc['services']['gateway'];gateway.pop('build');gateway['image']=image
             gateway['environment']['OPENAI_UPSTREAM_BASE_URL']='http://provider:8081/v1'
             gateway['volumes'][-1]['source']=str(credential)
@@ -109,9 +110,9 @@ def main():
                 service=doc['services'].setdefault(name,{'networks':['external_egress']})
                 service.pop('build',None)
                 fixture=folder/(name+'.py')
-                fixture.write_text(f'RUN={run!r}\nPORT={port}\nSECRET={secret!r}\nTASK={task!r}\n'+SERVER)
-                # Provider secret is not present in the problem/scorer fixture.
-                if name!='provider':fixture.write_text(f'RUN={run!r}\nPORT={port}\nSECRET=None\nTASK={task!r}\n'+SERVER)
+                fixture.write_text(f'RUN={run!r}\nPORT={port}\nCANARY={canary!r}\nTASK={task!r}\n'+SERVER)
+                # Provider canary is not present in the problem/scorer fixture.
+                if name!='provider':fixture.write_text(f'RUN={run!r}\nPORT={port}\nCANARY=None\nTASK={task!r}\n'+SERVER)
                 service.update(image=image,command=['python','/fixture.py'],volumes=[str(fixture)+':/fixture.py:ro'])
             if args.ipv6:
                 for net in doc['networks'].values():net['enable_ipv6']=True
@@ -123,8 +124,8 @@ def main():
             docker(*compose,'up','-d','--wait','--wait-timeout','90')
             containers={name:inspect(docker(*compose,'ps','-q',name).strip()) for name in doc['services']}
             networks={name:json.loads(docker('network','inspect',run+'_'+name))[0] for name in doc['networks']}
-            runs.append((run,containers,networks,secret))
-        for run,containers,networks,secret in runs:
+            runs.append((run,containers,networks,canary))
+        for run,containers,networks,canary in runs:
             main=containers['main']
             others=next(c for r,c,_,_ in runs if r!=run)
             addresses=[(f'other-{name}',net['IPAddress'],port) for name,port in
@@ -166,7 +167,7 @@ for label,host,port in TARGETS:
  else:s.close();raise AssertionError(f'Unexpected reachability: {label} {host}:{port}')
 for name in ('/run/docker.sock','/var/run/docker.sock','/run/dungeness/credentials.json','/var/lib/testbed/usage/.event-token'):
  assert not Path(name).exists(),name
-for secret in SECRETS:assert secret not in json.dumps(dict(os.environ))
+for canary in CANARIES:assert canary not in json.dumps(dict(os.environ))
 if not BASELINE:
  for family,kind,proto in ((socket.AF_PACKET,socket.SOCK_RAW,0),(socket.AF_INET,socket.SOCK_RAW,socket.IPPROTO_RAW)):
   try:s=socket.socket(family,kind,proto)
@@ -179,7 +180,7 @@ print(RUN+': own inference/papers/scorer work; host, other runs, private mounts 
                 code=f"import urllib.request; assert urllib.request.urlopen('http://{bridge}:{server.server_port}',timeout=3).read()==b'host-canary';print('CONFIRMED: ordinary internal bridge reaches synthetic host service')"
                 print(docker('exec',main['Id'],'python','-c',code),end='')
             else:
-                code=f'RUN={run!r}\nTARGETS={addresses!r}\nSECRETS={[s for _,_,_,s in runs]!r}\nBASELINE=False\n'+probe
+                code=f'RUN={run!r}\nTARGETS={addresses!r}\nCANARIES={[s for _,_,_,s in runs]!r}\nBASELINE=False\n'+probe
                 print(docker('exec','-i',main['Id'],'python','-',input=code),end='')
                 for name,network in networks.items():
                     if name=='external_egress':continue
