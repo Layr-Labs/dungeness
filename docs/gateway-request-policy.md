@@ -111,3 +111,17 @@ The boundary tests use mock providers. They exercise all registered inference
 routes with and without model allowlists and with disabled/optional web budgets,
 and assert that rejected requests cause no upstream calls or model charges.
 Positive cases cover local Codex/Claude-style tool histories, SDK loops, configured providers, compaction, token counting, embeddings and local model discovery.
+
+## OpenRouter usage and charges
+
+OpenRouter calls record provider-reported `billed_usd`, `billing_source` and
+`upstream_request_id` alongside pinned-price `normalized_usd`. The same gateway
+code runs locally and in hosted evaluations. Charges come from response
+`usage.cost`, or a bounded HTTPS lookup of that exact generation when needed;
+shared-key balance deltas are never used for attribution. Lookup credentials stay
+inside the gateway, and the generation endpoint is not exposed to the harness.
+
+A missing charge remains unknown and blocks further model admissions. Actual
+charges and the existing normalized ceiling both constrain the run; in-flight
+requests can still exceed a cap. Other provider routes keep their existing
+accounting. Cost records are not proof that a solver-authored local trace is genuine.
