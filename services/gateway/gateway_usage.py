@@ -512,7 +512,8 @@ class UsageLedger:
             self.counts[name] += 1
             self._write_summary_locked()
 
-    def admit_model(self, request_id: str, *, tokens: int = 0, usd: float | None = None) -> None:
+    def admit_model(self, request_id: str, *, tokens: int = 0, usd: float | None = None,
+                    exclusive: bool = False) -> None:
         """Reserve shared credits until the upstream stream has fully drained.
 
         A reservation is an admission allowance, not a provider billing promise.
@@ -532,6 +533,11 @@ class UsageLedger:
             if type(tokens) is not int or tokens < 0:
                 raise ValueError("Invalid model token reservation")
             token_limit = self.limits["model_tokens"]
+            if exclusive:
+                if self.model_inflight:
+                    raise BudgetExceeded("opaque-history request must wait for active calls to settle")
+                tokens = max(0, token_limit - self.counts["model_tokens"]) if token_limit is not None else 0
+                usd = available
             if token_limit is not None and self.counts["model_tokens"] + sum(self.model_token_inflight.values()) + tokens > token_limit:
                 raise BudgetExceeded("model tokens are reserved or insufficient for this request")
             reservation = min(available, self.request_reservation_usd) if usd is None else usd

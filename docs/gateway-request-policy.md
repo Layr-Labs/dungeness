@@ -141,9 +141,12 @@ provider usage remains authoritative; missing accounting blocks further calls.
 
 This is deliberately conservative: large cached histories may be rejected even
 when their eventual bill would be lower. It is not a universal tokenizer or a
-provider-enforced cash guarantee. Opaque encrypted history, provider-side state
-references and operations without a supported output bound are rejected in
-this mode. Use explicit text history and ordinary generation routes. Other
+provider-enforced cash guarantee. Opaque encrypted history is preserved, but its
+request must wait for other calls and reserves the entire remaining allowance.
+Ciphertext length is not treated as a token count. A single opaque-history call
+can still exceed a soft limit; actual provider usage settles it. Provider-side
+state references and operations without a supported output bound are rejected.
+Use ordinary generation routes. Other
 local runs keep the existing protocol behavior unless this guard is enabled.
 
 A provider-enforced, expiring per-run key is an additional financial boundary;

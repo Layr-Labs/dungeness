@@ -19,16 +19,14 @@ def bounded_request(payload, operation, pricing, *, maximum=65536):
             raise ValueError('Budgeted inference permits only one generated completion per request')
     if payload.get('previous_response_id') or payload.get('conversation'):
         raise ValueError('Send explicit local history for bounded inference')
-    def check(value):
+    def opaque(value):
         if isinstance(value, dict):
-            if value.get('encrypted_content'):
-                raise ValueError('Opaque provider state cannot be conservatively reserved; send explicit history')
-            for item in value.values():
-                check(item)
+            if value.get('encrypted_content') or value.get('type') in ('redacted_thinking', 'reasoning.encrypted', 'compaction'):
+                return True
+            return any(opaque(item) for item in value.values())
         elif isinstance(value, list):
-            for item in value:
-                check(item)
-    check(payload.get('input', []))
+            return any(opaque(item) for item in value)
+        return False
     fields = [k for k in ('max_output_tokens', 'max_completion_tokens', 'max_tokens') if k in payload]
     if len(fields) > 1:
         raise ValueError('Use a single output-token limit')
@@ -44,6 +42,10 @@ def bounded_request(payload, operation, pricing, *, maximum=65536):
     key = (fields[0] if fields else 'max_output_tokens' if operation == 'responses'
            else 'max_completion_tokens' if operation == 'chat/completions' else 'max_tokens')
     result[key] = limit
+    if opaque(payload.get('input', [])) or opaque(payload.get('messages', [])):
+        # Ciphertext is not a token count. Preserve supported protocol history,
+        # but admit it exclusively against the entire remaining allowance.
+        return result, None, None
     # Includes tools and message framing. No claim of exact model tokenization.
     inputs = len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()) + 1024
     tiers = [pricing, *([pricing['long_context']] if pricing.get('long_context') else [])]
