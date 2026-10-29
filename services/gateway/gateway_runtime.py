@@ -165,7 +165,8 @@ class Gateway:
                 payload, tokens, usd = bounded_request(
                     payload, operation, pricing_for_request(provider, payload["model"]),
                     maximum=int(os.environ.get("DUNGENESS_MAX_OUTPUT_TOKENS", "65536")))
-                self.ledger.admit_model(request.state.request_id, tokens=tokens, usd=usd)
+                self.ledger.admit_model(request.state.request_id, tokens=tokens or 0, usd=usd,
+                                        exclusive=tokens is None)
             else:
                 self.ledger.admit_model(request.state.request_id)
         log_event("model_request_admitted", request_id=request.state.request_id)
