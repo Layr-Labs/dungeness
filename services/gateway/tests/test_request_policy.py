@@ -106,6 +106,8 @@ class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
             await runtime.client.aclose()
             def upstream(request):
                 calls.append(json.loads(request.content))
+                if "plugins" in calls[-1]:
+                    return httpx.Response(403, json={"error": {"message": "Workspace blocks server tools"}})
                 data = {"choices": [], "usage": usage}
                 class Stream(httpx.AsyncByteStream):
                     async def __aiter__(self):
@@ -119,7 +121,7 @@ class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 reply = await client.post(url, json=payload)
                 self.assertEqual(reply.status_code, 200, reply.text)
                 self.assertEqual(calls[0]["stream_options"], {"include_usage": True})
-                self.assertEqual(calls[0]["plugins"], [{"id": "web", "enabled": False}])
+                self.assertNotIn("plugins", calls[0])
                 self.assertAlmostEqual(runtime.ledger.usd_spent, .00462)
                 for block in (
                     {"type": "image_url", "image_url": {"url": "https://example.invalid/image"}},
@@ -319,7 +321,7 @@ class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(reply.status_code, 200, (provider, operation, reply.text))
                         expected += 1
                         if provider == "openrouter":
-                            self.assertEqual(calls[-1][1]["plugins"], [{"id": "web", "enabled": False}])
+                            self.assertNotIn("plugins", calls[-1][1])
                         if calls[-1][0] == "http":
                             self.assertNotIn("x-untrusted-search", calls[-1][2].headers)
                 self.assertEqual(len(calls), expected)
