@@ -1,4 +1,10 @@
-# Gateway Design (MVP)
+# Gateway design notes (historical)
+
+These original MVP notes include retired web-access behavior. For the current
+runtime, use [network isolation](../docs/network-isolation.md),
+[gateway authentication](../docs/gateway-authentication.md), and
+[request policy](../docs/gateway-request-policy.md). Outbound Exa search/fetch is
+disabled; provider credentials use private gateway-only files.
 
 ## Purpose
 

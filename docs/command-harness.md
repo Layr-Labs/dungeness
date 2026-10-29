@@ -21,7 +21,10 @@ execution:
 ```
 
 The Dockerfile needs Python 3 for the runner. Install all dependencies at build
-time; the execution container has no direct internet route.
+time; the execution container has no direct internet route. Each run uses
+[isolated internal bridges](network-isolation.md), with no host bridge address.
+Raw sockets, network administration and setuid/file-capability escalation are
+unavailable; ordinary sockets, subprocesses and workspace writes remain supported.
 
 Bundle papers, local databases, indexes and retrieval software in the harness
 image, using any layout or file format your agent supports. Dungeness does not
