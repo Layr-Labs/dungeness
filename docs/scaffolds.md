@@ -35,7 +35,7 @@ applied to the agent workspace, intermediate evaluator and final verifier.
 Source files, the manifest and edit paths are recorded in run provenance.
 
 Consumers require `declarative-scaffolds-v2`. Schema-v1 scaffolds with implicit
-Rust modules and validation stages are rejected. Catalyst supplies the ECDSA
+Rust modules and validation stages are rejected. OpenRSI supplies the ECDSA
 schema-v2 scaffold from its own problem package; generic Dungeness does not
 bundle that challenge's starting candidate, SDK or source transformations.
 

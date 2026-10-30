@@ -29,8 +29,8 @@ Follow the [runtime quick start](../README.md#quick-start-for-operators).
 Create a `dungeness-command-v1` descriptor and Dockerfile for your harness,
 then select its model policy independently in `model_access` in the run spec.
 The bundled `command` example only prints its task and makes no model calls.
-Catalyst solvers normally use the public Catalyst CLI to build or submit a
-`catalyst-exec-v1` harness; Catalyst creates this descriptor automatically.
+OpenRSI solvers normally use the `openrsi-space` CLI to build or submit a
+`catalyst-exec-v1` harness; OpenRSI creates this descriptor automatically.
 
 Bundled Codex, Claude Code, Pi and Prime Agent launchers have been retired,
 along with Dungeness's login command, native reasoning flags and refresh proxy.

@@ -51,7 +51,7 @@ To reproduce only the old host-access gap with a synthetic listener:
 uv run --locked --group gateway python script/check-run-isolation.py --baseline
 ```
 
-The full Catalyst mock integration additionally exercises the actual Harbor
+The full OpenRSI mock integration additionally exercises the actual Harbor
 adapter, candidate evaluation, independent verification and Yukon receipt retrieval.
 
 ## Scope

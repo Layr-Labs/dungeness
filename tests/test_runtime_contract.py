@@ -19,7 +19,7 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(expected["providers"], ["anthropic", "claude-subscription", "openai", "openai-chatgpt", "openrouter"])
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            # Prove registry extensions come from this runtime, not Catalyst or
+            # Prove registry extensions come from this runtime, not OpenRSI or
             # a previously imported checkout. No server or credential is used.
             gateway = root / "services/gateway"
             shutil.copytree(ROOT / "services/gateway", gateway,

@@ -25,7 +25,7 @@ def gateway_credentials(render: Path, env_file: Path, environment: dict[str, str
     Linux uses shared memory; other local platforms use a private temp directory.
     The caller must leave this context after container teardown.
     """
-    # Metadata commands (providers/capabilities) are also invoked by Catalyst's
+    # Metadata commands (providers/capabilities) are also invoked by OpenRSI's
     # Python interpreter. Only execution needs the CLI's pinned dotenv runtime.
     from dotenv import dotenv_values
 

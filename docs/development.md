@@ -55,7 +55,7 @@ supplies the Harbor interpreter and retains its existing helper entry points.
 `execution/environments.py` owns run-scoped Docker discovery and teardown;
 the CLI's administrative `clean` command uses those same operations.
 `execution/process.py` streams subprocess output and reaps interrupted children
-before teardown. Children remain in the caller's process group so Catalyst's
+before teardown. Children remain in the caller's process group so OpenRSI's
 group cancellation continues to reach them. Termination gets a ten-second grace
 period before killing an unresponsive child. Cleanup attempts all stages even
 when record finalization fails, and secondary errors do not replace the original
@@ -67,7 +67,7 @@ validation and generic compilation remain in the compiler.
 
 `scaffolds.py` materializes schema-v2 scaffold manifests using explicit file
 mappings and text edits that must match an expected number of times. It knows
-no language filenames or problem-specific validation stages. Catalyst owns its
+no language filenames or problem-specific validation stages. OpenRSI owns its
 ECDSA scaffold and verifier bundles under `src/catalyst/problem-set/ecdsa-fail/`
 and installs them into the disposable runtime. Candidate files and trusted edits remain separate;
 submitted harnesses cannot choose the manifest or load preparation code.
@@ -91,13 +91,13 @@ modules imported on the host.
 
 Preserve the behavioral tests when moving code. Where a feature is deliberately
 retired, test explicit rejection rather than silently ignoring its old settings.
-Update exports, documentation links and Catalyst consumer tests with each
+Update exports, documentation links and OpenRSI consumer tests with each
 affected boundary. Changes to model credentials, accounting, isolation or
 candidate verification need their own focused validation.
 
 Compiler and record tests use a disposable runtime populated from synthetic
 records under `tests/fixtures/runtime/`. Challenge grader tests live with the
-Catalyst problem assets. No Dungeness check requires a Catalyst checkout.
+OpenRSI problem assets. No Dungeness check requires a OpenRSI checkout.
 
 For network-policy changes, also run `make check-run-isolation` with Docker
 access. It exercises two simultaneous runs with synthetic credentials; see

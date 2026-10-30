@@ -10,7 +10,7 @@ def resolve_web_access(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError("run spec web_search must be a mapping")
     # External web access is retired. Accept old access-only settings but never
-    # let optional mode re-enable it. Older Catalyst releases emit these references.
+    # let optional mode re-enable it. Older OpenRSI releases emit these references.
     # They resolve without loading a profile, prompt, or other repository file.
     if set(value) == {"profile"}:
         aliases = {

@@ -37,13 +37,13 @@ implemented routes, not credential validity, model prices or operator-dependent
 features such as OpenRouter inference-only routing. Configure extensions only
 in the trusted runtime; harnesses must not supply or replace that registry.
 
-## Catalyst migration
+## OpenRSI migration
 
 The former `ecdsa-readable-verifier-results-v1` capability was retired when the
-verifier moved to Catalyst. Its readability guarantee is tested with that package.
-Update the Catalyst adapter together with a runtime that no longer declares it.
+verifier moved to OpenRSI. Its readability guarantee is tested with that package.
+Update the OpenRSI adapter together with a runtime that no longer declares it.
 
-Catalyst reads this contract through `catalyst.runtime_contract`. Older pinned
+OpenRSI reads this contract through `catalyst.runtime_contract`. Older pinned
 runtimes without the file temporarily use the existing source-marker checks,
 isolated in `catalyst._legacy_dungeness`. A present but malformed or incomplete
 declaration fails; it never falls back to those checks. No new capability may be
@@ -51,7 +51,7 @@ added to the legacy bridge. Remove it after supported deployments have moved to
 contract-bearing pins.
 
 The compatibility declaration allows internal modules to move, but it does not
-remove other integration boundaries. Catalyst still writes record collections
+remove other integration boundaries. OpenRSI still writes record collections
 and uses the Dungeness CLI. Its real compiler contract tests also exercise
 internal compiler helpers. Coordinate those tests and any explicit file/CLI
 interface changes when extracting modules.
@@ -64,7 +64,7 @@ tests cover request validation, rejected-request accounting and assigned resourc
 Harbor environment checks the adapter against the real pinned Harbor API.
 See [development checks](development.md).
 
-Before changing this contract or runtime layout, also run Catalyst's real
+Before changing this contract or runtime layout, also run OpenRSI's real
 compiler tests against a clean commit of the candidate runtime. From the verifier
 checkout, with its dependencies installed:
 

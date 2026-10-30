@@ -69,7 +69,7 @@ solver-controlled credential-grant format.
 
 Session-token profiles require their existing `*_EXPIRES_AT` value. Credential
 expiry does not trigger an API-key fallback or an automatic login/refresh.
-Catalyst's local login readers remain responsible for extracting temporary
+OpenRSI's local login readers remain responsible for extracting temporary
 access from provider login files.
 
 Trusted authentication headers override any allowed client metadata. Destinations

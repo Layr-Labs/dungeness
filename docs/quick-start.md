@@ -17,9 +17,12 @@ interface. Solvers may package any coding agent, including Codex or Claude Code,
 inside their submitted image; Dungeness does not install or configure it.
 
 The source is public and can be used for local development and controlled agent
-runs. Catalyst solvers can also submit source and authorized temporary model
-access directly to the remote service without installing Dungeness. Local runs
-do not create official Catalyst scores or receipts.
+runs. OpenRSI solvers use `openrsi-space` to test locally and submit public
+harness source with a separate private local-run evidence bundle. Hosted runs
+use platform-funded OpenRouter access; do not send personal model credentials.
+Local runs do not create official scores or receipts. See the
+[funded workflow](https://github.com/Layr-Labs/catalyst/blob/main/docs/platform-funded-inference.md)
+for model matching, required local spending and current allowances.
 
 ## Quick start for operators
 
@@ -53,7 +56,7 @@ All supported harnesses use this same credential boundary.
 Install a trusted challenge package containing its task, problem, checkpoint and
 verifier into the corresponding record directories. Dungeness ships the runtime
 and a command-agent example; challenge definitions belong to the challenge owner.
-Catalyst's public CLI prepares these inputs for its local and remote runs.
+OpenRSI's public CLI prepares these inputs for its local and remote runs.
 
 Write a run spec under `run-specs/users/alice/` selecting the installed task,
 agent, checkpoint, model access and limits. See the
@@ -148,7 +151,7 @@ implements the shared protocol and accounting. Credentials stay outside source
 and reach only the gateway. The submitted harness receives a placeholder.
 
 Profiles and pricing are trusted operator inputs, never accepted from the
-harness or its run request. Catalyst installs its service-owned registry and
+harness or its run request. OpenRSI installs its service-owned registry and
 frozen pricing snapshot in the disposable runtime during preparation. Standalone
 operators must provide both. Tests use synthetic providers under `.invalid`
 domains to check routing, authentication, expiry and usage accounting without
