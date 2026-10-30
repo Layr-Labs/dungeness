@@ -65,7 +65,7 @@ async def harness(*, declared=True, web=False):
         "GROK_SUBSCRIPTION_TOKEN": "unused-grok-session",
         "GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "MINIMAX_CODING_PLAN_KEY": "unused-minimax-plan-key",
-    }), patch.object(gateway_pricing, "MODEL_PRICING", [*gateway_pricing.MODEL_PRICING, *[
+    }), patch.object(gateway_pricing, "MODEL_PRICING", [*[e for e in gateway_pricing.MODEL_PRICING if e["provider"] not in {"example-api", "example-session", "claude-subscription", "grok-subscription", "minimax-subscription"}], *[
         {"provider": p, "upstream_id": "example/example-model", "request_models": [MODELS[p]],
          "input_per_mtok": 2, "output_per_mtok": 6, "cached_read_per_mtok": .5,
          "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session", "claude-subscription", "grok-subscription", "minimax-subscription")]]):
@@ -95,6 +95,24 @@ async def harness(*, declared=True, web=False):
 
 
 class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_output_limit_rejection_records_reason_without_sending_request(self):
+        with patch.dict(os.environ, {'DUNGENESS_BOUNDED_REQUESTS': '1'}):
+            async with harness() as (client, runtime, calls):
+                payload = {**request_body('anthropic', 'messages'), 'max_tokens': 128000}
+                reply = await client.post(route('anthropic', 'messages'), json=payload)
+                self.assertEqual(reply.status_code, 400)
+                self.assertIn('65536', reply.text)
+                self.assertEqual(calls, [])
+                self.assertEqual(runtime.ledger.counts['model_requests'], 0)
+                events = [json.loads(line) for line in (runtime.ledger.directory/'events.jsonl').read_text().splitlines()]
+                rejected = next(e for e in events if e['kind'] == 'gateway.model_request_rejected')
+                self.assertEqual(rejected['data']['code'], 'output_token_limit')
+                self.assertEqual(rejected['data']['maximum'], 65536)
+                self.assertNotIn('solve locally', json.dumps(rejected))
+                reply = await client.post(route('anthropic', 'messages'), json={**payload, 'max_tokens': 64000})
+                self.assertEqual(reply.status_code, 200, reply.text)
+                self.assertEqual(len(calls), 1)
+
     async def test_text_only_quote_excludes_media_and_counts_reasoning_once(self):
         reference = {
             "provider": "openrouter", "upstream_id": MODELS["openrouter"],

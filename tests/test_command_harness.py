@@ -33,6 +33,16 @@ MODEL = {"provider": "openai-chatgpt", "request_model": "gpt-6-astra",
 
 
 class CommandHarnessTests(unittest.TestCase):
+    def test_command_child_receives_real_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = Path(tmp)/'task.json'
+            task.write_text(json.dumps({'workspace': tmp, 'remaining_seconds': 45,
+                'execution': {'entrypoint': [sys.executable, '-c',
+                "import os,time; remaining=float(os.environ['DUNGENESS_AGENT_DEADLINE_EPOCH'])-time.time(); assert 40<remaining<=45; assert os.environ['DUNGENESS_AGENT_TIMEOUT_SEC']=='45'"]}}))
+            result = subprocess.run([sys.executable, str(ROOT/'adapters/harbor/command_runner.py'), str(task)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_provider_discovery_does_not_import_execution_only_dependencies(self):
         code = ("import runpy,sys; sys.modules['dotenv']=None; "
                 "sys.argv=[sys.argv[1],'providers']; runpy.run_path(sys.argv[0],run_name='__main__')")

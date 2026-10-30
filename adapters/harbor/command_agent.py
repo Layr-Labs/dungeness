@@ -66,6 +66,10 @@ class CommandAgent(BaseInstalledAgent):
             )
             (self.logs_dir / f"harness-output-{attempt}.txt").write_text(
                 (result.stdout or "") + "\n" + (result.stderr or ""))
+            (self.logs_dir / "harness-outcome.json").write_text(json.dumps({
+                "attempt": attempt, "exit_code": result.return_code,
+                "status": "completed" if result.return_code == 0 else "failed",
+            }))
             if result.return_code == 0:
                 return
             if (result.return_code != 75 or attempt >= self.max_resumes

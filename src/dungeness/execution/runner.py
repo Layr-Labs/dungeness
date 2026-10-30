@@ -6,6 +6,7 @@ This layer owns orchestration, not record schemas, CLI arguments or model policy
 from __future__ import annotations
 
 from contextlib import ExitStack
+import json
 import os
 from pathlib import Path
 import shutil
@@ -175,4 +176,11 @@ def execute(
             )
         if failure is None and cleanup_error is not None:
             raise cleanup_error
+    # Harbor can exit zero after recording a failed trial. The finalized record,
+    # rather than the orchestration process, determines the run's outcome.
+    if record_path is not None:
+        data = json.loads(record_path.read_text())["data"]
+        if data.get("status") != "completed":
+            print(f">> run {data.get('status', 'failed')}; inspect {record_path}", file=sys.stderr)
+            return 130 if data.get("status") == "cancelled" else 1
     return 0

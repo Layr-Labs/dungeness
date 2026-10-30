@@ -76,6 +76,14 @@ class ExecutionLifecycleTests(unittest.TestCase):
                          str(self.root / "adapters/harbor"))
         self.assertFalse(Path(self.commands.call_args.kwargs["env"]["DUNGENESS_CREDENTIALS_FILE"]).exists())
 
+    def test_zero_harbor_exit_with_failed_trial_returns_failure(self):
+        from dungeness.records import write_json
+        write_json(self.run_dir / 'harbor' / self.run_id / 'result.json', {
+            'stats': {'n_errored_trials': 1, 'evals': {'synthetic': {'exception_stats': {'RuntimeError': 1}}}}})
+        self.assertEqual(self.execute(), 1)
+        self.assertEqual(self.record()['status'], 'failed')
+        self.assertIn('RuntimeError', self.record()['error'])
+
     def test_credentials_remain_until_container_teardown_then_are_removed(self):
         files = []
         def command(argv, **kwargs):

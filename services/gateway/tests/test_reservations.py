@@ -14,6 +14,16 @@ RATES = {'input_per_mtok': 2, 'cached_read_per_mtok': .5, 'output_per_mtok': 10}
 
 
 class ReservationTests(unittest.TestCase):
+    def test_offline_validator_covers_field_policy_and_output_reservations(self):
+        from gateway_reservations import validate_generation, OutputLimitError
+        payload = {'model': 'claude-opus-5-5', 'messages': [{'role': 'user', 'content': 'Synthetic probe'}], 'max_tokens': 64000}
+        body, _, _ = validate_generation('claude-subscription', 'messages', payload, RATES)
+        self.assertEqual(body['max_tokens'], 64000)
+        with self.assertRaises(OutputLimitError):
+            validate_generation('claude-subscription', 'messages', {**payload, 'max_tokens': 128000}, RATES)
+        with self.assertRaises(ValueError):
+            validate_generation('claude-subscription', 'messages', {**payload, 'unknown_control': True}, RATES)
+
     def test_zero_input_pricing_still_reserves_tokens(self):
         for output in (0, 10):
             with self.subTest(output=output):
