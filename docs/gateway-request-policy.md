@@ -1,5 +1,28 @@
 # Gateway request policy
 
+## Offline checks and output limits
+
+OpenRSI enables bounded request reservations with a default maximum of **65,536
+output tokens per request**, separately from the run's spending limit. Oversized
+explicit limits are rejected before generation, not silently truncated. Claude
+Code harnesses should set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000`. This is a gateway
+policy, not the provider model's maximum output capacity.
+
+Use the same field and reservation validator as the gateway without making calls:
+
+```sh
+python tools/validate-model-request.py --provider claude-subscription \
+  --operation messages --request request.json \
+  --pricing docs/examples/local-subscription-pricing-20261030.json
+```
+
+The JSON request must include the selected model. This checks body fields and
+output limits and reports the conservative reservation. It does not validate
+credentials, live balance, provider eligibility, transport headers or actual
+upstream behavior. A strict mock can import `validate_generation` from
+`services/gateway/gateway_reservations.py`. Rejected live requests emit a safe
+`gateway.model_request_rejected` event without prompt or credential contents.
+
 The gateway accepts a reviewed subset of provider APIs. Every inference route
 validates requests **before provider traffic or budget
 reservation**. This applies to command harnesses, legacy named agents, and runs

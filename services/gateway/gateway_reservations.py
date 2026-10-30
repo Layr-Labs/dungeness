@@ -9,6 +9,22 @@ import math
 GENERATION = {'responses', 'chat/completions', 'completions', 'messages'}
 
 
+class OutputLimitError(ValueError):
+    def __init__(self, maximum):
+        self.maximum = maximum
+        super().__init__(f'Per-request output limit must be 1..{maximum} tokens')
+
+
+def validate_generation(provider, operation, payload, pricing, *, maximum=65536, available_usd=None):
+    """Offline public validator shared with live bounded inference admission.
+
+    Does not check credentials, routing availability, or reserve live credits.
+    """
+    from gateway_request_policy import validate_model_request
+    validate_model_request(provider, operation, payload)
+    return bounded_request(payload, operation, pricing, maximum=maximum, available_usd=available_usd)
+
+
 def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd=None):
     if operation not in GENERATION:
         raise ValueError('This operation has no bounded generation contract; use explicit text generation.')
@@ -37,7 +53,7 @@ def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd
         raise ValueError('Output-token limit does not match this API operation')
     limit = payload[fields[0]] if fields else min(maximum, 16384)
     if type(limit) is not int or not 1 <= limit <= maximum:
-        raise ValueError(f'Per-request output limit must be 1..{maximum} tokens')
+        raise OutputLimitError(maximum)
     result = dict(payload)
     key = (fields[0] if fields else 'max_output_tokens' if operation == 'responses'
            else 'max_completion_tokens' if operation == 'chat/completions' else 'max_tokens')

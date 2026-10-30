@@ -29,7 +29,7 @@ from gateway_models import (
     usage_extractor,
 )
 from gateway_provider_cost import openrouter_charge
-from gateway_reservations import bounded_request
+from gateway_reservations import validate_generation
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
 import gateway_pricing
 from gateway_pricing import (
@@ -165,8 +165,8 @@ class Gateway:
                 # Sizing and admission share the ledger lock: concurrent calls
                 # cannot each allocate the same remaining credits.
                 with self.ledger.lock:
-                    payload, tokens, usd = bounded_request(
-                        payload, operation, pricing_for_request(provider, payload["model"]),
+                    payload, tokens, usd = validate_generation(
+                        provider, operation, payload, pricing_for_request(provider, payload["model"]),
                         maximum=int(os.environ.get("DUNGENESS_MAX_OUTPUT_TOKENS", "65536")),
                         available_usd=self.ledger.available_model_usd())
                     self.ledger.admit_model(request.state.request_id, tokens=tokens or 0, usd=usd,

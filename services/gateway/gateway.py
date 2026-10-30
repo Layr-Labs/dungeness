@@ -391,13 +391,23 @@ async def external_web_disabled(_request: Request) -> Response:
     }}, status_code=410)
 
 
+def model_request_rejected(request, error):
+    from gateway_reservations import OutputLimitError
+    details = {"code": "output_token_limit" if isinstance(error, OutputLimitError) else "request_policy_rejected"}
+    if isinstance(error, OutputLimitError):
+        details["maximum"] = error.maximum
+    # Do not record request bodies, header values, or arbitrary exception text.
+    log_event("model_request_rejected", request_id=getattr(request.state, "request_id", None), **details)
+    return JSONResponse({"error": str(error)}, status_code=400)
+
+
 async def model_openai(request: Request) -> Response:
     try:
         return await gateway.proxy_model("openai", request.path_params["path"], request)
     except BudgetExceeded as error:
         return budget_rejected(request, "model.openai", error)
     except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return model_request_rejected(request, error)
     except httpx.HTTPError as error:
         return JSONResponse(
             {"error": f"provider request failed: {type(error).__name__}"},
@@ -413,7 +423,7 @@ async def model_anthropic(request: Request) -> Response:
     except BudgetExceeded as error:
         return budget_rejected(request, "model.anthropic", error)
     except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return model_request_rejected(request, error)
     except httpx.HTTPError as error:
         return JSONResponse(
             {"error": f"provider request failed: {type(error).__name__}"},
@@ -429,7 +439,7 @@ async def model_openrouter(request: Request) -> Response:
     except BudgetExceeded as error:
         return budget_rejected(request, "model.openrouter", error)
     except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return model_request_rejected(request, error)
     except httpx.HTTPError as error:
         return JSONResponse(
             {"error": f"provider request failed: {type(error).__name__}"},
@@ -446,7 +456,7 @@ async def model_configured(request: Request) -> Response:
     except BudgetExceeded as error:
         return budget_rejected(request, 'model.' + provider, error)
     except ValueError as error:
-        return JSONResponse({'error': str(error)}, status_code=400)
+        return model_request_rejected(request, error)
     except httpx.HTTPError as error:
         return JSONResponse({'error': f'provider request failed: {type(error).__name__}'}, status_code=502)
 
@@ -459,7 +469,7 @@ async def model_chatgpt(request: Request) -> Response:
     except BudgetExceeded as error:
         return budget_rejected(request, "model.openai-chatgpt", error)
     except ValueError as error:
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return model_request_rejected(request, error)
     except httpx.HTTPError as error:
         return JSONResponse(
             {"error": f"provider request failed: {type(error).__name__}"},

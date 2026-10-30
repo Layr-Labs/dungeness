@@ -26,7 +26,10 @@ need a separate integration decision.
 
 The frozen [2026-10-30 local schedule](examples/local-subscription-pricing-20261030.json)
 records the public OpenRouter reference prices and original catalog fields.
-Pass it to `openrsi-space local run --pricing /absolute/path/to/the/schedule.json`.
+Current OpenRSI clients bundle equivalent reference entries; `--pricing` is not
+required for advertised models. This file is also available for direct Dungeness
+experiments. Claude Code setup is documented in the
+[OpenRSI recipe](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/claude-subscription.md).
 It does not change the historical default schedule or query live prices during
 a run. Grok's higher rate above 200,000 input tokens is retained; hosted search
 is disabled. A 500,000-token context window is a client configuration, not a

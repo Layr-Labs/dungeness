@@ -5,6 +5,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 
 
 def launch(task_path):
@@ -14,6 +15,10 @@ def launch(task_path):
     argv = execution["resume_entrypoint"] if task.get("resume") else execution["entrypoint"]
     environment = {**os.environ, "DUNGENESS_TASK": task_path,
                    "DUNGENESS_WORKSPACE": task["workspace"]}
+    if "remaining_seconds" in task:
+        remaining = max(0, float(task["remaining_seconds"]))
+        environment["DUNGENESS_AGENT_DEADLINE_EPOCH"] = str(time.time() + remaining)
+        environment["DUNGENESS_AGENT_TIMEOUT_SEC"] = str(int(remaining))
     process = subprocess.Popen(argv, cwd=task["workspace"], env=environment, start_new_session=True)
     received = []
 
