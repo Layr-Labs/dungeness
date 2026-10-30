@@ -255,7 +255,10 @@ METRICS = Metrics()
 
 
 class BudgetExceeded(RuntimeError):
-    pass
+    def __init__(self, message, *, code="model_budget_rejected", **details):
+        super().__init__(message)
+        self.code = code
+        self.details = details
 
 
 class UsageLedger:
@@ -512,6 +515,11 @@ class UsageLedger:
             self.counts[name] += 1
             self._write_summary_locked()
 
+    def available_model_usd(self):
+        """Caller holds lock across request sizing and admission."""
+        with self.lock:
+            return self.usd_limit - max(self.usd_spent, self.budget_usd_spent) - sum(self.model_inflight.values())
+
     def admit_model(self, request_id: str, *, tokens: int = 0, usd: float | None = None,
                     exclusive: bool = False) -> None:
         """Reserve shared credits until the upstream stream has fully drained.
@@ -527,7 +535,7 @@ class UsageLedger:
                 raise BudgetExceeded("duplicate active request")
             if len(self.model_inflight) >= self.max_parallel_requests:
                 raise BudgetExceeded("model concurrency limit reached; retry after active calls settle")
-            available = self.usd_limit - max(self.usd_spent, self.budget_usd_spent) - sum(self.model_inflight.values())
+            available = self.available_model_usd()
             if available <= 0:
                 raise BudgetExceeded("model credits are reserved or exhausted")
             if type(tokens) is not int or tokens < 0:
@@ -544,7 +552,14 @@ class UsageLedger:
             if not isinstance(reservation, (float, int)) or not 0 <= reservation < float('inf'):
                 raise ValueError("Invalid model cost reservation")
             if reservation > available:
-                raise BudgetExceeded("insufficient credits for conservative request reservation; shorten input or lower output limit")
+                raise BudgetExceeded(
+                    "Insufficient credits for this request's conservative reservation; "
+                    "shorten the input or lower an explicit output-token limit. "
+                    "This request was not sent to the provider.",
+                    code="model_reservation_exceeds_remaining_budget",
+                    available_usd=available, required_reservation_usd=reservation,
+                    budget_usd=self.usd_limit, reserved_tokens=tokens,
+                    upstream_request_sent=False)
             self.reserve("model_requests")
             self.model_inflight[request_id] = reservation
             self.model_token_inflight[request_id] = tokens
