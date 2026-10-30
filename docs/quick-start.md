@@ -21,7 +21,7 @@ runs. OpenRSI solvers use `openrsi-space` to test locally and submit public
 harness source with a separate private local-run evidence bundle. Hosted runs
 use platform-funded OpenRouter access; do not send personal model credentials.
 Local runs do not create official scores or receipts. See the
-[funded workflow](https://github.com/Layr-Labs/catalyst/blob/main/docs/platform-funded-inference.md)
+[funded workflow](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/platform-funded-inference.md)
 for model matching, required local spending and current allowances.
 
 ## Quick start for operators

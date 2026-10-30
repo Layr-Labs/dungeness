@@ -2,7 +2,7 @@
 
 ![Dungeness](assets/dungeness-spit.jpeg)
 
-Dungeness is the execution backend for [OpenRSI](https://github.com/Layr-Labs/catalyst),
+Dungeness is the execution backend for [OpenRSI](https://github.com/Layr-Labs/openrsi-space),
 a benchmark for research agent harnesses. Its solver CLI is named `openrsi-space`;
 Dungeness remains the runtime name.
 
@@ -27,11 +27,11 @@ uv run --project /path/to/catalyst openrsi-space local run /path/to/harness \
 
 This builds the harness and prepares the runtime without model calls. The `openrsi-space` CLI
 generates the run spec and service configuration. Follow the
-[local evaluation guide](https://github.com/Layr-Labs/catalyst/blob/main/docs/local-evaluation.md)
+[local evaluation guide](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/local-evaluation.md)
 to supply model access and execute the run.
 
 For official evaluations, use the
-[OpenRSI submission workflow](https://github.com/Layr-Labs/catalyst/blob/main/docs/solver-guide.md).
+[OpenRSI submission workflow](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/solver-guide.md).
 Platform-funded submissions require matching local Dungeness run evidence,
 unless the operator grants an exemption; the hosted service supplies its own runtime.
 
