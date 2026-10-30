@@ -42,7 +42,7 @@ def stream_command(command: list[str], *, cwd: Path, env: dict[str, str] | None 
                 last_line = line.strip()
         return_code = process.wait()
     except BaseException:
-        # Stay in the caller's process group: Catalyst cancels that whole group.
+        # Stay in the caller's process group: OpenRSI cancels that whole group.
         # Reap our child before container teardown even if interruption happens
         # while streaming output, rather than leaving a launcher running.
         try:

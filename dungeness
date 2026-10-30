@@ -203,7 +203,7 @@ def require_config_mapping(
 
 
 def validate_run_spec_web_search(document: dict[str, object]) -> None:
-    """Keep the public validator used by Catalyst, without loading profiles."""
+    """Keep the public validator used by OpenRSI, without loading profiles."""
     try:
         resolve_web_access(document.get("web_search"))
     except ValueError as error:

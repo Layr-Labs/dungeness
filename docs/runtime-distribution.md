@@ -19,7 +19,7 @@ python3 script/export_runtime.py --revision HEAD \
 The exporter reads **only the selected Git commit**, never local credentials or
 uncommitted files. Its allowlist excludes `runs/`, personal knowledge bases,
 personal run specs, experiments, reports, Git history and tests. No personal
-task directories are included. Catalyst generates its task and checkpoint from
+task directories are included. OpenRSI generates its task and checkpoint from
 its own trusted problem package. The exporter rejects symlinks and LFS pointers in the selected runtime. It refuses to replace
 an existing archive.
 
@@ -28,7 +28,7 @@ file. The command prints the archive digest. The same revision produces
 identical archive bytes.
 
 The bundle is source for running Dungeness locally; it is not an official
-Catalyst evaluation or a hosted service. It contains no provider credentials.
+OpenRSI evaluation or a hosted service. It contains no provider credentials.
 
 The optional local transcript viewer is excluded by default. Include it with
 `--include-transcript-tools` when needed; full checkouts have it under
@@ -100,4 +100,4 @@ zeros search and fetch budgets. Direct agent egress remains blocked.
 The unused world-map development/holdout split evaluator is retired; tasks
 requesting it fail explicitly. Full-benchmark verification is retained. The old
 Dungeness-specific Yukon manifest, placeholder workflow and submission slot are
-removed; Catalyst owns its Yukon integration.
+removed; OpenRSI owns its Yukon integration.

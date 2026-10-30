@@ -54,7 +54,7 @@ into the gateway; no native credentials or refresh proxy are supplied to a
 command harness. The caller owns credential lifetime and cleanup.
 
 The pricing schedule is runtime data, not a source-code model whitelist.
-An enclosing service such as Catalyst can install a frozen, authenticated
+An enclosing service such as OpenRSI can install a frozen, authenticated
 catalog snapshot into the isolated runtime's `services/gateway/pricing.yaml`
 before compiling a run. The same snapshot is used by the compiler, gateway
 and downstream verifier. Submitted agents cannot set their own rates.
@@ -107,7 +107,7 @@ Set CLI options, reasoning settings and protocol compatibility inside the harnes
 run-level native `agent_options` are rejected. To resume, implement
 `execution.resume_entrypoint` and retain session state inside the container.
 
-Catalyst's `catalyst-exec-v1` submission contract is unchanged. Its public CLI
+OpenRSI's `catalyst-exec-v1` submission contract is unchanged. Its public CLI
 accepts a Dockerfile and entrypoint and installs the trusted command adapter.
 The `agents/projects/dungeness/command` example is only a no-model smoke command.
 Historical bundled-agent experiments require their original runtime revision.

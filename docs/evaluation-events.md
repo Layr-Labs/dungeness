@@ -29,4 +29,4 @@ and `dungeness evals --jsonl` preserves their original lines.
 
 Challenge owners should emit the explicit map. During migration they can retain
 flat fields for old consumers; new readers prefer the map and do not duplicate
-those fields. Catalyst owns its ECDSA metric names and emits both representations.
+those fields. OpenRSI owns its ECDSA metric names and emits both representations.
