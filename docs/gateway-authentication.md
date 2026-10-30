@@ -7,7 +7,7 @@ the request or choose research settings.
 
 ## LLM access routes
 
-The gateway ships five access routes. A route identifies an upstream endpoint
+The gateway ships built-in and configured access routes. A route identifies an upstream endpoint
 and authentication recipe, not a model or a blanket permission to use an account.
 
 | Route | Access mechanism |
@@ -17,13 +17,17 @@ and authentication recipe, not a model or a blanket permission to use an account
 | `anthropic` | Anthropic API key |
 | `claude-subscription` | Claude access token plus an explicit future expiry |
 | `openrouter` | OpenRouter API key; models from multiple vendors |
+| `grok-subscription` | Local Grok access token plus its actual expiry |
+| `minimax-subscription` | Local MiniMax Coding/Token Plan key |
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
-Dedicated Kimi and Grok integrations have been removed; neither is a configured
-access route. A Grok model accessed through OpenRouter uses the OpenRouter API
+Kimi Code remains excluded because its subscription guidelines prohibit
+non-interactive automation. A Grok model accessed through OpenRouter uses the OpenRouter API
 route and credential, not a Grok subscription credential.
 
-The checked-in `services/gateway/providers.json` contains no additional routes.
+The checked-in `services/gateway/providers.json` supplies the Grok and MiniMax
+routes using the existing Chat Completions protocol. Both use reference credits,
+not cash billing. See [local subscription access](local-subscriptions.md).
 Operators can add compatible routes through that trusted registry; harnesses
 cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
