@@ -97,3 +97,43 @@ class ReservationTests(unittest.TestCase):
                     self.assertEqual(reply.status_code, 200, reply.text)
                     self.assertEqual(calls[0][1]['max_output_tokens'], 16384)
         asyncio.run(run())
+
+    def test_only_reachable_context_rates_are_reserved(self):
+        rates = {**RATES, 'long_context': {**RATES, 'threshold_input_tokens': 2000,
+                 'input_per_mtok': 20, 'output_per_mtok': 100}}
+        short = {'model': 'example', 'input': 'hello'}
+        self.assertEqual(bounded_request(short, 'responses', rates),
+                         bounded_request(short, 'responses', RATES))
+        long = {**short, 'input': 'x'*2000}
+        self.assertGreater(bounded_request(long, 'responses', rates)[2],
+                           bounded_request(long, 'responses', RATES)[2])
+
+    def test_omitted_output_limit_fits_remaining_budget_but_explicit_is_preserved(self):
+        payload = {'model': 'example', 'input': 'hello'}
+        body, tokens, usd = bounded_request(payload, 'responses', RATES, available_usd=.05)
+        self.assertLess(body['max_output_tokens'], 16384)
+        self.assertGreater(body['max_output_tokens'], 1)
+        self.assertLessEqual(usd, .05)
+        explicit = {**payload, 'max_output_tokens': 16384}
+        body, _, usd = bounded_request(explicit, 'responses', RATES, available_usd=.05)
+        self.assertEqual(body['max_output_tokens'], 16384)
+        self.assertGreater(usd, .05)
+
+    def test_small_budget_reaches_provider_and_oversize_rejection_has_details(self):
+        async def run():
+            with patch.dict(os.environ, {'DUNGENESS_BOUNDED_REQUESTS': '1'}):
+                async with harness() as (client, runtime, calls):
+                    runtime.ledger.usd_limit = .05
+                    body = request_body('openrouter', 'responses')
+                    reply = await client.post(route('openrouter', 'responses'), json=body)
+                    self.assertEqual(reply.status_code, 200, reply.text)
+                    self.assertLess(calls[0][1]['max_output_tokens'], 16384)
+                    body['max_output_tokens'] = 65536
+                    reply = await client.post(route('openrouter', 'responses'), json=body)
+                    self.assertEqual(reply.status_code, 429, reply.text)
+                    error = reply.json()
+                    self.assertEqual(error['code'], 'model_reservation_exceeds_remaining_budget')
+                    self.assertFalse(error['upstream_request_sent'])
+                    self.assertGreater(error['required_reservation_usd'], error['available_usd'])
+                    self.assertEqual(len(calls), 1)
+        asyncio.run(run())

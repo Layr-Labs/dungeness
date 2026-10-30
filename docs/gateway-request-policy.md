@@ -133,10 +133,10 @@ The trusted run-spec can enable `model_access.bounded_requests: true` and set
 in the gateway environment. Harness requests cannot change this policy.
 
 With the guard enabled, text generation gets an explicit output-token limit
-(default 16,384 if omitted), and the ledger atomically reserves both token and
+(up to 16,384 if omitted, reduced to fit available credits), and the ledger atomically reserves both token and
 USD estimates across concurrent requests. Estimates use UTF-8 request bytes plus
 framing allowance and the most expensive configured input/cache/output rates,
-including long-context tiers. Only one completion is permitted. Actual settled
+including a long-context tier only when the conservative input bound exceeds its threshold. Only one completion is permitted. Actual settled
 provider usage remains authoritative; missing accounting blocks further calls.
 
 This is deliberately conservative: large cached histories may be rejected even
@@ -146,8 +146,11 @@ request must wait for other calls and reserves the entire remaining allowance.
 Ciphertext length is not treated as a token count. A single opaque-history call
 can still exceed a soft limit; actual provider usage settles it. Provider-side
 state references and operations without a supported output bound are rejected.
-Use ordinary generation routes. Other
-local runs keep the existing protocol behavior unless this guard is enabled.
+Explicit output limits are preserved or rejected, never silently reduced.
+Sizing and admission use the same ledger lock. Rejections include a request ID,
+code, available credits and required reservation, without the request content.
+Use ordinary generation routes. OpenRSI local and remote runs enable this same
+policy; standalone Dungeness runs can select it in the run spec.
 
 A provider-enforced, expiring per-run key is an additional financial boundary;
 gateway estimates do not protect a key stolen from the gateway or host.

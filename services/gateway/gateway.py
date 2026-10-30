@@ -204,9 +204,12 @@ def budget_rejected(request: Request, operation: str, error: BudgetExceeded) -> 
         request_id=request.state.request_id,
         operation=operation,
         reason=str(error),
+        code=error.code,
+        **error.details,
         level="warning",
     )
-    return JSONResponse({"error": str(error)}, status_code=429)
+    return JSONResponse({"error": str(error), "code": error.code,
+                         "request_id": request.state.request_id, **error.details}, status_code=429)
 
 
 async def health(_request: Request) -> Response:

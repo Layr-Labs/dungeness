@@ -9,7 +9,7 @@ import math
 GENERATION = {'responses', 'chat/completions', 'completions', 'messages'}
 
 
-def bounded_request(payload, operation, pricing, *, maximum=65536):
+def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd=None):
     if operation not in GENERATION:
         raise ValueError('This operation has no bounded generation contract; use explicit text generation.')
     if type(maximum) is not int or not 1 <= maximum <= 1048576:
@@ -48,7 +48,12 @@ def bounded_request(payload, operation, pricing, *, maximum=65536):
         return result, None, None
     # Includes tools and message framing. No claim of exact model tokenization.
     inputs = len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()) + 1024
-    tiers = [pricing, *([pricing['long_context']] if pricing.get('long_context') else [])]
+    # A long-context surcharge is possible only when the input bound crosses
+    # its threshold. Do not charge short requests as if they had long context.
+    tiers = [pricing]
+    long_context = pricing.get('long_context')
+    if long_context and inputs > long_context['threshold_input_tokens']:
+        tiers.append(long_context)
     input_rate = max(float(t.get(k, t['input_per_mtok'])) for t in tiers
                      for k in ('input_per_mtok', 'cached_read_per_mtok', 'cache_write_per_mtok', 'cache_write_1h_per_mtok'))
     output_rate = max(float(t['output_per_mtok']) for t in tiers)
@@ -56,6 +61,15 @@ def bounded_request(payload, operation, pricing, *, maximum=65536):
     input_weight = max([1.0, *[float(t.get(k, t['input_per_mtok'])) / float(t['input_per_mtok'])
                              for t in tiers if t['input_per_mtok'] > 0
                              for k in ('cached_read_per_mtok', 'cache_write_per_mtok', 'cache_write_1h_per_mtok')]])
+    # Only an omitted output limit is adjustable. Explicit harness limits are
+    # honored or rejected. Keep the original input bound (including framing)
+    # when reducing output, so this never under-reserves the serialized request.
+    if available_usd is not None and not fields and output_rate > 0:
+        if not math.isfinite(available_usd):
+            raise ValueError('Invalid available model budget')
+        affordable = math.floor((available_usd * 1e6 - inputs * input_rate) / output_rate)
+        limit = max(1, min(limit, affordable))
+        result[key] = limit
     tokens = math.ceil(inputs * input_weight) + limit
     usd = (inputs * input_rate + limit * output_rate) / 1e6
     if not math.isfinite(usd) or usd < 0:
