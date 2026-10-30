@@ -1,4 +1,47 @@
 {
   "schema_version": 1,
-  "providers": {}
+  "providers": {
+    "grok-subscription": {
+      "base_url": "https://cli-chat-proxy.grok.com/v1",
+      "credential_env": "GROK_SUBSCRIPTION_TOKEN",
+      "credential_kind": "session-token",
+      "billed": false,
+      "catalog_author": "x-ai",
+      "models": {
+        "grok-4.7": {
+          "upstream": "grok-4.7",
+          "catalog": "x-ai/grok-4.7"
+        }
+      },
+      "protocol": "openai",
+      "routes": [
+        "chat/completions"
+      ],
+      "headers": {},
+      "model_header": null
+    },
+    "minimax-subscription": {
+      "base_url": "https://api.minimax.io/v1",
+      "credential_env": "MINIMAX_CODING_PLAN_KEY",
+      "credential_kind": "api-key",
+      "billed": false,
+      "catalog_author": "minimax",
+      "models": {
+        "MiniMax-M3.1-Flash": {
+          "upstream": "MiniMax-M3.1-Flash",
+          "catalog": "minimax/minimax-m3.1-flash"
+        },
+        "MiniMax-M3": {
+          "upstream": "MiniMax-M3",
+          "catalog": "minimax/minimax-m3"
+        }
+      },
+      "protocol": "openai",
+      "routes": [
+        "chat/completions"
+      ],
+      "headers": {},
+      "model_header": null
+    }
+  }
 }

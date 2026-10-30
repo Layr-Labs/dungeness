@@ -25,6 +25,8 @@ MODELS = {
     "openai-chatgpt": "gpt-6-astra",
     "example-api": "example-model",
     "example-session": "example-model",
+    "grok-subscription": "grok-4.7",
+    "minimax-subscription": "MiniMax-M3.1-Flash",
 }
 
 
@@ -60,10 +62,13 @@ async def harness(*, declared=True, web=False):
         "EXAMPLE_API_KEY": "unused-example-key",
         "EXAMPLE_SESSION_TOKEN": "unused-session",
         "EXAMPLE_SESSION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+        "GROK_SUBSCRIPTION_TOKEN": "unused-grok-session",
+        "GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+        "MINIMAX_CODING_PLAN_KEY": "unused-minimax-plan-key",
     }), patch.object(gateway_pricing, "MODEL_PRICING", [*gateway_pricing.MODEL_PRICING, *[
-        {"provider": p, "upstream_id": "example/example-model", "request_models": ["example-model"],
+        {"provider": p, "upstream_id": "example/example-model", "request_models": [MODELS[p]],
          "input_per_mtok": 2, "output_per_mtok": 6, "cached_read_per_mtok": .5,
-         "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session", "claude-subscription")]]):
+         "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session", "claude-subscription", "grok-subscription", "minimax-subscription")]]):
         Path(temp, "auth.json").write_text(json.dumps({
             "tokens": {"access_token": "private-test-token", "account_id": "private-account"}}))
         calls = []

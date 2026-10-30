@@ -386,6 +386,22 @@ class ConfiguredProviderCompilerTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.dict(compiler.CONFIGURED_PROVIDERS, CONFIGURED_FIXTURES))
 
+    def test_installed_subscription_credentials_are_gateway_only(self):
+        for name in ('grok-subscription', 'minimax-subscription'):
+            profile = compiler.CONFIGURED_PROVIDERS[name]
+            model = {'provider': name, 'request_model': next(iter(profile['models'])),
+                     'base_url': f'http://gateway:8080/model/{name}/v1'}
+            compose = yaml.safe_load(compiler.build_compose(
+                'local-plan', {'historical_cutoff': {}},
+                {'web': {'searches': 0, 'fetches': 0}, 'model': {'requests': 10, 'total_tokens': 10000}},
+                provider=name, max_usd=3, command_policy={'models': [model]}))
+            gateway = compose['services']['gateway']
+            key = profile['credential_env']
+            self.assertEqual(gateway['x-dungeness-credential-env'][key], 'TESTBED_' + key)
+            self.assertNotIn(key, gateway['environment'])
+            self.assertNotIn(key, json.dumps(compose['services']['main']))
+            self.assertTrue(gateway['read_only'])
+
     def test_configured_credentials_only_reach_gateway(self):
         model = {'provider': 'example-session', 'request_model': 'example-model',
                  'base_url': 'http://gateway:8080/model/example-session/v1'}

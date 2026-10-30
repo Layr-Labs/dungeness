@@ -143,9 +143,16 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderRegistryTests(unittest.TestCase):
-    def test_default_registry_has_no_configured_providers(self):
+    def test_installed_subscription_profiles_are_inference_only(self):
         from provider_profiles import load_profiles
-        self.assertEqual(load_profiles(), {})
+        profiles = load_profiles()
+        self.assertEqual(set(profiles), {'grok-subscription', 'minimax-subscription'})
+        for profile in profiles.values():
+            self.assertEqual(profile['routes'], ['chat/completions'])
+            self.assertEqual(profile['headers'], {})
+            self.assertIsNone(profile['model_header'])
+            self.assertFalse(profile['billed'])
+            self.assertTrue(profile['models'])
 
     def test_fresh_gateway_loads_only_the_installed_operator_registry(self):
         from configured_fixture import FIXTURES
