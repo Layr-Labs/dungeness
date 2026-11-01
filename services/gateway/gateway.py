@@ -208,8 +208,13 @@ def budget_rejected(request: Request, operation: str, error: BudgetExceeded) -> 
         **error.details,
         level="warning",
     )
+    # Waiting cannot fix a request larger than all remaining credits, even after
+    # active reservations settle. Preserve 429 for temporary admission pressure.
+    permanent = error.details.get("retryable") is False
     return JSONResponse({"error": str(error), "code": error.code,
-                         "request_id": request.state.request_id, **error.details}, status_code=429)
+                         "request_id": request.state.request_id, **error.details},
+                        status_code=400 if permanent else 429,
+                        headers={"x-should-retry": "false"} if permanent else None)
 
 
 async def health(_request: Request) -> Response:

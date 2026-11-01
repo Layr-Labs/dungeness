@@ -172,6 +172,11 @@ state references and operations without a supported output bound are rejected.
 Explicit output limits are preserved or rejected, never silently reduced.
 Sizing and admission use the same ledger lock. Rejections include a request ID,
 code, available credits and required reservation, without the request content.
+If the reservation exceeds all remaining credits even after active calls settle,
+the gateway returns HTTP 400 with `retryable: false` and `x-should-retry: false`.
+Shorten the context or lower the explicit output limit before trying again;
+repeating the same request will not help. A reservation that could fit after
+active calls settle still returns HTTP 429 with `retryable: true`.
 Use ordinary generation routes. OpenRSI local and remote runs enable this same
 policy; standalone Dungeness runs can select it in the run spec.
 

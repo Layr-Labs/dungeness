@@ -95,6 +95,24 @@ async def harness(*, declared=True, web=False):
 
 
 class RequestBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_citations_round_trip_without_enabling_server_tools(self):
+        async with harness() as (client, runtime, calls):
+            for provider in ('anthropic', 'openrouter', 'claude-subscription'):
+                for citations in ([], None):
+                    payload = request_body(provider, 'messages')
+                    payload['messages'] = [
+                        {'role': 'assistant', 'content': [
+                            {'type': 'text', 'text': 'Continue implementation.', 'citations': citations}]},
+                        {'role': 'user', 'content': 'Continue.'}]
+                    reply = await client.post(route(provider, 'messages'), json=payload)
+                    self.assertEqual(reply.status_code, 200, reply.text)
+                count = len(calls)
+                for citations in ([{'type': 'web_search_result_location', 'url': 'https://example.invalid'}], 'invalid', {}):
+                    payload['messages'][0]['content'][0]['citations'] = citations
+                    reply = await client.post(route(provider, 'messages'), json=payload)
+                    self.assertEqual(reply.status_code, 400, reply.text)
+                self.assertEqual(len(calls), count)
+
     async def test_output_limit_rejection_records_reason_without_sending_request(self):
         with patch.dict(os.environ, {'DUNGENESS_BOUNDED_REQUESTS': '1'}):
             async with harness() as (client, runtime, calls):

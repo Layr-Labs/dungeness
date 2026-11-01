@@ -559,6 +559,7 @@ class UsageLedger:
                     code="model_reservation_exceeds_remaining_budget",
                     available_usd=available, required_reservation_usd=reservation,
                     budget_usd=self.usd_limit, reserved_tokens=tokens,
+                    retryable=reservation <= self.usd_limit - max(self.usd_spent, self.budget_usd_spent),
                     upstream_request_sent=False)
             self.reserve("model_requests")
             self.model_inflight[request_id] = reservation

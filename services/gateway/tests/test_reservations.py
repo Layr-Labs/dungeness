@@ -14,6 +14,25 @@ RATES = {'input_per_mtok': 2, 'cached_read_per_mtok': .5, 'output_per_mtok': 10}
 
 
 class ReservationTests(unittest.TestCase):
+    def test_reservation_wait_is_retryable_only_when_settlement_can_help(self):
+        async def run():
+            with patch.dict(os.environ, {'DUNGENESS_BOUNDED_REQUESTS': '1'}):
+                async with harness() as (client, runtime, calls):
+                    runtime.ledger.usd_limit = 1
+                    runtime.ledger.admit_model('active', usd=.99)
+                    body = request_body('openrouter', 'responses')
+                    body['max_output_tokens'] = 1000
+                    reply = await client.post(route('openrouter', 'responses'), json=body)
+                    self.assertEqual(reply.status_code, 429, reply.text)
+                    self.assertTrue(reply.json()['retryable'])
+                    self.assertNotIn('x-should-retry', reply.headers)
+                    self.assertFalse(calls)
+                    runtime.ledger.finish_model('active', accounted=True)
+                    reply = await client.post(route('openrouter', 'responses'), json=body)
+                    self.assertEqual(reply.status_code, 200, reply.text)
+                    self.assertEqual(len(calls), 1)
+        asyncio.run(run())
+
     def test_offline_validator_covers_field_policy_and_output_reservations(self):
         from gateway_reservations import validate_generation, OutputLimitError
         payload = {'model': 'claude-opus-5-5', 'messages': [{'role': 'user', 'content': 'Synthetic probe'}], 'max_tokens': 64000}
@@ -140,8 +159,10 @@ class ReservationTests(unittest.TestCase):
                     self.assertLess(calls[0][1]['max_output_tokens'], 16384)
                     body['max_output_tokens'] = 65536
                     reply = await client.post(route('openrouter', 'responses'), json=body)
-                    self.assertEqual(reply.status_code, 429, reply.text)
+                    self.assertEqual(reply.status_code, 400, reply.text)
+                    self.assertEqual(reply.headers['x-should-retry'], 'false')
                     error = reply.json()
+                    self.assertFalse(error['retryable'])
                     self.assertEqual(error['code'], 'model_reservation_exceeds_remaining_budget')
                     self.assertFalse(error['upstream_request_sent'])
                     self.assertGreater(error['required_reservation_usd'], error['available_usd'])

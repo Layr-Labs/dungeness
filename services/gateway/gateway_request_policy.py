@@ -167,7 +167,11 @@ def content_blocks(value: Any, depth: int = 0) -> None:
             raise ValueError("content block must be an object")
         kind = block.get("type")
         if kind in ("text", "input_text", "output_text"):
-            fields(block, {"type", "text", "cache_control", "annotations", "logprobs"}, "text block")
+            fields(block, {"type", "text", "cache_control", "annotations", "logprobs", "citations"}, "text block")
+            # Anthropic-compatible responses can include empty citation metadata.
+            # Round-tripping it does not request a server tool or remote resource.
+            if "citations" in block and block["citations"] not in (None, []):
+                raise ValueError("only empty citation metadata is supported")
         elif kind in ("thinking", "redacted_thinking", "reasoning"):
             fields(block, {"type", "thinking", "signature", "data", "text"}, "thinking block")
         elif kind == "tool_use":
