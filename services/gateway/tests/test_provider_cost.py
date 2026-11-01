@@ -23,6 +23,25 @@ class ProviderCostTests(unittest.TestCase):
         for value in (None, True, -1, 'nan', 'Infinity', {}, 'invalid'):
             self.assertIsNone(amount(value))
 
+    def test_anthropic_stream_id_supports_generation_reconciliation(self):
+        events = [{'type': 'message_start', 'message': {
+                    'id': 'gen-messages-one', 'usage': {'input_tokens': 100}}},
+                  {'type': 'message_delta', 'usage': {'output_tokens': 20}}]
+        body = b''.join(b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events)
+        self.assertEqual(response_charge(body, 'text/event-stream'), ('gen-messages-one', None))
+        async def run():
+            def upstream(request):
+                self.assertEqual(request.url.params['id'], 'gen-messages-one')
+                return httpx.Response(200, json={'data': {'id': 'gen-messages-one',
+                    'model': 'example/model', 'total_cost': 0.0042}})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+                return await openrouter_charge(client, body, 'text/event-stream',
+                    {'authorization': 'Bearer synthetic'}, 'example/model')
+        self.assertEqual(asyncio.run(run()), ('gen-messages-one', 0.0042, 'openrouter_generation'))
+        events.append({'id': 'gen-different', 'usage': {'cost': 0.0}})
+        conflict = b''.join(b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events)
+        self.assertEqual(response_charge(conflict, 'text/event-stream'), (None, None))
+
     def test_cost_in_response_does_not_query_shared_key_balance(self):
         async def run():
             def upstream(request):

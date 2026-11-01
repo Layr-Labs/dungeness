@@ -27,7 +27,10 @@ def response_charge(body, content_type):
     for document in decode_response_documents(body, content_type):
         if not isinstance(document, dict):
             continue
-        value = document.get('response', document)
+        # Anthropic Messages streams put the provider generation ID and initial
+        # usage inside message_start.message, not at the SSE document root.
+        value = (document.get('message') if document.get('type') == 'message_start'
+                 else document.get('response', document))
         if not isinstance(value, dict):
             continue
         candidate = value.get('id')
