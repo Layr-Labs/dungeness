@@ -209,6 +209,7 @@ class Gateway:
         request_id = request.state.request_id
         finalized = False
         upstream_status = None
+        upstream_generation_id = None
         failure_category = None
         failure_stage = None
 
@@ -252,7 +253,8 @@ class Gateway:
             upstream_request_id, billing_source = None, 'reference_estimate'
             if provider == 'openrouter':
                 upstream_request_id, billed_usd, billing_source = await openrouter_charge(
-                    self.client, response_body, content_type, auth_headers, model)
+                    self.client, response_body, content_type, auth_headers, model,
+                    generation_id=upstream_generation_id)
             budget_usd = billed_usd if provider == 'openrouter' else usd
             self.ledger.add_model_usage(
                 billed_tokens=billed_tokens,
@@ -466,6 +468,8 @@ class Gateway:
             )
             upstream = await self.client.send(upstream_request, stream=True)
             upstream_status = upstream.status_code
+            if provider == "openrouter":
+                upstream_generation_id = upstream.headers.get("x-generation-id")
             # Do not reflect arbitrary upstream headers, even Content-Type.
             raw_type = upstream.headers.get("content-type", "application/json").partition(";")[0].strip().lower()
             content_type = raw_type if raw_type in {"application/json", "text/event-stream"} else "text/plain"

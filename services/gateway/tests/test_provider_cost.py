@@ -42,6 +42,26 @@ class ProviderCostTests(unittest.TestCase):
         conflict = b''.join(b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events)
         self.assertEqual(response_charge(conflict, 'text/event-stream'), (None, None))
 
+    def test_openrouter_header_recovers_charge_when_messages_stream_is_incomplete(self):
+        body = b'data: {"type":"message_start","message":{"id":"msg_native","usage":{"input_tokens":26,"output_tokens":8}}}\n\n'
+        async def run(identity='gen-header-one', body_id=None):
+            calls = []
+            def upstream(request):
+                calls.append(request.url)
+                self.assertEqual(str(request.url), 'https://openrouter.ai/api/v1/generation?id=gen-header-one')
+                return httpx.Response(200, json={'data': {'id': 'gen-header-one',
+                    'model': 'example/model', 'total_cost': 0.123}})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+                result = await openrouter_charge(client,
+                    body if body_id is None else json.dumps({'id': body_id, 'usage': {'cost': 0}}).encode(),
+                    'text/event-stream' if body_id is None else 'application/json',
+                    {'authorization': 'Bearer synthetic'}, 'example/model', generation_id=identity)
+                return result, len(calls)
+        self.assertEqual(asyncio.run(run()), (('gen-header-one', 0.123, 'openrouter_generation'), 1))
+        for invalid in ('https://attacker.invalid', 'gen-header-one, gen-other', 'msg_native', ''):
+            self.assertEqual(asyncio.run(run(invalid)), ((None, None, 'unavailable'), 0))
+        self.assertEqual(asyncio.run(run(body_id='gen-body-different')), ((None, None, 'unavailable'), 0))
+
     def test_cost_in_response_does_not_query_shared_key_balance(self):
         async def run():
             def upstream(request):

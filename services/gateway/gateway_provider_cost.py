@@ -44,8 +44,17 @@ def response_charge(body, content_type):
     return identity, cost
 
 
-async def openrouter_charge(client, body, content_type, headers, model):
+async def openrouter_charge(client, body, content_type, headers, model, *, generation_id=None):
     identity, cost = response_charge(body, content_type)
+    # Messages bodies use the native msg_ ID. OpenRouter's own generation ID
+    # is supplied in a trusted response header on every inference endpoint.
+    # Never accept a harness request header or turn an ID into an arbitrary URL.
+    if generation_id is not None:
+        if not isinstance(generation_id, str) or not re.fullmatch(r'gen-[A-Za-z0-9_-]{1,196}', generation_id):
+            return None, None, 'unavailable'
+        if identity and identity.startswith('gen-') and identity != generation_id:
+            return None, None, 'unavailable'
+        identity = generation_id
     if cost is not None:
         return identity, cost, 'openrouter_usage'
     if identity is None:
