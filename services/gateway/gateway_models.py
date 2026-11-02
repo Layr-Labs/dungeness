@@ -424,6 +424,18 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
             events.append(value)
 
     inp = cache_read = cache_create = out = 0
+    if "text/event-stream" in content_type:
+        # Initial usage is only a prefix: output counters arrive at the end.
+        # A clean HTTP EOF is not evidence that generation completed.
+        kinds = [event.get("type") for event in events]
+        if (not kinds or kinds[-1] != "message_stop" or "error" in kinds
+                or "message_start" not in kinds
+                or not any(event.get("type") == "message_delta"
+                           and isinstance(event.get("usage"), dict)
+                           and type(event["usage"].get("output_tokens")) is int
+                           and event["usage"]["output_tokens"] >= 0
+                           for event in events)):
+            return {}
     cache_durations = None
     found = False
     for value in events:

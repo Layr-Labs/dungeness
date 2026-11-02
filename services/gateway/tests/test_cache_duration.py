@@ -23,10 +23,20 @@ RAW = {"input_tokens": 500, "output_tokens": 100, "cache_read_input_tokens": 200
 
 
 class CacheDurationTests(unittest.TestCase):
+    def test_stream_prefix_is_not_complete_usage_even_after_clean_http_eof(self):
+        start = {"type": "message_start", "message": {"usage": RAW}}
+        delta = {"type": "message_delta", "usage": {"output_tokens": 100}}
+        stop = {"type": "message_stop"}
+        for events in ([start], [start, delta], [start, stop],
+                       [start, delta, {"type": "error"}, stop]):
+            with self.subTest(events=events):
+                body = b''.join(b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events)
+                self.assertEqual(extract_anthropic_usage(body, 'text/event-stream'), {})
+
     def test_json_and_stream_have_identical_mixed_duration_cost(self):
         body = json.dumps({"usage": RAW}).encode()
         stream = ("data: " + json.dumps({"type": "message_start", "message": {"usage": {**RAW, "output_tokens": 0}}})
-                  + "\n\ndata: " + json.dumps({"type": "message_delta", "usage": {"output_tokens": 100}}) + "\n\n").encode()
+                  + "\n\ndata: " + json.dumps({"type": "message_delta", "usage": {"output_tokens": 100}}) + '\n\ndata: {"type":"message_stop"}\n\n').encode()
         values = [extract_anthropic_usage(body, "application/json"), extract_anthropic_usage(stream, "text/event-stream")]
         self.assertEqual(values[0], values[1])
         for usage in values:
@@ -60,6 +70,42 @@ class CacheDurationTests(unittest.TestCase):
 
 
 class CacheDurationSettlementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_clean_http_eof_with_initial_usage_halts_inference(self):
+        reference = {**RATES, "provider": "anthropic", "upstream_id": "claude-test",
+                     "request_models": ["claude-test"]}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                "TESTBED_USAGE_DIR": tmp, "DUNGENESS_ALLOWED_MODELS": '[["anthropic","claude-test"]]',
+                "MAX_MODEL_REQUESTS": "20", "MAX_MODEL_TOKENS": "100000", "MAX_MODEL_USD": "3",
+                "DUNGENESS_CREDENTIALS_FILE": str(Path(tmp) / "credentials.json")}), \
+                patch.object(gateway_pricing, "MODEL_PRICING", [reference]):
+            credential = Path(tmp) / 'credentials.json'
+            credential.write_text(json.dumps({'ANTHROPIC_API_KEY': 'synthetic-test-value'}))
+            credential.chmod(0o600)
+            runtime = Gateway(); await runtime.client.aclose(); calls = []
+            def upstream(request):
+                calls.append(request)
+                body = ('data: ' + json.dumps({'type':'message_start', 'message':{'usage':RAW}})
+                        + '\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\n')
+                return httpx.Response(200, content=body, headers={'content-type':'text/event-stream'})
+            runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+            try:
+                with patch.object(gateway, 'gateway', runtime):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url='http://gateway') as client:
+                        payload={'model':'claude-test','max_tokens':20,'stream':True,
+                                 'messages':[{'role':'user','content':'fixture'}]}
+                        response=await client.post('/model/anthropic/v1/messages',json=payload)
+                        self.assertEqual(response.status_code,200)
+                        self.assertIn('partial',response.text)
+                        self.assertEqual((await client.post('/model/anthropic/v1/messages',json=payload)).status_code,429)
+                self.assertEqual(len(calls),1)
+                receipts=[e['data'] for e in map(json.loads,(Path(tmp)/'events.jsonl').read_text().splitlines())
+                          if e['kind']=='model.accounting']
+                self.assertEqual(receipts[0]['accounting_method'],'unavailable')
+                summary=json.loads((Path(tmp)/'summary.json').read_text())
+                self.assertEqual(summary['usage']['model_accounting_state'],'incomplete')
+            finally:
+                await runtime.client.aclose()
+
     async def test_missing_duration_blocks_further_requests_with_unknown_usage(self):
         reference = {**RATES, "provider": "anthropic", "upstream_id": "claude-test",
                      "request_models": ["claude-test"]}

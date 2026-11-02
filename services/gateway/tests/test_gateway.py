@@ -314,6 +314,7 @@ class UsageTests(unittest.TestCase):
             b'"cache_creation_input_tokens":0,"output_tokens":1}}}\n\n'
             b'event: message_delta\n'
             b'data: {"type":"message_delta","usage":{"output_tokens":25}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
 
         class OneChunkStream(httpx.AsyncByteStream):
@@ -1009,6 +1010,7 @@ class UsageTests(unittest.TestCase):
             b'"cache_creation_input_tokens":0,"output_tokens":1}}}\n\n'
             b'event: message_delta\n'
             b'data: {"type":"message_delta","usage":{"output_tokens":25}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
 
         class OneChunkStream(httpx.AsyncByteStream):
@@ -1123,6 +1125,7 @@ class UsageTests(unittest.TestCase):
             b'"cache_creation_input_tokens":0,"output_tokens":1}}}\n\n'
             b'event: message_delta\n'
             b'data: {"type":"message_delta","usage":{"output_tokens":20}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
 
         class TwoChunk(httpx.AsyncByteStream):
@@ -1195,6 +1198,7 @@ class UsageTests(unittest.TestCase):
             b'"cache_creation_input_tokens":0,"output_tokens":1}}}\n\n'
             b'event: message_delta\n'
             b'data: {"type":"message_delta","usage":{"output_tokens":7}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
         usage = extract_anthropic_usage(_gzip.compress(sse), "text/event-stream")
         self.assertEqual(usage["input_tokens"], 60)  # 50 + 10 cache
