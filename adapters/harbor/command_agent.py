@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import time
 
-from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCodeError
 
 
 class CommandAgent(BaseInstalledAgent):
@@ -60,8 +60,11 @@ class CommandAgent(BaseInstalledAgent):
             path.write_text(json.dumps(task))
             await environment.upload_file(path, "/tmp/dungeness-task.json")
             self.mark_startup("agent_started" if attempt == 0 else "agent_resumed")
-            result = await self.exec_as_agent(
-                environment, command="python3 /tmp/dungeness-launch.py /tmp/dungeness-task.json",
+            # Harbor's exec_as_agent raises before returning failed output.
+            # Keep the same container/default-user boundary, but capture the
+            # result before classifying failure or deciding whether to resume.
+            result = await environment.exec(
+                command="set -o pipefail; python3 /tmp/dungeness-launch.py /tmp/dungeness-task.json",
                 cwd=task["workspace"],
             )
             (self.logs_dir / f"harness-output-{attempt}.txt").write_text(
@@ -75,7 +78,9 @@ class CommandAgent(BaseInstalledAgent):
             if (result.return_code != 75 or attempt >= self.max_resumes
                     or not self.execution.get("resume_entrypoint")
                     or self.timeout - (time.monotonic() - started) < self.min_remaining):
-                raise RuntimeError(f"Harness exited with status {result.return_code}.")
+                raise NonZeroAgentExitCodeError(
+                    f"Command failed (exit {result.return_code}): harness; "
+                    f"see harness-output-{attempt}.txt.")
 
     def populate_context_post_run(self, context):
         # Accounting comes only from the gateway.

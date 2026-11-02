@@ -321,6 +321,13 @@ class UsageTests(unittest.TestCase):
                 yield stream
 
         async def upstream(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                self.assertEqual(request.url.path, "/api/v1/generation")
+                self.assertEqual(request.url.params["id"], "gen-openrouter-messages")
+                self.assertEqual(request.headers["authorization"], "Bearer unused")
+                return httpx.Response(200, json={"data": {
+                    "id": "gen-openrouter-messages", "model": "anthropic/claude-opus-5",
+                    "total_cost": 0.12345}})
             self.assertEqual(request.url.path, "/api/v1/messages")
             self.assertEqual(request.headers["authorization"], "Bearer unused")
             self.assertNotIn("x-api-key", request.headers)
@@ -328,7 +335,7 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(request.headers["anthropic-version"], "2023-06-01")
             return httpx.Response(
                 200,
-                headers={"content-type": "text/event-stream"},
+                headers={"content-type": "text/event-stream", "x-generation-id": "gen-openrouter-messages"},
                 stream=OneChunkStream(),
             )
 
@@ -361,6 +368,10 @@ class UsageTests(unittest.TestCase):
                 self.assertEqual(event["cached_input_tokens"], 40)
                 self.assertEqual(event["output_tokens"], 25)
                 self.assertEqual(event["billed_tokens"], 129)
+                self.assertEqual(event["billed_usd"], 0.12345)
+                self.assertEqual(event["upstream_request_id"], "gen-openrouter-messages")
+                self.assertEqual(event["billing_source"], "openrouter_generation")
+                self.assertNotIn("x-generation-id", response.headers)
                 from gateway import pricing_for_request
 
                 pricing = pricing_for_request("openrouter", "anthropic/claude-opus-5")

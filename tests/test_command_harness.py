@@ -282,15 +282,39 @@ class CommandHarnessTests(unittest.TestCase):
                 logs_dir=Path(temp), model_name="test-model",
                 execution={"entrypoint": ["python3", "agent.py"]})
             environment = AsyncMock()
+            environment.exec.return_value = ExecResult(return_code=0, stdout="ok")
             with patch.object(agent, "exec_as_agent", new=AsyncMock(
                     return_value=ExecResult(return_code=0, stdout="ok"))):
                 asyncio.run(agent.install(environment))
                 asyncio.run(agent.run("test task", environment, None))
             self.assertEqual((Path(temp) / "harness-output-0.txt").read_text(), "ok\n")
-            with patch.object(agent, "exec_as_agent", new=AsyncMock(
-                    return_value=ExecResult(return_code=2, stderr="bad command"))):
-                with self.assertRaisesRegex(RuntimeError, "status 2"):
-                    asyncio.run(agent.run("test task", environment, None))
+            environment.exec.return_value = ExecResult(return_code=2, stdout="partial work", stderr="bad command")
+            with self.assertRaisesRegex(RuntimeError, "exit 2"):
+                asyncio.run(agent.run("test task", environment, None))
+            self.assertEqual((Path(temp) / "harness-output-0.txt").read_text(), "partial work\nbad command")
+            self.assertEqual(json.loads((Path(temp) / "harness-outcome.json").read_text())["exit_code"], 2)
+            self.assertNotIn("user", environment.exec.call_args.kwargs)
+
+    def test_adapter_resumes_exit_75_after_preserving_output(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        try:
+            from harbor.environments.base import ExecResult
+        except ImportError:
+            self.skipTest("Harbor is required for the adapter API contract test.")
+        adapter = load("command_agent_resume_contract", "adapters/harbor/command_agent.py")
+        with tempfile.TemporaryDirectory() as temp:
+            agent = adapter.CommandAgent(logs_dir=Path(temp), model_name="test-model",
+                execution={"entrypoint": ["python3", "agent.py"], "resume_entrypoint": ["python3", "resume.py"]},
+                continuation_max_resumes=1)
+            environment = AsyncMock()
+            environment.exec.side_effect = [ExecResult(return_code=75, stderr="checkpoint saved"),
+                                            ExecResult(return_code=0, stdout="resumed")]
+            asyncio.run(agent.run("test task", environment, None))
+            self.assertEqual(environment.exec.call_count, 2)
+            self.assertIn("checkpoint saved", (Path(temp) / "harness-output-0.txt").read_text())
+            self.assertIn("resumed", (Path(temp) / "harness-output-1.txt").read_text())
+            self.assertTrue(json.loads((Path(temp) / "dungeness-task.json").read_text())["resume"])
 
     def test_generic_job_has_no_codex_identity_and_cannot_import_solver_host_code(self):
         agent = {"execution": {"interface": "dungeness-command-v1", "entrypoint": ["python3", "harness.py"]},
