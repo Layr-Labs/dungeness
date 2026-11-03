@@ -1,0 +1,14 @@
+schema_version: 1
+type: problem
+namespace: public/sample-challenge
+id: sample-problem
+
+labels:
+  domain: synthetic-example
+
+data:
+  objective: minimize the measured cost of a valid candidate
+  metric:
+    name: sample_score
+    direction: minimize
+    formula: work_units * memory_units

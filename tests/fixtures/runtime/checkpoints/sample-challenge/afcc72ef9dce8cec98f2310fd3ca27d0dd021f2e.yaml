@@ -1,0 +1,25 @@
+schema_version: 1
+type: checkpoint
+id: afcc72ef9dce8cec98f2310fd3ca27d0dd021f2e
+namespace: public/github/layr-labs/sample-challenge
+created_at: null
+published_at: null
+
+labels:
+  role: competition-frontier
+  source: sample-problem-api
+
+data:
+  repository:
+    url: https://example.invalid/source.git
+    commit: afcc72ef9dce8cec98f2310fd3ca27d0dd021f2e
+  history:
+    anchor: c6f6d2c7f50353259241e296458afb0e651e6c37
+    distance_from_anchor: 1326
+    counting_method: git-rev-list-ancestry-path-count
+  web_cutoff: "2026-08-17T23:59:59.999Z"
+  interface: sample-directory-v1
+  reference:
+    work_units: 1284345
+    memory_units: 1153
+    score: 1480849785

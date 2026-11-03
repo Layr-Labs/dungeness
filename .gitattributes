@@ -1,0 +1,5 @@
+# Execution output is not part of source distributions.
+/runs export-ignore
+/report export-ignore
+/reports export-ignore
+/artifacts export-ignore

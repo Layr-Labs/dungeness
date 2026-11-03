@@ -1,0 +1,37 @@
+schema_version: 1
+type: task
+namespace: projects/dungeness
+id: sample-starter
+instruction: statement.txt
+
+relations:
+  problem: problem:public/sample-challenge/sample-problem
+
+workspace:
+  include:
+    - .
+
+interfaces:
+  sample-directory-v1:
+    candidate:
+      allowed_paths:
+        - solution
+    verifier: sample-problem/synthetic
+
+policies:
+  network: policies/network/mediated.yaml
+  web: policies/web/exa.yaml
+  budget: policies/budget/no-web.yaml
+
+evaluation:
+  mode: full-benchmark
+
+resources:
+  agent:
+    memory_mb: 4096
+    cpus: 4
+  verifier:
+    memory_mb: 8192
+    cpus: 4
+    timeout_sec: 1200
+    build_timeout_sec: 1200
