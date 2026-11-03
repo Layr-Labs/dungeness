@@ -144,8 +144,10 @@ def build_workspace_notice(
 - Only changes under **`{candidate_rel}`** are submitted and graded.
 - Authoritative evaluation restores the trusted harness, toolchain and dependencies
   from the selected checkpoint, then overlays only the candidate.
-- The pinned toolchain is preinstalled. Local compilation is available; the
-  trusted evaluator and final verifier determine correctness and scores.
+- The trusted evaluator supplies its pinned toolchain. Compiling inside the agent
+  container requires compatible tools and dependencies in the harness image;
+  do not assume they are installed. The trusted evaluator and final verifier
+  determine correctness and scores.
 - `candidate-state save NAME`, `restore NAME`, and `list` provide optional local
   snapshots. The harness chooses which candidate to leave for final verification.
 """
