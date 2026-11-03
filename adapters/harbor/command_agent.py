@@ -55,6 +55,7 @@ class CommandAgent(BaseInstalledAgent):
         started = time.monotonic()
         for attempt in range(self.max_resumes + 1):
             task["resume"] = attempt > 0
+            task["output_log"] = f"/logs/agent/harness-output-{attempt}.txt"
             task["remaining_seconds"] = max(0, self.timeout - (time.monotonic() - started))
             path = self.logs_dir / "dungeness-task.json"
             path.write_text(json.dumps(task))
@@ -63,12 +64,27 @@ class CommandAgent(BaseInstalledAgent):
             # Harbor's exec_as_agent raises before returning failed output.
             # Keep the same container/default-user boundary, but capture the
             # result before classifying failure or deciding whether to resume.
+            output = self.logs_dir / f"harness-output-{attempt}.txt"
+            output.unlink(missing_ok=True)
+            output.with_suffix('.coverage.json').unlink(missing_ok=True)
             result = await environment.exec(
                 command="set -o pipefail; python3 /tmp/dungeness-launch.py /tmp/dungeness-task.json",
                 cwd=task["workspace"],
             )
-            (self.logs_dir / f"harness-output-{attempt}.txt").write_text(
-                (result.stdout or "") + "\n" + (result.stderr or ""))
+            output = self.logs_dir / f"harness-output-{attempt}.txt"
+            # Docker bind mounts already contain the continuously written log.
+            # Other Harbor backends must copy it before container teardown.
+            if not output.exists():
+                try:
+                    await environment.download_file(task["output_log"], output)
+                    await environment.download_file(task["output_log"].replace('.txt', '.coverage.json'),
+                                                    output.with_suffix('.coverage.json'))
+                except Exception:
+                    pass
+            if not output.exists():
+                output.write_text((result.stdout or "") + "\n" + (result.stderr or ""))
+                output.with_suffix('.coverage.json').write_text(json.dumps({
+                    "complete": False, "missing": "continuous_capture_unavailable"}))
             (self.logs_dir / "harness-outcome.json").write_text(json.dumps({
                 "attempt": attempt, "exit_code": result.return_code,
                 "status": "completed" if result.return_code == 0 else "failed",
