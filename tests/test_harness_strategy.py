@@ -73,6 +73,9 @@ class HarnessStrategyTests(unittest.TestCase):
         for required in ("solution", "evaluate", "900 seconds", "run-status",
                          "final verifier", "lower is better"):
             self.assertIn(required, notice)
+        self.assertNotIn("pinned toolchain is preinstalled", notice)
+        self.assertIn("requires compatible tools", notice)
+        self.assertIn("no compiler is required in the agent container", notice)
         for retired in ("Within the first", "Before changing", "research-worker",
                         "Evaluation loop", "two to four", "Stop starting"):
             self.assertNotIn(retired, notice)

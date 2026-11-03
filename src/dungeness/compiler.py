@@ -124,6 +124,8 @@ def build_eval_notice(candidate_rel: str, direction: str) -> str:
 
 - `evaluate` (or `evaluate {candidate_rel}`) builds and checks the current
   candidate against the real benchmark. Calls consume the evaluation allowance.
+  It sends the candidate to the trusted evaluator, which supplies its own
+  toolchain and dependencies; no compiler is required in the agent container.
 - Invalid candidates return `status: invalid` with compiler or verification errors.
 - The objective is the verified score; {better} is better.
 - The final verifier independently checks the candidate left at `{candidate_rel}`.
@@ -144,8 +146,10 @@ def build_workspace_notice(
 - Only changes under **`{candidate_rel}`** are submitted and graded.
 - Authoritative evaluation restores the trusted harness, toolchain and dependencies
   from the selected checkpoint, then overlays only the candidate.
-- The pinned toolchain is preinstalled. Local compilation is available; the
-  trusted evaluator and final verifier determine correctness and scores.
+- The trusted evaluator supplies its pinned toolchain. Optional compilation inside
+  the agent container requires compatible tools and dependencies installed by the
+  solver during the image build. The trusted evaluator and final verifier
+  determine correctness and scores.
 - `candidate-state save NAME`, `restore NAME`, and `list` provide optional local
   snapshots. The harness chooses which candidate to leave for final verification.
 """
