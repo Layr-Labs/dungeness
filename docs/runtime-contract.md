@@ -43,9 +43,9 @@ The former `ecdsa-readable-verifier-results-v1` capability was retired when the
 verifier moved to OpenRSI. Its readability guarantee is tested with that package.
 Update the OpenRSI adapter together with a runtime that no longer declares it.
 
-OpenRSI reads this contract through `catalyst.runtime_contract`. Older pinned
+OpenRSI reads this contract through `openrsi_space.runtime_contract`. Older pinned
 runtimes without the file temporarily use the existing source-marker checks,
-isolated in `catalyst._legacy_dungeness`. A present but malformed or incomplete
+isolated in `openrsi_space._legacy_dungeness`. A present but malformed or incomplete
 declaration fails; it never falls back to those checks. No new capability may be
 added to the legacy bridge. Remove it after supported deployments have moved to
 contract-bearing pins.
@@ -69,8 +69,8 @@ compiler tests against a clean commit of the candidate runtime. From the verifie
 checkout, with its dependencies installed:
 
 ```sh
-CATALYST_DUNGENESS=/path/to/clean/dungeness \
-PYTHONPATH=src:/path/to/catalyst/src \
+OPENRSI_DUNGENESS=/path/to/clean/dungeness \
+PYTHONPATH=src:/path/to/openrsi-space/src \
 python -m unittest discover -s tests -p test_dungeness_contract.py
 ```
 

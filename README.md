@@ -17,11 +17,11 @@ provides the shared execution machinery.
 ## Use with OpenRSI
 
 For a local integration check, install Git, uv and Docker. Replace the paths below
-with your `catalyst` checkout, configured harness and clean Dungeness checkout.
+with your `openrsi-space` checkout, configured harness and clean Dungeness checkout.
 The directories can live anywhere; the harness must include `evaluation.json`.
 
 ```sh
-uv run --project /path/to/catalyst openrsi-space local run /path/to/harness \
+uv run --project /path/to/openrsi-space openrsi-space local run /path/to/harness \
   --dungeness /path/to/dungeness --prepare-only
 ```
 
