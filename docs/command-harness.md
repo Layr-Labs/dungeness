@@ -107,7 +107,7 @@ Set CLI options, reasoning settings and protocol compatibility inside the harnes
 run-level native `agent_options` are rejected. To resume, implement
 `execution.resume_entrypoint` and retain session state inside the container.
 
-OpenRSI's `catalyst-exec-v1` submission contract is unchanged. Its public CLI
+OpenRSI's current submission interface is `openrsi-exec-v1`; its adapter also accepts historical harness manifests. Its public CLI
 accepts a Dockerfile and entrypoint and installs the trusted command adapter.
 The `agents/projects/dungeness/command` example is only a no-model smoke command.
 Historical bundled-agent experiments require their original runtime revision.
