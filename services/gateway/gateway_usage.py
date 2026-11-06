@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from gateway_errors import recovery
 import fcntl
 import json
 import os
@@ -258,7 +259,7 @@ class BudgetExceeded(RuntimeError):
     def __init__(self, message, *, code="model_budget_rejected", **details):
         super().__init__(message)
         self.code = code
-        self.details = details
+        self.details = {**recovery(code, retryable=details.pop("retryable", False)), **details}
 
 
 class UsageLedger:
@@ -503,15 +504,15 @@ class UsageLedger:
         # consume a request/search budget and therefore cannot bypass hard limits.
         with self.lock:
             if self.limits[name] is not None and self.counts[name] >= self.limits[name]:
-                raise BudgetExceeded(f"budget exhausted for {name}")
+                raise BudgetExceeded(f"budget exhausted for {name}", code="request_budget_exhausted")
             if name == "model_requests":
                 if (self.limits["model_tokens"] is not None
                         and self.counts["model_tokens"] >= self.limits["model_tokens"]):
-                    raise BudgetExceeded("model token budget is exhausted")
+                    raise BudgetExceeded("model token budget is exhausted", code="model_token_budget_exhausted")
                 if self.model_accounting_incomplete:
-                    raise BudgetExceeded("model accounting is incomplete")
+                    raise BudgetExceeded("model accounting is incomplete", code="model_accounting_incomplete", action="check_accounting")
                 if max(self.usd_spent, self.budget_usd_spent) >= self.usd_limit:
-                    raise BudgetExceeded("model USD budget is exhausted")
+                    raise BudgetExceeded("model USD budget is exhausted", code="model_budget_exhausted")
             self.counts[name] += 1
             self._write_summary_locked()
 
@@ -530,24 +531,30 @@ class UsageLedger:
         """
         with self.lock:
             if self.model_accounting_incomplete:
-                raise BudgetExceeded("model accounting is incomplete")
+                raise BudgetExceeded("model accounting is incomplete", code="model_accounting_incomplete", action="check_accounting")
             if request_id in self.model_inflight:
-                raise BudgetExceeded("duplicate active request")
+                raise BudgetExceeded("duplicate active request", code="duplicate_active_request", action="inspect_existing_request")
             if len(self.model_inflight) >= self.max_parallel_requests:
-                raise BudgetExceeded("model concurrency limit reached; retry after active calls settle")
+                raise BudgetExceeded("model concurrency limit reached; retry after active calls settle", code="model_concurrency_limit", retryable=True, action="wait_for_active_requests")
             available = self.available_model_usd()
             if available <= 0:
-                raise BudgetExceeded("model credits are reserved or exhausted")
+                settled_remaining = self.usd_limit - max(self.usd_spent, self.budget_usd_spent)
+                raise BudgetExceeded("model credits are reserved or exhausted",
+                    code="model_credits_reserved" if settled_remaining > 0 else "model_budget_exhausted",
+                    retryable=settled_remaining > 0)
             if type(tokens) is not int or tokens < 0:
                 raise ValueError("Invalid model token reservation")
             token_limit = self.limits["model_tokens"]
             if exclusive:
                 if self.model_inflight:
-                    raise BudgetExceeded("opaque-history request must wait for active calls to settle")
+                    raise BudgetExceeded("opaque-history request must wait for active calls to settle", code="model_exclusive_request_waiting", retryable=True, action="wait_for_active_requests")
                 tokens = max(0, token_limit - self.counts["model_tokens"]) if token_limit is not None else 0
                 usd = available
             if token_limit is not None and self.counts["model_tokens"] + sum(self.model_token_inflight.values()) + tokens > token_limit:
-                raise BudgetExceeded("model tokens are reserved or insufficient for this request")
+                remaining = token_limit - self.counts["model_tokens"]
+                raise BudgetExceeded("model tokens are reserved or insufficient for this request",
+                    code="model_token_budget_exhausted" if remaining <= 0 else "model_token_reservation_rejected",
+                    retryable=remaining > 0 and tokens <= remaining)
             reservation = min(available, self.request_reservation_usd) if usd is None else usd
             if not isinstance(reservation, (float, int)) or not 0 <= reservation < float('inf'):
                 raise ValueError("Invalid model cost reservation")

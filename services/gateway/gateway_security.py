@@ -1,7 +1,9 @@
 """Bounded I/O and credential-safe responses for the run-scoped gateway."""
+from gateway_errors import recovery
 import asyncio
 import json
 import re
+import uuid
 from urllib.parse import quote
 
 from starlette.responses import JSONResponse
@@ -60,17 +62,35 @@ class SecretFilter:
         return b"".join(output)
 
 
-def safe_provider_error(status, request_id):
+def safe_provider_error(status, request_id, *, accounting_complete=False):
     code = {
         400: "provider_invalid_request", 401: "provider_authentication_failed",
         403: "provider_access_denied", 404: "provider_model_unavailable",
         429: "provider_rate_limited",
     }.get(status, "provider_unavailable" if status >= 500 else "provider_request_failed")
+    recovery_code = code if accounting_complete else "provider_accounting_incomplete"
+    details = {**recovery(recovery_code, retryable=status in (408, 429, 500, 502, 503, 504),
+                         action="check_accounting" if not accounting_complete else None),
+               "recovery_code": recovery_code,
+               "accounting_complete": accounting_complete, "upstream_request_sent": True}
     return JSONResponse({"error": {
         "code": code, "message": "The model provider rejected or could not complete the request.",
         "request_id": request_id, "upstream_status": status,
-        "retryable": status in (408, 429, 500, 502, 503, 504),
-    }}, status_code=status if 400 <= status <= 599 else 502)
+        **details,
+    }}, status_code=status if 400 <= status <= 599 else 502,
+        headers={"x-should-retry": "true" if details["retryable"] else "false"})
+
+
+def admission_error(code, status, *, retryable=False, **details):
+    # Body bounds run before request instrumentation. Generate a safe ID here.
+    from gateway_usage import log_event
+    identity = uuid.uuid4().hex
+    info = {"code": code, "request_id": identity, "upstream_request_sent": False,
+            **recovery(code, retryable=retryable), **details}
+    log_event("model_request_rejected", **info)
+    return JSONResponse({"error": info}, status_code=status,
+                        headers={"x-request-id": identity,
+                                 "x-should-retry": "true" if info["retryable"] else "false"})
 
 
 class RequestBoundsMiddleware:
@@ -85,8 +105,7 @@ class RequestBoundsMiddleware:
         counted = scope["path"] not in {"/healthz", "/status", "/metrics"}
         limit = MAX_REQUEST_BYTES if counted else 1024
         if counted and self.active >= MAX_ACTIVE_REQUESTS:
-            return await JSONResponse({"error": {"code": "gateway_capacity", "retryable": True}},
-                                      status_code=429)(scope, receive, send)
+            return await admission_error("gateway_capacity", 429, retryable=True)(scope, receive, send)
         # No await between checking and incrementing: atomic within the event loop.
         if counted:
             self.active += 1
@@ -100,13 +119,11 @@ class RequestBoundsMiddleware:
                             return
                         body.extend(message.get("body", b""))
                         if len(body) > limit:
-                            return await JSONResponse({"error": {"code": "request_too_large", "limit": limit}},
-                                                      status_code=413)(scope, receive, send)
+                            return await admission_error("request_too_large", 413, limit=limit)(scope, receive, send)
                         if not message.get("more_body", False):
                             break
             except TimeoutError:
-                return await JSONResponse({"error": {"code": "request_body_timeout"}},
-                                          status_code=408)(scope, receive, send)
+                return await admission_error("request_body_timeout", 408, retryable=True)(scope, receive, send)
             delivered = False
 
             async def bounded_receive():

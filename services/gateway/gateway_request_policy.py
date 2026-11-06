@@ -428,7 +428,7 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
     except ValueError as error:
         # Do not echo arbitrary field names/values from untrusted history.
         raise HistoryPolicyError("unsupported_history_structure",
-            "Gateway rejected conversation history; check the supported provider/API history schema.",
+            "Gateway rejected conversation history; use supported text and local-tool history. Image, audio and document input blocks are not supported. Correct the request before retrying.",
             location="input" if operation.startswith("responses") else "messages") from error
     if operation == "embeddings":
         text_or_tokens(payload.get("input"))

@@ -30,6 +30,7 @@ from gateway_models import (
 )
 from gateway_provider_cost import openrouter_charge
 from gateway_reservations import validate_generation
+from gateway_errors import GatewayPolicyError, recovery
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
 import gateway_pricing
 from gateway_pricing import (
@@ -149,16 +150,28 @@ class Gateway:
         if provider in PROFILES:
             upstream_model(provider, payload['model'])
         # All credential types are checked before admitting a model request.
-        provider_auth_headers(provider)
+        try:
+            private_values = set()
+            request.state.provider_headers = provider_auth_headers(provider, private_values=private_values)
+            request.state.provider_private_values = private_values
+        except ValueError as error:
+            raise GatewayPolicyError("provider_credentials_unavailable",
+                "Provider authentication credentials are unavailable or expired; contact the run operator.") from error
         if provider == "openrouter" and not self.openrouter_inference_only:
-            raise ValueError(
+            raise GatewayPolicyError("provider_configuration_invalid",
                 "OpenRouter inference requires the operator to disable account-default "
                 "server tools/plugins and set TESTBED_OPENROUTER_INFERENCE_ONLY=1"
             )
         if self.allowed_models is not None and (provider, payload["model"]) not in self.allowed_models:
             raise ValueError("model is not authorized for this run")
         from gateway_models import validate_declared_request
-        validate_declared_request(payload, pricing_for_request(provider, payload["model"]))
+        try:
+            request_pricing = pricing_for_request(provider, payload["model"])
+        except ValueError as error:
+            raise GatewayPolicyError("provider_configuration_invalid" if self.allowed_models is not None
+                                     else "model_pricing_unavailable",
+                "Model is not present in the trusted pricing policy; use an allowed priced model or contact the operator.") from error
+        validate_declared_request(payload, request_pricing)
         if self.allowed_models is None:
             self.ledger.reserve("model_requests")
         else:
@@ -229,6 +242,9 @@ class Gateway:
                 except ValueError:
                     usage = {}
                     accounting_basis = "invalid_or_missing_cache_duration"
+            if not usage and getattr(request.state, "transport_not_sent", False):
+                usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                accounting_basis = "transport_not_sent"
             if (not usage and status == "provider_error"
                     and rejected_before_generation(response_body, content_type, upstream_status)):
                 # A rejected input did not generate tokens. Successful,
@@ -252,10 +268,12 @@ class Gateway:
             )
             billed_usd = usd if cfg.get("billed", True) and not (request_pricing or {}).get("text_only") else None
             upstream_request_id, billing_source = None, 'reference_estimate'
-            if provider == 'openrouter':
+            if provider == 'openrouter' and accounting_basis != 'transport_not_sent':
                 upstream_request_id, billed_usd, billing_source = await openrouter_charge(
                     self.client, response_body, content_type, auth_headers, model,
                     generation_id=upstream_generation_id)
+            if accounting_basis == "transport_not_sent":
+                billed_usd, billing_source = 0.0, "transport_not_sent"
             budget_usd = billed_usd if provider == 'openrouter' else usd
             self.ledger.add_model_usage(
                 billed_tokens=billed_tokens,
@@ -385,11 +403,21 @@ class Gateway:
                 status=status,
                 usage=usage,
             )
-            if self.allowed_models is not None:
-                self.ledger.finish_model(request_id, accounted=bool(usage) and budget_usd is not None)
+            self.ledger.finish_model(request_id, accounted=bool(usage) and budget_usd is not None)
+            if failure_category:
+                log_event("model_recovery_required", request_id=request_id,
+                    code=failure_category, stage=failure_stage,
+                    upstream_request_sent=getattr(request.state, "upstream_request_sent", None),
+                    accounting_complete=bool(usage) and budget_usd is not None,
+                    **recovery("provider_accounting_incomplete" if not usage or budget_usd is None
+                               else failure_category,
+                               retryable=getattr(request.state, "transport_not_sent", False),
+                               action=None if getattr(request.state, "transport_not_sent", False) else "inspect_partial_response"))
 
-        private_values = set()
-        auth_headers = provider_auth_headers(provider, private_values=private_values)
+        # Reuse credentials checked before reservation. Reading them a second
+        # time could fail after admission and strand the reservation.
+        auth_headers = request.state.provider_headers
+        private_values = request.state.provider_private_values
         response_filter = SecretFilter(private_values)
         response_body = bytearray()
         received_bytes = 0
@@ -581,15 +609,19 @@ class Gateway:
                 await upstream.aclose()
             await finalize(bytes(response_body), content_type)
             if not upstream.is_success:
-                return safe_provider_error(upstream.status_code, request_id)
+                return safe_provider_error(upstream.status_code, request_id, accounting_complete=bool(usage) and not self.ledger.model_accounting_incomplete)
             return Response(bytes(response_body), status_code=upstream.status_code,
                             headers=response_headers)
         except BaseException as error:
+            if upstream_status is None and isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+                request.state.upstream_request_sent = False
+                request.state.transport_not_sent = True
             if failure_category is None:
                 failure_category = transport_failure_category(error)
                 failure_stage = "upstream_request"
             await finalize(bytes(response_body), content_type)
             if isinstance(error, ResponseLimitExceeded):
                 return JSONResponse({"error": {"code": "upstream_response_too_large",
-                    "request_id": request_id, "retryable": False}}, status_code=502)
+                    "request_id": request_id, **recovery("provider_accounting_incomplete" if self.ledger.model_accounting_incomplete else "upstream_response_too_large", action="inspect_partial_response")}},
+                    status_code=502, headers={"x-should-retry": "false"})
             raise
