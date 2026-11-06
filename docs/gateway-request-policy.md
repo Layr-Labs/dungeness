@@ -89,10 +89,32 @@ The gateway does not translate requests or responses into another protocol.
 - Arbitrary request headers are not forwarded. OpenAI organization/project selection and
   opaque Codex routing/turn-state override headers are not forwarded either.
 
-Optional SDK fields should be omitted when unused. A rejection names the
-unsupported field or feature, so a harness author can remove it or request a
-reviewed protocol extension. There is no agent-controlled switch to bypass this
-policy.
+## Conversation history compatibility
+
+History is validated for the configured provider and API operation, separately
+from model, tool, routing and spending controls. OpenRouter Responses reasoning
+items support `format` and `signature`; Chat Completions uses `reasoning_details`.
+A format identifier is optional, inert metadata: when present it must be a
+nonempty string of at most 128 characters, rather than one of a fixed list of
+versions. The gateway preserves accepted history, including signatures,
+encrypted content, item order and tool associations, without removing fields.
+Requests are limited to 8 MiB and 64 levels of JSON nesting.
+
+Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
+`conversation_history_rejected`. Safe diagnostics include the request ID, schema
+version, location and item/field position where available, and whether the request
+reached the provider. Arbitrary field names and history contents are not echoed.
+Update to a compatible runtime or report the request ID; do not remove reasoning
+or signatures to work around a rejection. Capability restrictions remain enforced.
+
+Streaming is relayed unchanged. Clients must retain complete items delivered by
+`response.output_item.done`, even when the final response has an empty `output`,
+and must not treat unfinished items from an interrupted stream as complete.
+A rejected continuation does not erase earlier accounting or candidates and does
+not trigger an automatic provider retry or restart.
+
+Unused optional control fields should be omitted. Unsupported controls require a
+reviewed protocol extension; there is no agent-controlled policy bypass.
 
 ## OpenRouter account defaults
 

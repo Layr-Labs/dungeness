@@ -398,12 +398,20 @@ async def external_web_disabled(_request: Request) -> Response:
 
 def model_request_rejected(request, error):
     from gateway_reservations import OutputLimitError
+    from gateway_request_policy import HistoryPolicyError
     details = {"code": "output_token_limit" if isinstance(error, OutputLimitError) else "request_policy_rejected"}
     if isinstance(error, OutputLimitError):
         details["maximum"] = error.maximum
-    # Do not record request bodies, header values, or arbitrary exception text.
-    log_event("model_request_rejected", request_id=getattr(request.state, "request_id", None), **details)
-    return JSONResponse({"error": str(error)}, status_code=400)
+    if isinstance(error, HistoryPolicyError):
+        details.update(error.diagnostic)
+    sent = getattr(request.state, "upstream_request_sent", None)
+    if isinstance(sent, bool):
+        details.update(upstream_request_sent=sent, stage="upstream" if sent else "model_admission")
+    identity = getattr(request.state, "request_id", None)
+    # Only fixed labels and positions enter diagnostics; never the request body.
+    log_event("model_request_rejected", request_id=identity, **details)
+    return JSONResponse({"error": str(error), "diagnostic": {**details, "request_id": identity}}, status_code=400)
+
 
 
 async def model_openai(request: Request) -> Response:
