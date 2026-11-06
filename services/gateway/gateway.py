@@ -217,7 +217,8 @@ def budget_rejected(request: Request, operation: str, error: BudgetExceeded) -> 
                          "diagnostic": {"code": error.code, "request_id": request.state.request_id,
                                         "upstream_request_sent": False, **error.details}},
                         status_code=400 if error.details["category"] == "correctable" else 429,
-                        headers={"x-should-retry": "false"} if permanent else None)
+                        headers={"x-should-retry": "false"} if permanent else
+                                {"x-should-retry": "true", "retry-after": "1"})
 
 
 async def health(_request: Request) -> Response:

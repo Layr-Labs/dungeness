@@ -29,6 +29,7 @@ from gateway_models import (
     usage_extractor,
 )
 from gateway_provider_cost import openrouter_charge
+from gateway_stream import CompletionBarrier
 from gateway_reservations import validate_generation
 from gateway_errors import GatewayPolicyError, recovery
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
@@ -521,6 +522,7 @@ class Gateway:
                 # for accounting but discard client output rather than buffering it.
                 relay: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=16)
                 disconnected = asyncio.Event()
+                completion = CompletionBarrier(normalized)
 
                 async def relay_chunk(chunk):
                     if disconnected.is_set():
@@ -551,10 +553,13 @@ class Gateway:
                             for offset in range(0, len(chunk), 64 * 1024):
                                 safe = accept_chunk(chunk[offset:offset + 64 * 1024])
                                 if safe:
-                                    await relay_chunk(safe)
+                                    output = completion.feed(safe)
+                                    if output:
+                                        await relay_chunk(output)
                         tail = accept_chunk(b"", final=True)
-                        if tail:
-                            await relay_chunk(tail)
+                        output = completion.feed(tail, final=True)
+                        if output:
+                            await relay_chunk(output)
                     except BaseException as error:
                         status = "stream_interrupted"
                         failure_category = transport_failure_category(error)
@@ -565,7 +570,10 @@ class Gateway:
                         # missing event as zero usage.
                         try:
                             if failure_category != "upstream_response_too_large":
-                                accept_chunk(b"", final=True)
+                                tail = accept_chunk(b"", final=True)
+                                output = completion.feed(tail, final=True)
+                                if output:
+                                    await relay_chunk(output)
                         except ResponseLimitExceeded:
                             status = "stream_interrupted"
                             failure_category = "upstream_response_too_large"
@@ -575,6 +583,12 @@ class Gateway:
                         finally:
                             try:
                                 await finalize(bytes(response_body), content_type)
+                                # SDKs may start another turn at response.completed,
+                                # message_stop or finish_reason, before HTTP EOF.
+                                # Settle and release the reservation first.
+                                tail = completion.settled()
+                                for offset in range(0, len(tail), 64 * 1024):
+                                    await relay_chunk(tail[offset:offset + 64 * 1024])
                             finally:
                                 await relay_chunk(None)
 
