@@ -110,6 +110,9 @@ or signatures to work around a rejection. Capability restrictions remain enforce
 Streaming is relayed unchanged. Clients must retain complete items delivered by
 `response.output_item.done`, even when the final response has an empty `output`,
 and must not treat unfinished items from an interrupted stream as complete.
+Normal output streams immediately; response-completion events and their trailing
+usage events wait until accounting settles and the request reservation is
+released. A client can then start its next turn without racing that reservation.
 A rejected continuation does not erase earlier accounting or candidates and does
 not trigger an automatic provider retry or restart.
 
@@ -228,7 +231,9 @@ HTTP status alone. Existing error envelopes remain compatible.
 `error_schema_version: 1`, `category`, `action`, and `request_id` accompany these
 fields. `category` is `run_stopping`, `retryable`, or `correctable`; `run_action`
 is the simpler stop/continue decision. `x-should-retry: false` prevents supported
-SDKs from blindly retrying permanent request errors. Unknown request errors
+SDKs from blindly retrying permanent request errors.
+Temporary admission pressure instead includes `x-should-retry: true` and
+`Retry-After: 1`; adapters must still implement bounded retries. Unknown request errors
 are nonfatal but **not** permission to resend an unchanged request. Bound all
 retries by attempts and the run deadline. The gateway never retries inference
 on the harness's behalf.
