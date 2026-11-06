@@ -135,6 +135,7 @@ class Gateway:
         raise ValueError("External web search and fetch are disabled.")
 
     async def admit_model(self, provider: str, request: Request, operation: str) -> dict:
+        request.state.upstream_request_sent = False
         validate_model_transport(operation, request.method, list(request.query_params.multi_items()),
                                  await request.body())
         validate_model_headers(request.headers)
@@ -466,6 +467,7 @@ class Gateway:
                 params=request.query_params,
                 content=body,
             )
+            request.state.upstream_request_sent = True
             upstream = await self.client.send(upstream_request, stream=True)
             upstream_status = upstream.status_code
             if provider == "openrouter":

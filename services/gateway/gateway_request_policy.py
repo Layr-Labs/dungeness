@@ -9,6 +9,98 @@ from __future__ import annotations
 from typing import Any
 
 
+# Increment when the supported history contract changes. Kept in safe rejection
+# diagnostics; the exact gateway revision is recorded in the runtime manifest.
+HISTORY_SCHEMA_VERSION = 1
+MAX_MODEL_REQUEST_BYTES = 8 * 1024 * 1024
+
+
+class HistoryPolicyError(ValueError):
+    """Safe diagnostics: fixed labels and positions, never history or arbitrary keys."""
+
+    def __init__(self, reason: str, message: str, index: int | None = None, *, field=None, field_index=None, location="input"):
+        super().__init__(message)
+        self.diagnostic = {"code": "conversation_history_rejected", "reason": reason,
+                           "location": location, "history_schema_version": HISTORY_SCHEMA_VERSION}
+        if index is not None:
+            self.diagnostic.update(item_index=index, item_type="reasoning")
+        if field is not None:
+            self.diagnostic["field"] = field
+        if field_index is not None:
+            self.diagnostic["field_index"] = field_index
+
+
+def reasoning_history(item: dict, provider: str, index: int) -> None:
+    """Validate a reviewed history envelope without treating it as request controls.
+
+    OpenRouter adds format/signature to the standard Responses reasoning item.
+    Do not accept these fields at the request root or on tool definitions. Unknown
+    fields remain explicit errors, rather than silently dropping evidence. Format
+    is bounded, inert metadata, not a capability or a model-routing selector.
+    """
+    allowed = {"type", "id", "status", "summary", "content", "encrypted_content"}
+    if provider == "openrouter":
+        allowed |= {"format", "signature"}
+    for position, key in enumerate(sorted(item)):
+        if key not in allowed:
+            raise HistoryPolicyError("unsupported_history_field",
+                "Unsupported reasoning history field; check the gateway's history compatibility schema.",
+                index, field_index=position)
+
+    def invalid(field):
+        return HistoryPolicyError("invalid_history_field",
+            "Invalid reasoning history field type or structure.", index, field=field)
+
+    for name in ("id", "encrypted_content", "signature"):
+        if item.get(name) is not None and not isinstance(item[name], str):
+            raise invalid(name)
+    status = item.get("status")
+    if status is not None and (not isinstance(status, str)
+                              or status not in {"in_progress", "incomplete", "completed"}):
+        raise invalid("status")
+    format_name = item.get("format")
+    if format_name is not None and (not isinstance(format_name, str) or not 1 <= len(format_name) <= 128):
+        raise invalid("format")
+    for name, kind in (("summary", "summary_text"), ("content", "reasoning_text")):
+        value = item.get(name)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise invalid(name)
+        for block in value:
+            if (not isinstance(block, dict) or set(block) != {"type", "text"}
+                    or block.get("type") != kind or not isinstance(block.get("text"), str)):
+                raise invalid(name)
+
+
+def chat_reasoning_history(value: Any, provider: str, index: int) -> None:
+    """OpenRouter Chat Completions uses reasoning_details, not Responses items."""
+    if value is None:
+        return
+    def invalid(field=None):
+        return HistoryPolicyError("invalid_history_field",
+            "Invalid Chat Completions reasoning history.", index, field=field, location="messages")
+    if provider != "openrouter" or not isinstance(value, list):
+        raise invalid()
+    for item in value:
+        if not isinstance(item, dict):
+            raise invalid()
+        kind = item.get("type")
+        shapes = {"reasoning.text": {"text", "signature"},
+                  "reasoning.summary": {"summary"}, "reasoning.encrypted": {"data"}}
+        if not isinstance(kind, str) or kind not in shapes:
+            raise invalid()
+        if set(item) - ({"type", "id", "format", "index"} | shapes[kind]):
+            raise invalid()
+        for key in ({"id", "format"} | shapes[kind]):
+            if item.get(key) is not None and not isinstance(item[key], str):
+                raise invalid(key if key in {"id", "format", "signature", "summary"} else None)
+        if item.get("format") is not None and not 1 <= len(item["format"]) <= 128:
+            raise invalid("format")
+        if item.get("index") is not None and (type(item["index"]) is not int or item["index"] < 0):
+            raise invalid()
+
+
 RESPONSES_FIELDS = frozenset("""
 model input instructions tools tool_choice parallel_tool_calls stream
 stream_options max_output_tokens temperature top_p reasoning text truncation
@@ -190,14 +282,18 @@ def content_blocks(value: Any, depth: int = 0) -> None:
         cache_control(block.get("cache_control"))
 
 
-def messages(value: Any) -> None:
-    for message in sequence(value, "messages"):
+def messages(value: Any, provider: str = "openai", operation: str = "messages") -> None:
+    for index, message in enumerate(sequence(value, "messages")):
         obj = fields(message, {"role", "content", "name", "tool_calls", "tool_call_id",
                                "function_call", "reasoning_content", "reasoning",
                                "reasoning_details", "cache_control", "refusal"}, "message")
         if obj.get("role") not in ("system", "developer", "user", "assistant", "tool", "function"):
             raise ValueError("unsupported message role")
         content_blocks(obj.get("content"))
+        if obj.get("reasoning_details") is not None:
+            if operation != "chat/completions":
+                raise ValueError("reasoning_details requires Chat Completions")
+            chat_reasoning_history(obj["reasoning_details"], provider, index)
         if "tool_calls" in obj:
             for call in sequence(obj["tool_calls"], "tool_calls"):
                 fields(call, {"id", "type", "function", "index"}, "tool call")
@@ -209,11 +305,10 @@ def messages(value: Any) -> None:
         cache_control(obj.get("cache_control"))
 
 
-def response_input(value: Any) -> None:
+def response_input(value: Any, provider: str = "openai") -> None:
     if isinstance(value, str) or value is None:
         return
     history_fields = {
-        "reasoning": {"summary", "content", "encrypted_content"},
         "compaction": {"encrypted_content"},
         "function_call": {"name", "namespace", "arguments", "call_id"},
         "function_call_output": {"call_id", "output"},
@@ -226,11 +321,13 @@ def response_input(value: Any) -> None:
         "apply_patch_call": {"call_id", "operation"},
         "apply_patch_call_output": {"call_id", "output"},
     }
-    for item in sequence(value, "input"):
+    for index, item in enumerate(sequence(value, "input")):
         if not isinstance(item, dict):
             raise ValueError("input item must be an object")
         kind = item.get("type", "message")
-        if kind == "message":
+        if kind == "reasoning":
+            reasoning_history(item, provider, index)
+        elif kind == "message":
             fields(item, {"type", "id", "role", "content", "status", "phase"}, "input message")
             if item.get("role") not in ("system", "developer", "user", "assistant"):
                 raise ValueError("unsupported input message role")
@@ -287,6 +384,15 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
         raise ValueError("unsupported model operation")
     if provider == "openrouter":
         allowed |= OPENROUTER_FIELDS
+    stack = [(payload, 0)]
+    while stack:
+        value, depth = stack.pop()
+        if depth > 64:
+            raise ValueError("model request exceeds maximum nesting depth")
+        if isinstance(value, dict):
+            stack.extend((entry, depth + 1) for entry in value.values())
+        elif isinstance(value, list):
+            stack.extend((entry, depth + 1) for entry in value)
     fields(payload, allowed, f"{operation} request")
     model = payload.get("model")
     if not isinstance(model, str) or not model:
@@ -310,13 +416,21 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
     choice = payload.get("function_call")
     if choice is not None and choice not in ("none", "auto"):
         fields(choice, {"name"}, "function_call")
-    if "messages" in payload:
-        messages(payload["messages"])
-    if "system" in payload:
-        content_blocks(payload["system"])
-    if operation.startswith("responses"):
-        response_input(payload.get("input"))
-    elif operation == "embeddings":
+    try:
+        if "messages" in payload:
+            messages(payload["messages"], provider, operation)
+        if "system" in payload:
+            content_blocks(payload["system"])
+        if operation.startswith("responses"):
+            response_input(payload.get("input"), provider)
+    except HistoryPolicyError:
+        raise
+    except ValueError as error:
+        # Do not echo arbitrary field names/values from untrusted history.
+        raise HistoryPolicyError("unsupported_history_structure",
+            "Gateway rejected conversation history; check the supported provider/API history schema.",
+            location="input" if operation.startswith("responses") else "messages") from error
+    if operation == "embeddings":
         text_or_tokens(payload.get("input"))
     elif operation == "completions":
         text_or_tokens(payload.get("prompt"))
@@ -353,6 +467,8 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
 
 
 def validate_model_transport(operation: str, method: str, query: list[tuple[str, str]], body: bytes) -> None:
+    if len(body) > MAX_MODEL_REQUEST_BYTES:
+        raise ValueError("model request exceeds the 8 MiB gateway limit")
     if operation == "models":
         if method != "GET" or query or body:
             raise ValueError("model listing accepts only GET without a body or query")
