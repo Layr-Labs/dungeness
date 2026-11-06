@@ -51,6 +51,10 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
                     summary = json.loads((Path(temp)/'summary.json').read_text())
                     self.assertEqual(summary['usage']['model_accounting_state'],
                                      'settled' if has_usage else 'incomplete')
+                    diagnostics = [e['data'] for e in map(json.loads, contents.splitlines())
+                                   if e['kind'] == 'gateway.model_recovery_required']
+                    self.assertEqual(diagnostics[0]['run_action'], 'continue' if has_usage else 'stop')
+                    self.assertFalse(diagnostics[0]['retryable'])
                     self.assertNotIn('private-token-canary',contents)
                     self.assertNotIn('private-upstream',contents)
                 finally:
@@ -131,17 +135,19 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app),
                                                  base_url="http://gateway") as client:
                         payload = {"model": "gpt-6-astra", "input": "solve", "stream": True}
-                        for expected in (200, 502, 429):
+                        for expected in (200, 502, 200):
                             reply = await client.post("/model/chatgpt/v1/responses", json=payload,
                                 headers={"authorization": "Bearer testbed", "chatgpt-account-id": "untrusted"})
                             self.assertEqual(reply.status_code, expected, reply.text)
-                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(calls), 3)
                 receipts = [json.loads(line)["data"] for line in (Path(temp) / "events.jsonl").read_text().splitlines()
                             if json.loads(line)["kind"] == "model.accounting"]
                 self.assertEqual(receipts[0]["accounting_method"], "gateway")
                 self.assertGreater(receipts[0]["normalized_usd"], 0)
                 self.assertIsNone(receipts[0]["billed_usd"])
-                self.assertEqual(receipts[1]["accounting_method"], "unavailable")
+                self.assertEqual(receipts[1]["accounting_basis"], "transport_not_sent")
+                self.assertEqual(receipts[1]["normalized_usd"], 0)
+                self.assertFalse(runtime.ledger.model_accounting_incomplete)
                 self.assertNotIn("private-test-token", (Path(temp) / "events.jsonl").read_text())
             finally:
                 await runtime.client.aclose()

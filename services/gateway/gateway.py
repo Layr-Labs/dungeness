@@ -8,6 +8,7 @@ code live in the ``gateway_*`` modules beside this file.
 from __future__ import annotations
 from gateway_security import RequestBoundsMiddleware
 
+from gateway_errors import recovery, GatewayPolicyError
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -210,10 +211,12 @@ def budget_rejected(request: Request, operation: str, error: BudgetExceeded) -> 
     )
     # Waiting cannot fix a request larger than all remaining credits, even after
     # active reservations settle. Preserve 429 for temporary admission pressure.
-    permanent = error.details.get("retryable") is False
+    permanent = not error.details["retryable"]
     return JSONResponse({"error": str(error), "code": error.code,
-                         "request_id": request.state.request_id, **error.details},
-                        status_code=400 if permanent else 429,
+                         "request_id": request.state.request_id, **error.details,
+                         "diagnostic": {"code": error.code, "request_id": request.state.request_id,
+                                        "upstream_request_sent": False, **error.details}},
+                        status_code=400 if error.details["category"] == "correctable" else 429,
                         headers={"x-should-retry": "false"} if permanent else None)
 
 
@@ -399,10 +402,10 @@ async def external_web_disabled(_request: Request) -> Response:
 def model_request_rejected(request, error):
     from gateway_reservations import OutputLimitError
     from gateway_request_policy import HistoryPolicyError
-    details = {"code": "output_token_limit" if isinstance(error, OutputLimitError) else "request_policy_rejected"}
+    details = {**recovery("request_policy_rejected"), "code": "output_token_limit" if isinstance(error, OutputLimitError) else "request_policy_rejected"}
     if isinstance(error, OutputLimitError):
         details["maximum"] = error.maximum
-    if isinstance(error, HistoryPolicyError):
+    if isinstance(error, (HistoryPolicyError, GatewayPolicyError)):
         details.update(error.diagnostic)
     sent = getattr(request.state, "upstream_request_sent", None)
     if isinstance(sent, bool):
@@ -410,7 +413,25 @@ def model_request_rejected(request, error):
     identity = getattr(request.state, "request_id", None)
     # Only fixed labels and positions enter diagnostics; never the request body.
     log_event("model_request_rejected", request_id=identity, **details)
-    return JSONResponse({"error": str(error), "diagnostic": {**details, "request_id": identity}}, status_code=400)
+    # Generic validators may include arbitrary submitted keys in their messages.
+    message = str(error) if isinstance(error, (HistoryPolicyError, OutputLimitError, GatewayPolicyError)) else "Request rejected by gateway policy; check the documented model, tool and request limits."
+    return JSONResponse({"error": message, "diagnostic": {**details, "request_id": identity}},
+                        status_code=400, headers={"x-should-retry": "false"})
+
+
+def model_transport_failed(request):
+    # Dispatch failures can have an unknown bill. Never advise an automatic paid
+    # retry based solely on HTTP 502 or the exception class.
+    sent = getattr(request.state, "upstream_request_sent", None)
+    code = "provider_accounting_incomplete" if gateway.ledger.model_accounting_incomplete else "provider_transport_failed"
+    details = {**recovery(code, retryable=sent is False,
+                         action="check_accounting" if code == "provider_accounting_incomplete" else None),
+               "code": code, "request_id": request.state.request_id,
+               "upstream_request_sent": sent}
+    log_event("model_transport_failed", **details)
+    return JSONResponse({"error": "Provider transport failed; inspect retained accounting before continuing.",
+                         "diagnostic": details}, status_code=502,
+                        headers={"x-should-retry": "true" if details["retryable"] else "false"})
 
 
 
@@ -422,10 +443,7 @@ async def model_openai(request: Request) -> Response:
     except ValueError as error:
         return model_request_rejected(request, error)
     except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
+        return model_transport_failed(request)
 
 
 async def model_anthropic(request: Request) -> Response:
@@ -438,10 +456,7 @@ async def model_anthropic(request: Request) -> Response:
     except ValueError as error:
         return model_request_rejected(request, error)
     except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
+        return model_transport_failed(request)
 
 
 async def model_openrouter(request: Request) -> Response:
@@ -454,10 +469,7 @@ async def model_openrouter(request: Request) -> Response:
     except ValueError as error:
         return model_request_rejected(request, error)
     except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
+        return model_transport_failed(request)
 
 
 async def model_configured(request: Request) -> Response:
@@ -471,7 +483,7 @@ async def model_configured(request: Request) -> Response:
     except ValueError as error:
         return model_request_rejected(request, error)
     except httpx.HTTPError as error:
-        return JSONResponse({'error': f'provider request failed: {type(error).__name__}'}, status_code=502)
+        return model_transport_failed(request)
 
 
 async def model_chatgpt(request: Request) -> Response:
@@ -484,10 +496,7 @@ async def model_chatgpt(request: Request) -> Response:
     except ValueError as error:
         return model_request_rejected(request, error)
     except httpx.HTTPError as error:
-        return JSONResponse(
-            {"error": f"provider request failed: {type(error).__name__}"},
-            status_code=502,
-        )
+        return model_transport_failed(request)
 
 
 async def drain_background_tasks(timeout_seconds: float | None = None) -> None:

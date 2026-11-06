@@ -134,6 +134,7 @@ class ModuleLayoutTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for filename in (
             "gateway.py",
+            "gateway_errors.py",
             "gateway_models.py",
             "gateway_auth.py",
             "gateway_request_policy.py",

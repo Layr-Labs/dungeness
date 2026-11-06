@@ -204,3 +204,65 @@ policy; standalone Dungeness runs can select it in the run spec.
 
 A provider-enforced, expiring per-run key is an additional financial boundary;
 gateway estimates do not protect a key stolen from the gateway or host.
+
+## Recovering from a rejected request
+
+A rejected request does **not** automatically end the research run. The gateway
+uses an explicit stop list in `gateway_errors.py`. Other errors leave the run
+open. Read the recovery fields in `diagnostic` (request/admission errors) or
+`error` (provider/transport-bound errors), rather than inferring recovery from
+HTTP status alone. Existing error envelopes remain compatible.
+
+| Case | `run_action` | `retryable` | Harness action |
+| --- | --- | --- | --- |
+| Invalid history, unsupported input or tool, unauthorized model, excessive output limit | `continue` | `false` | Correct the request, then continue the same run. |
+| Request reservation exceeds remaining credits or tokens | `continue` | `false` | Reduce context or an explicit output limit; retain completed work. |
+| Active requests temporarily reserve the needed allowance, or gateway capacity is full | `continue` | `true` | Wait for active calls to settle; retry with bounded backoff. |
+| Connection/pool failure known to occur before dispatch | `continue` | `true` | Retry with bounded backoff. The failed attempt still counts toward the request limit. |
+| Provider rate limit or transient failure with settled accounting | `continue` | `true` | Retry with bounded backoff. |
+| Actual request/token/spend limit exhausted | `stop` | `false` | Stop inference; save and verify the best candidate. |
+| Credentials unavailable, authentication/access denied, or required operator configuration missing | `stop` | `false` | Preserve work and report the safe error/request ID. |
+| Unknown charges after dispatch, incomplete accounting, or cancellation | `stop` | `false` | Preserve work; inspect accounting/status. Do not start a paid replacement automatically. |
+| Interrupted response with complete accounting | `continue` | `false` | Inspect the partial response; do not replay incomplete history or assume the operation completed. |
+
+`error_schema_version: 1`, `category`, `action`, and `request_id` accompany these
+fields. `category` is `run_stopping`, `retryable`, or `correctable`; `run_action`
+is the simpler stop/continue decision. `x-should-retry: false` prevents supported
+SDKs from blindly retrying permanent request errors. Unknown request errors
+are nonfatal but **not** permission to resend an unchanged request. Bound all
+retries by attempts and the run deadline. The gateway never retries inference
+on the harness's behalf.
+
+Current model input is text and supported local-tool history only. **Image,
+audio and document input blocks are unsupported**, including locally rendered
+PDF pages and inline images. Assigned PDFs can still be read locally: extract
+text before constructing model requests. This is ordinary request validation,
+not an image-specific stop rule. Nothing is silently removed from conversation
+history; signed or encrypted reasoning must remain intact. If safe correction
+is impossible, retain the candidate and return an actionable harness error.
+
+A gateway response cannot force an SDK or subprocess to resume. Harness wrappers
+must catch request failures and use this contract. Do not treat every HTTP 400
+as a fatal research failure, and do not treat every HTTP 429 as retryable.
+For streamed responses, HTTP 200 can precede a later interruption. Retained
+`gateway.model_recovery_required` events record recovery guidance; clients must
+also require a protocol completion event before considering history complete.
+`upstream_request_sent: true` records dispatch, not proof of provider receipt;
+`false` means a local rejection or a known pre-dispatch transport failure.
+
+### Fast regression loop
+
+Run offline gateway scenarios before a paid end-to-end test:
+
+```sh
+PYTHONPATH=services/gateway python -m unittest discover \
+  -s services/gateway/tests -p 'test_error_recovery.py'
+PYTHONPATH=services/gateway python -m unittest discover -s services/gateway/tests
+```
+
+The focused suite exercises failure → correction → successful continuation,
+retained accounting/work, budget pressure versus exhaustion, provider errors,
+transport uncertainty, and capability controls. All upstream calls are mocked.
+The full suite additionally covers signed history round trips and interrupted
+streams. Add each newly observed failure as an offline reproduction here before
+running another research experiment.
