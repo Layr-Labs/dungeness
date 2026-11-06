@@ -11,6 +11,10 @@ External web search and fetch are disabled. Omitted settings and legacy
 remain available through the internal problem service.
 Historical experiments must use their original revision.
 
+Harness authors and coding agents must implement
+[request-error handling](#required-request-error-handling) in their model adapter
+or CLI wrapper; a gateway error is not automatically feedback to the research model.
+
 An agent descriptor has the ordinary identity fields, `execution_mode: installed`,
 a Dockerfile, and:
 
@@ -97,6 +101,41 @@ provider billing limits. Calls can cost more than their allowance; actual usage
 controls subsequent admission, and missing usage stops it. A consuming benchmark
 must reject over-cap or incomplete evidence. Strict dollar caps require further
 provider-specific request bounds or provider-side limits.
+
+## Required request-error handling
+
+Read the [gateway recovery contract](gateway-request-policy.md#recovering-from-a-rejected-request)
+when building or adapting a harness. Errors expose recovery fields under
+`diagnostic` or, for provider and transport-bound errors, `error`:
+
+| `run_action` | `retryable` | Required harness behavior |
+| --- | --- | --- |
+| `stop` | `false` | Stop model calls and preserve completed work and accounting. |
+| `continue` | `true` | Retry with bounded backoff while the run's time and budget permit. |
+| `continue` | `false` | Correct the request or choose another supported approach before continuing. Do not resend it unchanged. |
+
+Inspect the stable error `code` and `action`; HTTP status or subprocess exit code
+alone is insufficient. Retain safe diagnostics and the request ID. Do not treat
+every HTTP 400 as the end of research or every HTTP 429/500 as retryable.
+If an SDK or CLI exits on an API error, its wrapper must handle that outcome;
+`run_action: continue` does not restart the process or deliver feedback to the model.
+Use the framework's supported recovery interface. Do not fabricate successful
+responses, alter retained evidence, or silently strip signed/encrypted history.
+If recovery is not possible, report that limitation and preserve the best result.
+
+The current gateway does not accept image inputs, including rendered PDF pages.
+Local image processing and OCR inside the sandbox are allowed; send extracted
+text instead. An image rejection follows the ordinary correctable-error path.
+
+Before selecting the final candidate, collect outstanding evaluation results
+within the remaining run time and choose the best verified candidate available.
+Do not overwrite a newer verified improvement with an older checkpoint merely
+because the model subprocess exited.
+
+Test the actual adapter/wrapper offline with a rejected request followed by a
+corrected successful request, bounded retries, a stop condition, and an evaluation
+finishing after the model subprocess exits. A gateway-only mock does not prove
+that an unmodified agent CLI or wrapper recovers.
 
 ## Migrating bundled agents
 
