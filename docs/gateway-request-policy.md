@@ -48,13 +48,12 @@ web_search:
   mode: disabled
 ```
 
-sets the gateway's search and fetch budgets to zero. The historical
-`web-search-profile:system/dungeness/disabled-v1` reference is an access-only alias
-for that setting; it is not a harness template or research strategy. `optional`
-permits the separately metered gateway web endpoints within the trusted task's
-policy and budget. Neither setting permits provider-hosted search through a
-model request. Client flags such as Codex `web_search=disabled` are additional
-defenses, not the enforcement boundary.
+sets the gateway's search and fetch budgets to zero. External web access is
+currently disabled for command harnesses even when legacy configuration asks
+for `optional`; omitted settings also resolve to `disabled`. Assigned resources
+remain available through the internal problem service. Provider-hosted search
+and browsing are always rejected in model requests. Client flags such as Codex
+`web_search=disabled` are additional defenses, not the enforcement boundary.
 
 ## Supported model requests
 
