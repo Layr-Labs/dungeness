@@ -14,6 +14,7 @@ COPY gateway_models.py /app/gateway_models.py
 COPY gateway_auth.py /app/gateway_auth.py
 COPY gateway_security.py /app/gateway_security.py
 COPY provider_profiles.py providers.json /app/
+COPY gateway_history_diagnostics.py /app/gateway_history_diagnostics.py
 COPY gateway_request_policy.py /app/gateway_request_policy.py
 COPY gateway_pricing.py /app/gateway_pricing.py
 COPY gateway_runtime.py /app/gateway_runtime.py

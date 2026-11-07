@@ -100,11 +100,22 @@ encrypted content, item order and tool associations, without removing fields.
 Requests are limited to 8 MiB and 64 levels of JSON nesting.
 
 Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
-`conversation_history_rejected`. Safe diagnostics include the request ID, schema
-version, location and item/field position where available, and whether the request
-reached the provider. Arbitrary field names and history contents are not echoed.
-Update to a compatible runtime or report the request ID; do not remove reasoning
-or signatures to work around a rejection. Capability restrictions remain enforced.
+`conversation_history_rejected`. Diagnostics version 1 adds a structural `path`
+(e.g. `input[87].content[1].type`) and a fixed `validation_rule`, such as
+`unsupported_content_type` or `unknown_field`. It includes the request ID,
+provider/API route, schema version, known item/block types and positions, and
+whether the request reached the provider. Unknown field names and type values
+are never echoed; unknown fields have only a sorted `field_index`. No prompt,
+reasoning, signature, credential or raw rejected body is copied into diagnostics.
+These details are retained in the existing `gateway.model_request_rejected`
+event and sanitized local/owner diagnostics, not public result descriptions.
+
+Keep the run records and report the request ID and structural diagnostic. Do not
+remove reasoning or signatures to work around a rejection, or automatically
+restart a paid run. Operators can group reports by route, schema version, rule
+and known item/block type before releasing compatibility fixes together. This
+adds diagnostics only; capability restrictions and accepted history are unchanged.
+
 
 Streaming is relayed unchanged. Clients must retain complete items delivered by
 `response.output_item.done`, even when the final response has an empty `output`,
