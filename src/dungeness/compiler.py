@@ -1534,6 +1534,7 @@ def build_compose(
                     "TESTBED_CAPTURE_PROMPTS": "${TESTBED_CAPTURE_PROMPTS:-}",
                     "TESTBED_USAGE_DIR": "/var/lib/testbed/usage",
                     "DUNGENESS_MODEL_HTTPS_PROXY": "${TESTBED_MODEL_HTTPS_PROXY:-}",
+                    "DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS": "${TESTBED_MODEL_REQUEST_TIMEOUT_SECONDS:-3600}",
                 },
                 "healthcheck": {
                     "test": [

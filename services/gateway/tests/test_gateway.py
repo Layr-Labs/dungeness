@@ -458,6 +458,7 @@ class UsageTests(unittest.TestCase):
             auth_file = Path(directory) / "auth.json"
             auth_file.write_text(json.dumps({"tokens": {
                 "access_token": "subscription-access-token", "account_id": "account-1"}}))
+            auth_file.chmod(0o600)
             os.environ["DUNGENESS_CHATGPT_AUTH_FILE"] = str(auth_file)
             ledger = UsageLedger("chatgpt-test", Path(directory))
             model_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
@@ -588,6 +589,7 @@ class UsageTests(unittest.TestCase):
         }):
             auth_file = Path(directory) / "auth.json"
             auth_file.write_text(json.dumps({"tokens": {"access_token": "subscription", "account_id": "account"}}))
+            auth_file.chmod(0o600)
             os.environ["DUNGENESS_CHATGPT_AUTH_FILE"] = str(auth_file)
             ledger = UsageLedger("chatgpt-stream-test", Path(directory))
             model_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))

@@ -50,6 +50,14 @@ ChatGPT's recipe reads its access token and account ID from the staged file.
 A missing, malformed, or incomplete credential file fails closed. Caller-supplied
 bearer tokens are never used to authenticate upstream requests.
 
+Both file-based paths require a regular file with no group/other permission bits
+and exactly one hard link. Symlinks and special files are rejected, and JSON is
+limited to 128 KiB. This applies to nested ChatGPT token documents as well as flat
+credential maps. Standalone integrations using broadly readable files must set
+`chmod 600` on the actual credential file and supply its direct path; an invalid
+configured file never falls back to another identity. Compiled runs already stage
+private files.
+
 For compatible providers in `providers.json`, bearer substitution remains the
 default. These optional fields configure different authentication headers:
 

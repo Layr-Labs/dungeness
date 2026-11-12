@@ -429,6 +429,8 @@ def model_transport_failed(request):
                          action="check_accounting" if code == "provider_accounting_incomplete" else None),
                "code": code, "request_id": request.state.request_id,
                "upstream_request_sent": sent}
+    if getattr(request.state, "transport_failure_category", None) == "upstream_request_deadline_exceeded":
+        details["failure_category"] = "upstream_request_deadline_exceeded"
     log_event("model_transport_failed", **details)
     return JSONResponse({"error": "Provider transport failed; inspect retained accounting before continuing.",
                          "diagnostic": details}, status_code=502,

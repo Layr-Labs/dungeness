@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+import math
 import json
 from provider_profiles import PROFILES, upstream_model
 import os
@@ -50,12 +52,40 @@ from gateway_usage import (
     set_active_ledger,
 )
 BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+UPSTREAM_CLOSE_SECONDS = 5
+ACCOUNTING_CLEANUP_SECONDS = 20
+
+
+class RequestDeadlineExceeded(httpx.TimeoutException):
+    """Absolute inference deadline; no arbitrary provider text in diagnostics."""
+
+
+@asynccontextmanager
+async def request_deadline(deadline):
+    timeout = asyncio.timeout_at(deadline)
+    try:
+        async with timeout:
+            yield
+    except TimeoutError:
+        if not timeout.expired():
+            raise
+        raise RequestDeadlineExceeded("Model request exceeded its duration limit.") from None
+
+
+async def close_upstream(upstream):
+    # Cleanup has a small separate bound; a stuck close must not prevent accounting.
+    try:
+        async with asyncio.timeout(UPSTREAM_CLOSE_SECONDS):
+            await upstream.aclose()
+    except (TimeoutError, httpx.HTTPError):
+        log_event("model_upstream_close_incomplete")
 
 
 def transport_failure_category(error: BaseException) -> str:
     """Fixed diagnostic labels only; exception messages can contain URLs or secrets."""
     for kind, label in (
         (asyncio.CancelledError, "gateway_cancelled"),
+        (RequestDeadlineExceeded, "upstream_request_deadline_exceeded"),
         (ResponseLimitExceeded, "upstream_response_too_large"),
         (httpx.ReadTimeout, "upstream_read_timeout"),
         (httpx.ConnectTimeout, "upstream_connect_timeout"),
@@ -102,6 +132,12 @@ class Gateway:
     """One trusted gateway instance and budget ledger for one benchmark run."""
 
     def __init__(self) -> None:
+        try:
+            self.request_timeout_seconds = float(os.environ.get("DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS", "3600"))
+            if not math.isfinite(self.request_timeout_seconds) or self.request_timeout_seconds <= 0:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Model request duration limit must be finite and positive.") from None
         self.run_id = os.environ["TESTBED_RUN_ID"]
         self.ledger = UsageLedger(
             self.run_id,
@@ -123,7 +159,8 @@ class Gateway:
         self.openrouter_inference_only = os.environ.get("DUNGENESS_OPENROUTER_INFERENCE_ONLY") == "1"
         # Model reasoning can legitimately take longer than an ordinary web
         # request. Responses are streamed to the agent as they arrive, while a
-        # bounded overall timeout still prevents abandoned provider calls.
+        # read timeout bounds inactivity. A separate monotonic deadline bounds
+        # the entire upstream request, including detached streaming drains.
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(600.0, connect=30.0), trust_env=False, follow_redirects=False,
             proxy=trusted_model_proxy()
@@ -217,6 +254,7 @@ class Gateway:
                 {"id": name, "object": "model", "owned_by": provider} for name in names]})
         payload = await self.admit_model(provider, request, normalized)
         started = time.monotonic()
+        deadline = asyncio.get_running_loop().time() + self.request_timeout_seconds
         status = "error"
         usage: dict[str, int] = {}
         model = "unknown"
@@ -270,9 +308,15 @@ class Gateway:
             billed_usd = usd if cfg.get("billed", True) and not (request_pricing or {}).get("text_only") else None
             upstream_request_id, billing_source = None, 'reference_estimate'
             if provider == 'openrouter' and accounting_basis != 'transport_not_sent':
-                upstream_request_id, billed_usd, billing_source = await openrouter_charge(
-                    self.client, response_body, content_type, auth_headers, model,
-                    generation_id=upstream_generation_id)
+                try:
+                    # This is accounting cleanup, never another inference call.
+                    # Bound the complete lookup, not just each HTTP read.
+                    async with asyncio.timeout(ACCOUNTING_CLEANUP_SECONDS):
+                        upstream_request_id, billed_usd, billing_source = await openrouter_charge(
+                            self.client, response_body, content_type, auth_headers, model,
+                            generation_id=upstream_generation_id)
+                except (TimeoutError, asyncio.CancelledError):
+                    upstream_request_id, billed_usd, billing_source = upstream_generation_id, None, 'unavailable'
             if accounting_basis == "transport_not_sent":
                 billed_usd, billing_source = 0.0, "transport_not_sent"
             budget_usd = billed_usd if provider == 'openrouter' else usd
@@ -497,7 +541,8 @@ class Gateway:
                 content=body,
             )
             request.state.upstream_request_sent = True
-            upstream = await self.client.send(upstream_request, stream=True)
+            async with request_deadline(deadline):
+                upstream = await self.client.send(upstream_request, stream=True)
             upstream_status = upstream.status_code
             if provider == "openrouter":
                 upstream_generation_id = upstream.headers.get("x-generation-id")
@@ -527,10 +572,22 @@ class Gateway:
                 async def relay_chunk(chunk):
                     if disconnected.is_set():
                         return
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        # Flush already-accounted completion without waiting for a
+                        # consumer beyond the deadline. A full relay is abandoned.
+                        try:
+                            relay.put_nowait(chunk)
+                        except asyncio.QueueFull:
+                            disconnected.set()
+                            while not relay.empty():
+                                relay.get_nowait()
+                            relay.put_nowait(None)
+                        return
                     put = asyncio.create_task(relay.put(chunk))
                     gone = asyncio.create_task(disconnected.wait())
                     try:
-                        done, _ = await asyncio.wait((put, gone), timeout=30,
+                        done, _ = await asyncio.wait((put, gone), timeout=min(30, remaining),
                                                      return_when=asyncio.FIRST_COMPLETED)
                         if not done:
                             # A stalled consumer must not pin a provider pump.
@@ -547,19 +604,20 @@ class Gateway:
                 async def pump() -> None:
                     nonlocal status, failure_category, failure_stage
                     try:
-                        async for chunk in upstream.aiter_bytes():
-                            # Bound individual queue entries as well as total
-                            # retained response bytes.
-                            for offset in range(0, len(chunk), 64 * 1024):
-                                safe = accept_chunk(chunk[offset:offset + 64 * 1024])
-                                if safe:
-                                    output = completion.feed(safe)
-                                    if output:
-                                        await relay_chunk(output)
-                        tail = accept_chunk(b"", final=True)
-                        output = completion.feed(tail, final=True)
-                        if output:
-                            await relay_chunk(output)
+                        async with request_deadline(deadline):
+                            async for chunk in upstream.aiter_bytes():
+                                # Bound individual queue entries as well as total
+                                # retained response bytes.
+                                for offset in range(0, len(chunk), 64 * 1024):
+                                    safe = accept_chunk(chunk[offset:offset + 64 * 1024])
+                                    if safe:
+                                        output = completion.feed(safe)
+                                        if output:
+                                            await relay_chunk(output)
+                            tail = accept_chunk(b"", final=True)
+                            output = completion.feed(tail, final=True)
+                            if output:
+                                await relay_chunk(output)
                     except BaseException as error:
                         status = "stream_interrupted"
                         failure_category = transport_failure_category(error)
@@ -579,7 +637,7 @@ class Gateway:
                             failure_category = "upstream_response_too_large"
                             failure_stage = "upstream_stream"
                         try:
-                            await upstream.aclose()
+                            await close_upstream(upstream)
                         finally:
                             try:
                                 await finalize(bytes(response_body), content_type)
@@ -611,16 +669,17 @@ class Gateway:
                                          background=BackgroundTask(disconnected.set))
 
             try:
-                async for chunk in upstream.aiter_bytes():
-                    accept_chunk(chunk)
-                accept_chunk(b"", final=True)
+                async with request_deadline(deadline):
+                    async for chunk in upstream.aiter_bytes():
+                        accept_chunk(chunk)
+                    accept_chunk(b"", final=True)
             except BaseException as error:
                 status = "stream_interrupted"
                 failure_category = transport_failure_category(error)
                 failure_stage = "upstream_response_body"
                 raise
             finally:
-                await upstream.aclose()
+                await close_upstream(upstream)
             await finalize(bytes(response_body), content_type)
             if not upstream.is_success:
                 return safe_provider_error(upstream.status_code, request_id, accounting_complete=bool(usage) and not self.ledger.model_accounting_incomplete)
@@ -630,6 +689,8 @@ class Gateway:
             if upstream_status is None and isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
                 request.state.upstream_request_sent = False
                 request.state.transport_not_sent = True
+            if isinstance(error, RequestDeadlineExceeded):
+                request.state.transport_failure_category = "upstream_request_deadline_exceeded"
             if failure_category is None:
                 failure_category = transport_failure_category(error)
                 failure_stage = "upstream_request"

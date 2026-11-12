@@ -170,6 +170,25 @@ routes with and without model allowlists and with disabled/optional web budgets,
 and assert that rejected requests cause no upstream calls or model charges.
 Positive cases cover local Codex/Claude-style tool histories, SDK loops, configured providers, compaction, token counting, embeddings and local model discovery.
 
+## Request lifetime
+
+Each admitted model request has one absolute, monotonic deadline, defaulting to
+3,600 seconds. Operators can set `TESTBED_MODEL_REQUEST_TIMEOUT_SECONDS` when
+launching compiled runs, or `DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS` for a
+standalone gateway. The value must be finite and positive. It is not a harness
+request option. Existing connection and read-inactivity timeouts still apply.
+
+The same deadline covers connection, response headers, body reads, and streaming
+drains after a client disconnect or stall. Cleanup allows up to five additional
+seconds to close upstream and twenty seconds to reconcile OpenRouter charges.
+Expiry records `upstream_request_deadline_exceeded` in the safe failure category;
+if streaming headers were already sent, consult retained accounting diagnostics.
+Complete usage already received is preserved and settled once. Missing usage or
+charges remain unknown and block further model admissions; a timeout is never
+assumed to mean free inference. The gateway does not restart research or retry
+paid inference automatically. Stopping the local connection cannot guarantee
+that a provider stops computation or billing immediately.
+
 ## OpenRouter usage and charges
 
 OpenRouter calls record provider-reported `billed_usd`, `billing_source` and

@@ -107,7 +107,7 @@ class AuthenticationTests(unittest.TestCase):
                             '{"tokens":{"access_token":"secret","account_id":"bad\\r\\naccount"}}'):
                 with self.subTest(content=content):
                     if content is not None:
-                        path.write_text(content)
+                        path.write_text(content); path.chmod(0o600)
                     with self.assertRaises(ValueError):
                         provider_auth_headers("openai-chatgpt")
 
@@ -140,6 +140,7 @@ class AuthenticationBoundaryTests(unittest.IsolatedAsyncioTestCase):
             Path(temp, "auth.json").write_text(json.dumps({"tokens": {
                 "access_token": "private-test-token", "account_id": "trusted-account",
             }}))
+            Path(temp, "auth.json").chmod(0o600)
             runtime = Gateway()
             await runtime.client.aclose()
             calls = []
