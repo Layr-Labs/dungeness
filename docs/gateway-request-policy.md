@@ -300,3 +300,22 @@ transport uncertainty, and capability controls. All upstream calls are mocked.
 The full suite additionally covers signed history round trips and interrupted
 streams. Add each newly observed failure as an offline reproduction here before
 running another research experiment.
+
+## OpenRouter Claude cache accounting
+
+OpenRouter Chat Completions reports aggregate `cache_write_tokens`, without the
+native Anthropic five-minute/one-hour breakdown. For duration-priced Claude
+models, the gateway resolves that aggregate using the request's cache TTL:
+OpenRouter's documented default is five minutes, and explicit uniform `5m` or
+`1h` markers use that duration. The accounting receipt records
+`provider_usage_request_cache_ttl` as its basis; provider-reported dollar charges
+remain independent of normalized reference credits.
+
+Mixed TTL markers on Chat Completions are rejected before model admission, with
+`run_action=continue`. Use one TTL or the assigned OpenRouter Messages route for
+mixed durations with native usage buckets. The gateway does not inspect tool
+arguments or JSON schemas as cache directives. Native Messages accounting still
+requires a valid provider-reported duration breakdown; unknown usage is never
+converted into a free call.
+
+Reference: [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching).
