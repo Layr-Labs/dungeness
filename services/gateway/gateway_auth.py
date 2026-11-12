@@ -6,17 +6,12 @@ missing or invalid fails closed; it does not select a fallback identity.
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import re
 import stat
 
 
-def credential_value(name, *, private_values=None):
-    """Resolve a credential name; file mode never falls back to environment."""
-    filename = os.environ.get("DUNGENESS_CREDENTIALS_FILE")
-    if filename is None:
-        # Standalone gateway compatibility. Compiled runs always require a file.
-        return os.environ.get(name)
+def private_json_file(filename):
+    """Read bounded private JSON through one non-following, nonblocking open."""
     try:
         fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as stream:
@@ -26,13 +21,23 @@ def credential_value(name, *, private_values=None):
             raw = stream.read(128 * 1024 + 1)
         if len(raw) > 128 * 1024:
             raise ValueError
-        values = json.loads(raw)
-        if not isinstance(values, dict) or any(
-            not isinstance(k, str) or not isinstance(v, str) for k, v in values.items()
-        ):
+        document = json.loads(raw)
+        if not isinstance(document, dict):
             raise ValueError
-    except (OSError, ValueError, UnicodeError):
+        return document
+    except (OSError, ValueError, UnicodeError, RecursionError):
         raise ValueError("Gateway credential file is unavailable or invalid.") from None
+
+
+def credential_value(name, *, private_values=None):
+    """Resolve a credential name; file mode never falls back to environment."""
+    filename = os.environ.get("DUNGENESS_CREDENTIALS_FILE")
+    if filename is None:
+        # Standalone gateway compatibility. Compiled runs always require a file.
+        return os.environ.get(name)
+    values = private_json_file(filename)
+    if any(not isinstance(k, str) or not isinstance(v, str) for k, v in values.items()):
+        raise ValueError("Gateway credential file is unavailable or invalid.")
     if private_values is not None:
         private_values.update(v for v in values.values() if v)
     return values.get(name)
@@ -80,13 +85,7 @@ def authentication_headers(recipe, *, private_values=None):
             if not filename:
                 continue
             try:
-                with Path(filename).open("rb") as stream:
-                    raw = stream.read(128 * 1024 + 1)
-                if len(raw) > 128 * 1024:
-                    raise ValueError
-                document = json.loads(raw)
-                if not isinstance(document, dict):
-                    raise ValueError
+                document = private_json_file(filename)
                 if private_values is not None:
                     def collect(value):
                         if isinstance(value, str) and value:
@@ -94,7 +93,7 @@ def authentication_headers(recipe, *, private_values=None):
                         elif isinstance(value, dict):
                             for item in value.values(): collect(item)
                     collect(document)
-            except (OSError, ValueError, UnicodeError):
+            except (OSError, ValueError, UnicodeError, RecursionError):
                 raise ValueError("Gateway credential file is unavailable or invalid.") from None
         selected = source
         break

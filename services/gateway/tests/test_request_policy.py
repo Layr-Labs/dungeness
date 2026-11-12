@@ -71,6 +71,7 @@ async def harness(*, declared=True, web=False):
          "cache_write_per_mtok": 2, "text_only": True} for p in ("example-api", "example-session", "claude-subscription", "grok-subscription", "minimax-subscription")]]):
         Path(temp, "auth.json").write_text(json.dumps({
             "tokens": {"access_token": "private-test-token", "account_id": "private-account"}}))
+        Path(temp, "auth.json").chmod(0o600)
         calls = []
         response = {"id": "resp-test", "object": "response", "status": "completed",
                     "output": [], "choices": [], "usage": {

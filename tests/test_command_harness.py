@@ -158,6 +158,9 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertNotIn("DUNGENESS_OPENROUTER_INFERENCE_ONLY", compose["services"]["main"]["environment"])
         self.assertEqual(compose["services"]["dev-scorer"]["environment"]["MAX_SUBMISSIONS"], "10")
         self.assertNotIn("DUNGENESS_RESEARCH_STATE_URL", json.dumps(compose))
+        self.assertEqual(compose["services"]["gateway"]["environment"]["DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS"],
+                         "${TESTBED_MODEL_REQUEST_TIMEOUT_SECONDS:-3600}")
+        self.assertNotIn("DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS", compose["services"]["main"]["environment"])
 
     def test_bounded_admission_is_owned_by_gateway(self):
         compose = yaml.safe_load(compiler.build_compose(
@@ -407,6 +410,7 @@ class CommandHarnessTests(unittest.TestCase):
             path = Path(temp) / "auth.json"
             path.write_text(json.dumps({"tokens": {
                 "access_token": "synthetic-private-token", "account_id": "synthetic-account"}}))
+            path.chmod(0o600)
             with patch.dict(os.environ, {"DUNGENESS_CHATGPT_AUTH_FILE": str(path)}):
                 headers = models.provider_auth_headers("openai-chatgpt")
             self.assertEqual(headers, {"authorization": "Bearer synthetic-private-token",
