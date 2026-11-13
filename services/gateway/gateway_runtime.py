@@ -27,6 +27,8 @@ from gateway_models import (
     prompt_profile,
     provider_auth_headers,
     usage_extractor,
+    openrouter_cache_ttl,
+    apply_cache_ttl,
 )
 from gateway_provider_cost import openrouter_charge
 from gateway_stream import CompletionBarrier
@@ -173,6 +175,7 @@ class Gateway:
                                      else "model_pricing_unavailable",
                 "Model is not present in the trusted pricing policy; use an allowed priced model or contact the operator.") from error
         validate_declared_request(payload, request_pricing)
+        openrouter_cache_ttl(provider, operation, payload, request_pricing)
         if self.allowed_models is None:
             self.ledger.reserve("model_requests")
         else:
@@ -237,6 +240,12 @@ class Gateway:
             finalized = True
             usage = extract(response_body, content_type)
             accounting_basis = "provider_usage" if usage else "unavailable"
+            if usage and request_pricing is not None:
+                ttl = openrouter_cache_ttl(provider, normalized, payload, request_pricing)
+                resolved = apply_cache_ttl(usage, ttl)
+                if resolved != usage:
+                    accounting_basis = "provider_usage_request_cache_ttl"
+                usage = resolved
             if usage and request_pricing is not None:
                 try:
                     request_usd(usage, request_pricing)

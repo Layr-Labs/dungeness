@@ -26,6 +26,52 @@ OPENROUTER_ROUTES = {
 }
 CHATGPT_ROUTES = {"responses", "responses/compact"}
 
+def openrouter_cache_ttl(provider, operation, payload, pricing):
+    """Resolve Claude Chat Completions' aggregate cache-write duration.
+
+    OpenRouter reports aggregate writes on this route. Its documented default
+    TTL is 5m; a homogeneous explicit TTL is also unambiguous. Mixed TTLs need
+    Messages' provider-reported breakdown, not a guessed cheaper bucket.
+    Inspect protocol cache markers only, never tool arguments or JSON schemas.
+    """
+    if (provider != "openrouter" or operation != "chat/completions"
+            or not payload.get("model", "").startswith("anthropic/claude-")
+            or not any("cache_write_1h_per_mtok" in rates
+                       for rates in (pricing, pricing.get("long_context", {})))):
+        return None
+    nodes = [payload]
+    for field in ("messages", "tools"):
+        values = payload.get(field, [])
+        if isinstance(values, list):
+            nodes.extend(value for value in values if isinstance(value, dict))
+    for message in payload.get("messages", []):
+        if isinstance(message, dict) and isinstance(message.get("content"), list):
+            nodes.extend(block for block in message["content"] if isinstance(block, dict))
+    ttls = set()
+    for node in nodes:
+        if "cache_control" not in node:
+            continue
+        control = node["cache_control"]
+        if (not isinstance(control, dict) or control.get("type") != "ephemeral"
+                or control.get("ttl", "5m") not in ("5m", "1h")):
+            raise ValueError("Cache control requires ephemeral caching with a 5m or 1h TTL.")
+        ttls.add(control.get("ttl", "5m"))
+    if len(ttls) > 1:
+        raise ValueError("Mixed cache TTLs require the OpenRouter Messages route and its cache-duration usage; "
+                         "use one TTL for Chat Completions. This request was not sent to the provider.")
+    return next(iter(ttls), "5m")
+
+
+def apply_cache_ttl(usage, ttl):
+    """Fill only a missing duration from a validated homogeneous request."""
+    if not usage or ttl is None or "cache_write_1h_input_tokens" in usage:
+        return usage
+    writes = usage.get("cache_write_input_tokens", 0)
+    if type(writes) is not int or writes < 0:
+        return usage
+    return {**usage, "cache_write_1h_input_tokens": writes if ttl == "1h" else 0}
+
+
 def validate_declared_request(payload, pricing):
     """Keep measured inference on the exact declared model and priced units."""
     if any(key in payload for key in ("models", "route", "plugins", "web_search_options")):
