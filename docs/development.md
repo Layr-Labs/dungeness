@@ -67,9 +67,11 @@ validation and generic compilation remain in the compiler.
 
 `scaffolds.py` materializes schema-v2 scaffold manifests using explicit file
 mappings and text edits that must match an expected number of times. It knows
-no language filenames or problem-specific validation stages. OpenRSI owns its
-ECDSA scaffold and verifier bundles under `src/openrsi_space/problem-set/ecdsa-fail/`
-and installs them into the disposable runtime. Candidate files and trusted edits remain separate;
+no language filenames or problem-specific validation stages. OpenRSI's
+problem sources, scaffolds and verifier bundles live in
+[openrsi-problems](https://github.com/Layr-Labs/openrsi-problems/tree/main/problems).
+The platform installs the selected signed package into the disposable runtime.
+Candidate files and trusted edits remain separate;
 submitted harnesses cannot choose the manifest or load preparation code.
 See [trusted scaffolds](scaffolds.md).
 
