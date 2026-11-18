@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-18",
+  "cli_version": "1.5.11",
+  "auth": "official CLI cached subscription sign-in; API-key environment removed",
+  "model": "gemini-4-carbon-low",
+  "exit_code": 0,
+  "status": "SUCCESS",
+  "reported_usage": {
+    "input_tokens": 1996,
+    "output_tokens": 7,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 2003
+  },
+  "response": "carbon subscription ready\n",
+  "response_matches": true,
+  "event_types": [
+    "init",
+    "result",
+    "step_update"
+  ],
+  "carbon_exposed_by_account": true,
+  "attested": false,
+  "accounting_verified": false
+}

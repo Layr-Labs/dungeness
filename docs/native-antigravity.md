@@ -20,9 +20,9 @@ OpenAI-compatible provider registry.
 Carbon's CLI selections are `gemini-4-carbon-low`, `gemini-4-carbon-medium` and
 `gemini-4-carbon-high`. Google lists Carbon for Ultra and Enterprise accounts.
 The Orchestrator selection is a different configuration that mixes models.
-The tested account's live model list does not expose Carbon. It exposes Gemini
-3.8 Flash at low, medium and high effort, along with other models. Carbon
-execution remains untested.
+The original account exposed Gemini 3.8 Flash but no Carbon. A second, Ultra
+account exposes Carbon at low, medium and high effort. After completing Google's
+account-verification step, that account passed a text-only Carbon Low test.
 
 Google's [additional terms](https://antigravity.google/terms) explicitly restrict
 third-party service access, including reuse of Antigravity OAuth with other
@@ -30,6 +30,14 @@ software. That restriction must not be described as a prohibition on all CLI
 automation: Google separately documents headless and ACP use. Those documents
 also do not establish permission for arbitrary subscription proxies,
 redistribution, or every proposed embedding.
+
+Google's current [FAQ](https://antigravity.google/docs/faq) is more explicit:
+headless mode is intended for direct scripting and CI, while wrapping `agy`
+inside third-party coding agents or applications is unsupported under consumer
+plans. The proposed OpenRSI embedding needs a provider-supported arrangement
+before rollout. A successful direct CLI test does not establish that arrangement.
+This is separate from the account-verification error observed during sign-in;
+we have no evidence that the proposed integration caused that error.
 
 ## What the real binary established
 
@@ -112,6 +120,14 @@ The [sanitized smoke-test receipt](../tools/antigravity-probe/observed-1.5.11-su
 records CLI-reported usage of 1,990 input tokens and 2 output tokens. This
 establishes one working subscription inference call. It does not qualify MCP
 execution, Carbon availability, complete usage accounting or attested execution.
+
+The user then signed in to an Ultra account and completed Google's additional
+account verification. The same text-only test with `gemini-4-carbon-low`
+returned exactly `carbon subscription ready` (plus a newline), with exit 0 and
+`SUCCESS`. The [Carbon receipt](../tools/antigravity-probe/observed-1.5.11-carbon-subscription.json)
+records 1,996 input tokens and 7 output tokens, as reported by the CLI.
+This establishes working Carbon subscription inference. It does not qualify
+tool execution, complete accounting or attested execution.
 
 For another account, complete `agy acp --login --disable-telemetry`
 interactively, then use `agy models` to check actual entitlement. Enter
