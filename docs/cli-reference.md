@@ -172,13 +172,20 @@ Common run options:
 | `--label KEY=VALUE` | Add searchable metadata; repeatable |
 | `--fresh-start` | Blank the checkpoint candidate before starting |
 | `--scaffold-start` | Start from the task's trusted reconstruction scaffold |
-| `--resume-from RUN_ID` | Continue from a prior run's candidate |
+| `--resume-from RUN_ID` | Copy a prior run's final candidate files or directories |
 | `--run-id` | Supply an explicit unique run ID |
 | `--keep-render` | Retain the temporary Harbor task for debugging |
 | `--keep-images` | Retain run-scoped Docker images after teardown |
 
 Run specs provide defaults. CLI labels are applied after run-spec labels, so a
 CLI label with the same key wins.
+
+`--resume-from` replaces each allowed candidate path with the prior run's saved
+final artifact, including complete directories. Files outside those paths come
+from the trusted checkpoint. Resume accepts regular files and directories;
+symlinks and special files in persisted candidates are rejected.
+The prior best score is historical context and may describe an earlier
+candidate. Evaluate the copied candidate to establish its score.
 
 `initialization.mode: scaffold` is distinct from `blank`. A scaffold task
 constructs a whitelisted workspace without Git history or the checkpoint

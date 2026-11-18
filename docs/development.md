@@ -99,6 +99,14 @@ Compiler and record tests use a disposable runtime populated from synthetic
 records under `tests/fixtures/runtime/`. Challenge grader tests live with the
 OpenRSI problem assets. No Dungeness check requires a OpenRSI checkout.
 
+Resume provenance hashes the copied candidate in the rendered workspace.
+Single files retain SHA-256 of raw bytes. Directory hashes use SHA-256 of
+`dungeness-resume-directory-v1\n` followed by compact ASCII JSON. Entries are
+sorted by relative path components and contain `[path, "directory"]` or
+`[path, "file", content_sha256, executable_boolean]`; the root itself is omitted.
+This records empty directories and executable flags without depending on host
+paths, timestamps, or ambiguous concatenations of names and file contents.
+
 For network-policy changes, also run `make check-run-isolation` with Docker
 access. It exercises two simultaneous runs with synthetic credentials; see
 [per-run isolation](network-isolation.md). This is separate from the offline suite.
