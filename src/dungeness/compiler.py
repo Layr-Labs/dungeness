@@ -137,6 +137,8 @@ def build_workspace_notice(
     candidate_rel: str, *, evaluation_available: bool,
     initialization_mode: str = "checkpoint",
 ) -> str:
+    # Retain keyword compatibility for consumers; task instructions own any
+    # initialization- or evaluation-specific guidance.
     notice = f"""
 
 ---
@@ -152,12 +154,7 @@ def build_workspace_notice(
   determine correctness and scores.
 - `candidate-state save NAME`, `restore NAME`, and `list` provide optional local
   snapshots. The harness chooses which candidate to leave for final verification.
-"""
-    if evaluation_available and initialization_mode == "scaffold":
-        notice += """
-The scaffold declares the required ABI and has no valid baseline score.
-Trusted validation progresses through 1, 64, 512 and 9,024 shots. Only a
-candidate passing the final stage receives a valid score.
+- The task defines the candidate interface, validation rules and scoring metric.
 """
     return notice
 
@@ -1709,12 +1706,51 @@ def build_compose(
     return yaml.safe_dump(document, sort_keys=False)
 
 
+def resume_candidate_entries(source: Path) -> list[Path]:
+    """Accept only regular files and directories from a persisted candidate."""
+    def validate(entry: Path) -> None:
+        try:
+            mode = entry.lstat().st_mode
+        except FileNotFoundError as error:
+            raise ValueError(f"--resume-from: prior run has no candidate at {entry}") from error
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise ValueError(f"--resume-from: unsupported candidate file (including symlinks): {entry}")
+
+    validate(source)
+    entries = [source, *sorted(source.rglob("*"))]
+    for entry in entries[1:]:
+        validate(entry)
+    return entries
+
+
+def resume_candidate_digest(source: Path) -> str:
+    """Hash copied content; directory manifests include names and empty dirs."""
+    entries = resume_candidate_entries(source)
+
+    def file_digest(path: Path) -> str:
+        with path.open("rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+
+    if source.is_file():
+        # Preserve the existing single-file provenance contract.
+        return file_digest(source)
+    manifest = []
+    for entry in entries[1:]:
+        relative = entry.relative_to(source).as_posix()
+        if entry.is_dir():
+            manifest.append([relative, "directory"])
+        else:
+            manifest.append([relative, "file", file_digest(entry), bool(entry.stat().st_mode & 0o111)])
+    encoded = json.dumps(manifest, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(b"dungeness-resume-directory-v1\n" + encoded).hexdigest()
+
+
 def resolve_resume_source(
     prior_run_id: str, candidate_paths: list[PurePosixPath], direction: str
 ) -> dict[str, Any]:
     """Locate a prior run's persisted result for a warm-start resume.
 
-    Seed a new workspace with a prior run's verified candidate files.
+    Seed a new workspace with a prior run's final candidate files or directories.
     Agent session memory and continuation logic remain inside the harness.
 
     Returns the prior candidate files (keyed by allowed path), the prior best
@@ -1725,6 +1761,7 @@ def resolve_resume_source(
     prior_dir = find_run_directory(prior_run_id)
     if prior_dir is None:
         raise ValueError(f"--resume-from: no such run: runs/{prior_run_id}")
+    prior_dir = prior_dir.resolve()
     # Harbor persists the final agent workspace under
     # runs/<id>/harbor/<job>/<trial>/artifacts/workspace/, mirroring the
     # container's /workspace. WORKSPACE_ROOT (/workspace/repo) maps under it.
@@ -1738,11 +1775,12 @@ def resolve_resume_source(
     ws_rel = WORKSPACE_ROOT.removeprefix("/workspace/")  # e.g. "repo"
     candidate_files: dict[str, Path] = {}
     for candidate in candidate_paths:
+        candidate = require_relative_path(candidate.as_posix(), "resume candidate path")
         source = workspace / ws_rel / candidate.as_posix()
-        if not source.is_file():
-            raise ValueError(
-                f"--resume-from: prior run has no candidate at {source}"
-            )
+        for parent in source.relative_to(prior_dir).parents:
+            if (prior_dir / parent).is_symlink():
+                raise ValueError(f"--resume-from: candidate parent must not be a symlink: {prior_dir / parent}")
+        resume_candidate_entries(source)
         candidate_files[candidate.as_posix()] = source
 
     usage_dir = prior_dir / "usage"
@@ -1853,22 +1891,22 @@ def build_continuation_notice(resume: dict[str, Any], candidate_rel: str, direct
     best_score = resume["best_score"]
     better = "lower" if direction == "minimize" else "higher"
     score_line = (
-        f"Its score on the real benchmark was {best_score:,.0f} "
-        f"({better} is better) -- beat it."
+        f"The previous run's best recorded score was {best_score} "
+        f"({better} is better). That score may belong to an earlier candidate."
         if isinstance(best_score, (int, float))
-        else "Improve on it."
+        else "The previous run has no recorded best score."
     )
     notice = (
         "\n\n---\n\n"
         "## Continuing prior work\n\n"
-        f"You are continuing from a previous run. `{candidate_rel}` in your "
-        "workspace is NOT the original baseline -- it is the best solution reached "
-        f"so far. {score_line} You do NOT have the prior session's memory, so treat "
-        "the evidence below as retained context. The harness chooses how to use it.\n"
+        f"`{candidate_rel}` in your workspace is the final candidate saved by "
+        f"the previous run. {score_line} Evaluate the copied candidate to establish "
+        "its current score. The prior session's memory is unavailable; the evidence "
+        "below is retained context. The harness chooses how to use it.\n"
     )
     score_history = resume.get("score_history") or []
     if len(score_history) >= 2:
-        points = [f"{s:,.0f}" for s in score_history]
+        points = [str(s) for s in score_history]
         if len(points) > 8:  # keep first + last few so it stays compact
             points = points[:1] + ["..."] + points[-6:]
         notice += (
@@ -2201,8 +2239,8 @@ def build_task(
         raise ValueError("metric.direction must be 'maximize' or 'minimize'")
 
     # Warm-start resume: validate the prior run, locate its final candidate
-    # file(s), and distill its progress (score history + the agent's own
-    # notes). Done now so the build fails fast before any checkout work.
+    # files/directories, and retain its score history and search queries.
+    # Done now so the build fails fast before any checkout work.
     resume = (
         resolve_resume_source(resume_from, candidate_paths, direction)
         if resume_from is not None
@@ -2362,13 +2400,19 @@ def build_task(
                 raise ValueError(
                     "scaffold initialization cannot resume from another run"
                 )
-            # Overlay only the editable candidate file(s) from the prior run onto
-            # the pristine baseline checkout: the agent continues from its best
-            # circuit, while everything else stays the trusted baseline.
+            # Replace each editable candidate with the prior final artifact.
+            # Directory overlays must not retain stale checkpoint files.
             for rel, source in resume["candidate_files"].items():
                 destination = workspace_dest / rel
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
+                if destination.is_dir() and not destination.is_symlink():
+                    shutil.rmtree(destination)
+                elif destination.exists() or destination.is_symlink():
+                    destination.unlink()
+                if source.is_dir():
+                    shutil.copytree(source, destination, symlinks=True)
+                else:
+                    shutil.copy2(source, destination)
         if fresh_start:
             # Fresh start: discard the commit's solution so the agent implements
             # from only the statement + task contract. Blank each candidate to an empty
@@ -2552,8 +2596,8 @@ def build_task(
                 "run_id": resume["run_id"],
                 "best_score": resume["best_score"],
                 "candidate_sha256": {
-                    rel: hashlib.sha256(source.read_bytes()).hexdigest()
-                    for rel, source in resume["candidate_files"].items()
+                    rel: resume_candidate_digest(workspace_dest / rel)
+                    for rel in resume["candidate_files"]
                 },
             }
         # task.toml lists only candidate_paths, so Harbor transfers no workspace,

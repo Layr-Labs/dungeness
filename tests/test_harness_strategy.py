@@ -8,6 +8,15 @@ from test_record_model import build, cli, write_run_spec
 
 
 class HarnessStrategyTests(unittest.TestCase):
+    def test_scaffold_notice_leaves_validation_contract_to_the_task(self):
+        notice = build.build_workspace_notice(
+            "answer.txt", evaluation_available=True, initialization_mode="scaffold",
+        )
+        self.assertIn("answer.txt", notice)
+        self.assertIn("task", notice)
+        for problem_detail in ("ABI", "9,024", " shots", "no valid baseline"):
+            self.assertNotIn(problem_detail, notice)
+
     def test_existing_openrsi_web_alias_still_disables_all_web_spending(self):
         for setting in (
             None,

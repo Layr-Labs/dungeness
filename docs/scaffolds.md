@@ -38,6 +38,9 @@ Consumers require `declarative-scaffolds-v2`. Schema-v1 scaffolds with implicit
 Rust modules and validation stages are rejected. OpenRSI supplies the ECDSA
 schema-v2 scaffold from its own problem package; generic Dungeness does not
 bundle that challenge's starting candidate, SDK or source transformations.
+Candidate interfaces, baseline validity, validation stages and score semantics
+belong in the task's instructions and trusted verifier. The compiler adds only
+the generic workspace and tool contracts.
 
 `--fresh-start` without a scaffold creates empty candidate files/directories.
 Use a scaffold when a language-specific entrypoint or support files are needed.
