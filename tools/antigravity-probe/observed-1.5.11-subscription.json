@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-18",
+  "cli_version": "1.5.11",
+  "auth": "official CLI cached subscription sign-in; API-key environment removed",
+  "model": "gemini-3.8-flash-low",
+  "exit_code": 0,
+  "status": "SUCCESS",
+  "reported_usage": {
+    "input_tokens": 1990,
+    "output_tokens": 2,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 1992
+  },
+  "final_result_keys": [
+    "conversation_id",
+    "duration_seconds",
+    "num_turns",
+    "response",
+    "status",
+    "usage"
+  ],
+  "expected_response_present": true,
+  "event_types": [
+    "init",
+    "result",
+    "step_update"
+  ],
+  "carbon_exposed_by_account": false,
+  "attested": false,
+  "accounting_verified": false
+}

@@ -20,7 +20,9 @@ OpenAI-compatible provider registry.
 Carbon's CLI selections are `gemini-4-carbon-low`, `gemini-4-carbon-medium` and
 `gemini-4-carbon-high`. Google lists Carbon for Ultra and Enterprise accounts.
 The Orchestrator selection is a different configuration that mixes models.
-Live account entitlement has not been tested.
+The tested account's live model list does not expose Carbon. It exposes Gemini
+3.8 Flash at low, medium and high effort, along with other models. Carbon
+execution remains untested.
 
 Google's [additional terms](https://antigravity.google/terms) explicitly restrict
 third-party service access, including reuse of Antigravity OAuth with other
@@ -100,10 +102,20 @@ would only ship an unqualified binary; it would not make Carbon usable safely.
 
 ## Subscription test checkpoint
 
-The official Mac CLI's `agy models` command currently requests sign-in. Complete
-`agy acp --login --disable-telemetry` interactively, then use `agy models` to
-check actual account entitlement before attempting a short Carbon prompt.
-Enter authorization codes only into the official CLI, not into a shared transcript.
+On 2026-11-18, the official Mac ARM64 CLI 1.5.11 successfully reused its cached
+subscription sign-in. `agy models` exposed Gemini 3.8 Flash but no Carbon.
+A text-only `gemini-3.8-flash-low` prompt completed with `SUCCESS` and the
+requested response. API-key environment variables were removed, and the CLI
+used a fresh workspace with a custom agent exposing no native tools.
+
+The [sanitized smoke-test receipt](../tools/antigravity-probe/observed-1.5.11-subscription.json)
+records CLI-reported usage of 1,990 input tokens and 2 output tokens. This
+establishes one working subscription inference call. It does not qualify MCP
+execution, Carbon availability, complete usage accounting or attested execution.
+
+For another account, complete `agy acp --login --disable-telemetry`
+interactively, then use `agy models` to check actual entitlement. Enter
+authorization codes only into the official CLI, not into a shared transcript.
 Do not fall back to an API key when subscription authentication is unavailable.
 
 This live check is needed because the offline probes exercise a synthetic API
