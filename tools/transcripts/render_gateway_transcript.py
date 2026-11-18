@@ -188,7 +188,7 @@ def short_json(value: Any, limit: int = 4000) -> str:
 def cybersecurity_stop_reason(value: Any, failure_context: bool = False) -> str | None:
     """Return a policy-stop reason from structured error data only.
 
-    This deliberately ignores ordinary prompt and response text. ECDSA task
+    This deliberately ignores ordinary prompt and response text. Task
     descriptions can mention cybersecurity, so scanning arbitrary transcript
     content would incorrectly label otherwise successful runs.
     """

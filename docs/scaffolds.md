@@ -35,9 +35,10 @@ applied to the agent workspace, intermediate evaluator and final verifier.
 Source files, the manifest and edit paths are recorded in run provenance.
 
 Consumers require `declarative-scaffolds-v2`. Schema-v1 scaffolds with implicit
-Rust modules and validation stages are rejected. OpenRSI supplies the ECDSA
-schema-v2 scaffold from its own problem package; generic Dungeness does not
-bundle that challenge's starting candidate, SDK or source transformations.
+Rust modules and validation stages are rejected. OpenRSI supplies its
+schema-v2 scaffolds from signed problem packages authored in
+[openrsi-problems](https://github.com/Layr-Labs/openrsi-problems).
+Dungeness does not bundle their starting candidates, SDKs or source transformations.
 Candidate interfaces, baseline validity, validation stages and score semantics
 belong in the task's instructions and trusted verifier. The compiler adds only
 the generic workspace and tool contracts.

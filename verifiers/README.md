@@ -2,6 +2,8 @@
 
 Operators install challenge-owned verifier images, graders and evaluator locks
 here. Dungeness runs the selected bundle independently of the harness. OpenRSI
-ships its ECDSA verifiers in its public problem package.
+authors those bundles in
+[openrsi-problems](https://github.com/Layr-Labs/openrsi-problems)
+and distributes them as signed problem packages.
 
 Generic execution lives in [`src/dungeness/execution/`](../src/dungeness/execution/).
