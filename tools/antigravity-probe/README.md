@@ -86,3 +86,38 @@ subscription entitlement, or identical behavior on the subscription transport.
 
 See the [integration assessment](../../docs/native-antigravity.md) for the
 remaining work across Dungeness, the VM, and the manager.
+
+## Direct subscription checks
+
+`subscription.py` discovers Google models through the official CLI's existing
+sign-in. It supports Carbon, Neon, Argon, Hydrogen, Flash and other Gemini
+selections actually returned for the account. It neither signs into accounts
+nor switches them. Use a checksum-verified official CLI binary.
+
+Discover available models without an inference call:
+
+```sh
+python3 tools/antigravity-probe/subscription.py --cli /path/to/agy
+```
+
+Explicitly request small text-only calls (these consume subscription usage):
+
+```sh
+python3 tools/antigravity-probe/subscription.py --cli /path/to/agy \
+  --model gemini-4-neon-low \
+  --model gemini-4-argon-low \
+  --model gemini-4-hydrogen-low \
+  --model gemini-3.8-flash-low \
+  --output /tmp/antigravity-subscription.json
+```
+
+The script checks every requested ID against fresh account discovery before
+starting any inference. It uses a fresh workspace, a custom agent without native
+tools or inherited customizations, and deny rules for tool execution. API-key
+and ADC environment variables are removed. Usage is explicitly CLI-reported;
+the receipt omits raw transcripts, sign-in links and account identifiers.
+
+This is a direct scripting experiment, not a production provider or attested
+run. Google's [FAQ](https://antigravity.google/docs/faq) says embedding the CLI
+in third-party applications is unsupported under consumer plans. A successful
+smoke test does not resolve that constraint or the accounting gap above.

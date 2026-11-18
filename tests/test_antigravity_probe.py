@@ -7,12 +7,18 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools" / "antigravity-probe"
 spec = importlib.util.spec_from_file_location("antigravity_probe", SOURCE / "probe.py")
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
+subscription_spec = importlib.util.spec_from_file_location(
+    "antigravity_subscription", SOURCE / "subscription.py",
+)
+subscription = importlib.util.module_from_spec(subscription_spec)
+subscription_spec.loader.exec_module(subscription)
 
 
 class AntigravityProbeTests(unittest.TestCase):
@@ -62,3 +68,37 @@ class AntigravityProbeTests(unittest.TestCase):
             self.assertEqual(len(replies), 2)
             self.assertEqual(journal.read_text(), '{"tool":"research_exec"}\n')
             self.assertFalse(marker.exists())
+
+    def test_subscription_models_must_be_available_before_testing(self):
+        available = [{"id": "gemini-4-neon-low", "name": "Neon"}]
+        with self.assertRaisesRegex(ValueError, "Not available"):
+            subscription.select_models(
+                ["gemini-4-neon-low", "gemini-4-carbon-low"], available,
+            )
+        self.assertEqual(subscription.select_models(
+            ["gemini-4-neon-low", "gemini-4-neon-low"], available,
+        ), ["gemini-4-neon-low"])
+
+    def test_subscription_receipt_excludes_private_cli_fields(self):
+        raw = {"event": "result", "result": {
+            "status": "ERROR", "conversation_id": "private-conversation",
+            "response": "private response", "usage": {
+                "input_tokens": 0, "account": "private-account",
+            },
+        }}
+        process = subprocess.CompletedProcess([], 1, json.dumps(raw),
+            "Verify your account at https://example.invalid/private-code")
+        result = subscription.summarize("gemini-4-neon-low", process)
+        self.assertEqual(result["error"], "account_verification_required")
+        self.assertEqual(result["reported_usage"], {"input_tokens": 0})
+        self.assertNotIn("private", json.dumps(result))
+        self.assertFalse(result["passed"])
+
+    def test_subscription_connection_does_not_fall_back_to_api_key_or_adc(self):
+        keys = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+                "GOOGLE_GEMINI_BASE_URL", "AGY_ADC_AUTH")
+        with patch.dict(os.environ, dict.fromkeys(keys, "must-not-propagate")):
+            env = subscription.subscription_environment()
+        for key in keys:
+            self.assertNotIn(key, env)
+        self.assertEqual(env["AGY_CLI_DISABLE_AUTO_UPDATE"], "true")

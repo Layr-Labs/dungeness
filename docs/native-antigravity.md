@@ -129,6 +129,26 @@ records 1,996 input tokens and 7 output tokens, as reported by the CLI.
 This establishes working Carbon subscription inference. It does not qualify
 tool execution, complete accounting or attested execution.
 
+The [reusable subscription check](../tools/antigravity-probe/subscription.py)
+now discovers the account's available Google models before accepting explicit
+test selections. One text-only call each for Neon Low, Argon Low, Hydrogen Low
+and Flash Low also passed on the Ultra account. The
+[sanitized report](../tools/antigravity-probe/observed-1.5.11-google-subscriptions.json)
+contains the available effort variants and CLI-reported usage.
+
+| Google model | Account exposes | Live test |
+| --- | --- | --- |
+| Gemini 4 Carbon | Low, Medium, High | Low passed |
+| Gemini 4 Neon | Low, Medium, High, XHigh | Low passed |
+| Gemini 4 Argon | Low, Medium, High | Low passed |
+| Gemini 4 Hydrogen | Low, Medium, High, XHigh | Low passed |
+| Gemini 3.8 Flash | Low, Medium, High | Low passed |
+| Orchestrator | Carbon, Neon, Argon | Discovered; not tested |
+
+These share the official subscription sign-in; they are not separate accounts
+or API-key routes. Higher efforts and Orchestrator remain untested. Discovery
+and the direct CLI tests do not enable a Dungeness provider or local UI option.
+
 For another account, complete `agy acp --login --disable-telemetry`
 interactively, then use `agy models` to check actual entitlement. Enter
 authorization codes only into the official CLI, not into a shared transcript.
