@@ -130,12 +130,16 @@ def execute(
         failure = f"{type(error).__name__}: {error}"
         raise
     finally:
-        timing.close()
         cleanup_error: Exception | None = None
+        try:
+            timing.close()
+        except Exception as error:
+            cleanup_error = error
+            print(f">> warning: could not close startup timing: {error}", file=sys.stderr)
         try:
             environments.teardown_run_environments(run_dir, remove_images=not keep_images)
         except Exception as error:
-            cleanup_error = error
+            cleanup_error = cleanup_error or error
             print(f">> warning: could not tear down run environments: {error}", file=sys.stderr)
         finally:
             try:

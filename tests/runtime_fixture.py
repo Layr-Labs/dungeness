@@ -12,7 +12,7 @@ import tempfile
 SOURCE = Path(__file__).resolve().parents[1]
 _temporary = tempfile.TemporaryDirectory(prefix="dungeness-unit-runtime-")
 atexit.register(_temporary.cleanup)
-ROOT = Path(_temporary.name)
+ROOT = Path(_temporary.name).resolve()
 
 for name in ("src", "adapters", "agents", "services", "policies", "tools"):
     shutil.copytree(SOURCE / name, ROOT / name,

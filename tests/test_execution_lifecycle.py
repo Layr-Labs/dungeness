@@ -43,6 +43,7 @@ class ExecutionLifecycleTests(unittest.TestCase):
         }))
         self.enterContext(patch.object(cli, "REPO_ROOT", self.root))
         self.enterContext(patch.object(runner.environments, "check_docker_network_capacity"))
+        self.enterContext(patch.object(runner.StartupTiming, "watch_containers"))
         self.teardown = self.enterContext(patch.object(runner.environments, "teardown_run_environments"))
         self.commands = self.enterContext(patch.object(
             runner, "stream_command", side_effect=[str(self.render), "completed"]))
@@ -195,6 +196,37 @@ class ExecutionLifecycleTests(unittest.TestCase):
         self.finish.assert_called_once()
         self.assertIn("could not dispose run render", self.output.getvalue())
 
+    def test_timing_cleanup_failure_still_releases_credentials_and_finalizes(self):
+        with patch.object(runner.StartupTiming, "close",
+                          side_effect=OSError("synthetic timing cleanup failure")):
+            with self.assertRaisesRegex(OSError, "timing cleanup failure"):
+                self.execute()
+        self.teardown.assert_called_once()
+        self.assertEqual(self.record()["status"], "completed")
+        credential_path = Path(self.commands.call_args.kwargs["env"]["DUNGENESS_CREDENTIALS_FILE"])
+        self.assertFalse(credential_path.parent.exists())
+        self.assertFalse(self.render_root.exists())
+
+    def test_timing_cleanup_failure_preserves_launch_failure_or_cancellation(self):
+        for error in (subprocess.CalledProcessError(7, ["synthetic-harbor"]),
+                      KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                self.commands.side_effect = [str(self.render), error]
+                # Keep the render available for the next case.
+                with patch.object(runner, "dispose_render"), patch.object(
+                    runner.StartupTiming, "close",
+                    side_effect=OSError("synthetic timing cleanup failure"),
+                ):
+                    with self.assertRaises(type(error)) as caught:
+                        self.execute()
+                self.assertIs(caught.exception, error)
+                self.assertEqual(self.record()["status"],
+                                 "cancelled" if isinstance(error, KeyboardInterrupt) else "failed")
+                credential_path = Path(self.commands.call_args.kwargs["env"]["DUNGENESS_CREDENTIALS_FILE"])
+                self.assertFalse(credential_path.parent.exists())
+        self.assertEqual(self.teardown.call_count, 2)
+        self.assertEqual(self.finish.call_count, 2)
+
     def test_render_disposal_refuses_paths_outside_run_temporary_directory(self):
         unrelated = self.root / "task"
         unrelated.mkdir()
@@ -208,7 +240,7 @@ class ProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             result = process.stream_command(
                 [sys.executable, "-c",
-                 "import os, sys; assert os.getcwd() == sys.argv[1]; print(os.environ['SYNTHETIC_VALUE'])",
+                 "import os, sys; assert os.path.samefile(os.getcwd(), sys.argv[1]); print(os.environ['SYNTHETIC_VALUE'])",
                  directory],
                 cwd=Path(directory), env={"SYNTHETIC_VALUE": "last nonempty line"},
             )
