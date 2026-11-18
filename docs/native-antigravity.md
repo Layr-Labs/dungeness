@@ -1,6 +1,7 @@
 # Native Antigravity / Carbon integration
 
-Status: investigated on 2026-11-18; not enabled for attested execution.
+Status: subscription integration resumed on 2026-11-18; not enabled for
+attested execution. API-key integration is outside this work.
 
 ## Supported integration surface
 
@@ -46,6 +47,22 @@ paid call is involved.
 5. A CLI `SUCCESS` result alone does not prove the task completed: default
    headless permissions can decline the tool and still return success.
 
+The [resumed probe report](../tools/antigravity-probe/observed-1.5.11-resumed.json)
+checks three additional documented integration paths:
+
+- Explicitly allowing only `mcp(openrsi/research_exec)` still produces the
+  unreported Flash Lite review call.
+- Eager MCP loading completes the tool with the correct declared argument
+  schema, but also produces that unreported review call.
+- `PreInvocation` and `PostInvocation` hooks each observe the two Carbon
+  invocations. Neither observes the third, reviewer invocation, and their
+  payloads contain no usage counts.
+
+Tool execution is now confirmed by a separate journal written by the fixed-output
+MCP fixture. Native step states and final success are insufficient evidence.
+The fixture never executes its supplied command. The seven-case probe completes
+and intentionally exits 2 because complete usage accounting fails.
+
 The missing helper usage is a measured compatibility gap for Dungeness's
 complete normalized-cost accounting. It is not a claim about actual charges
 to Google's subscription balance, and it does not prove that the OAuth
@@ -80,6 +97,19 @@ path needs to be established first.
 
 The current VM and manager therefore remain unchanged. Rebuilding the VM now
 would only ship an unqualified binary; it would not make Carbon usable safely.
+
+## Subscription test checkpoint
+
+The official Mac CLI's `agy models` command currently requests sign-in. Complete
+`agy acp --login --disable-telemetry` interactively, then use `agy models` to
+check actual account entitlement before attempting a short Carbon prompt.
+Enter authorization codes only into the official CLI, not into a shared transcript.
+Do not fall back to an API key when subscription authentication is unavailable.
+
+This live check is needed because the offline probes exercise a synthetic API
+transport; they do not establish identical behavior on Google's subscription
+transport. Until a complete metering source is qualified, label any live test
+usage as CLI-reported and do not submit it as a fully accounted attested run.
 
 ## Independent API option
 

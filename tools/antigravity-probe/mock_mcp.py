@@ -1,6 +1,8 @@
 """Fixed-output MCP fixture. Never executes the supplied command."""
 import json
+import os
 import sys
+from pathlib import Path
 
 for line in sys.stdin:
     request = json.loads(line)
@@ -24,6 +26,9 @@ for line in sys.stdin:
             },
         }]}
     elif method == "tools/call" and request.get("params", {}).get("name") == "research_exec":
+        if journal := os.environ.get("OPENRSI_PROBE_MCP_CALLS"):
+            with Path(journal).open("a") as handle:
+                handle.write('{"tool":"research_exec"}\n')
         result = {"content": [{"type": "text", "text": "synthetic output 42"}]}
     else:
         print(json.dumps({

@@ -29,7 +29,7 @@ def expected_cli_usage(calls):
     return dict(zip(USAGE_FIELDS, (80 * calls, 8 * calls, 3 * calls, 20 * calls, 88 * calls)))
 
 
-def summarize(case, requests, stdout, returncode, marker_exists):
+def summarize(case, requests, stdout, returncode, marker_exists, mcp_calls):
     events = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
     finals = [event["result"] for event in events if event.get("event") == "result"]
     final = finals[-1] if finals else {}
@@ -51,12 +51,12 @@ def summarize(case, requests, stdout, returncode, marker_exists):
         "model_calls_observed": len(requests),
         "model_facing_tools": declared,
         "reported_usage": usage,
+        "tool_errors": errors,
         "expected_usage_for_all_observed_calls": expected_cli_usage(len(requests)),
         "all_observed_usage_reported": bool(requests) and usage == expected_cli_usage(len(requests)),
-        "mcp_tool_completed": any(
-            step.get("tool_name") == "call_mcp_tool" and step.get("state") == "DONE"
-            for step in steps
-        ),
+        # A native DONE/SUCCESS can mean denied, so observe the MCP fixture itself.
+        "mcp_tool_completed": mcp_calls > 0,
+        "mcp_calls_observed": mcp_calls,
         "undeclared_shell_rejected": (
             case == "undeclared-shell"
             and "run_command" not in declared
@@ -66,7 +66,7 @@ def summarize(case, requests, stdout, returncode, marker_exists):
     }
 
 
-def run_case(case, always_proceed):
+def run_case(case, always_proceed, *, allow_mcp=False, eager=False, hooks=False):
     # Each case receives a fresh HOME, workspace, CLI state, and synthetic key.
     with tempfile.TemporaryDirectory(prefix="agy-probe-") as temporary:
         root = Path(temporary)
@@ -77,10 +77,30 @@ def run_case(case, always_proceed):
         (config / "antigravity-cli").mkdir(parents=True)
         (config / "config").mkdir()
         settings = {"modelProvider": "gemini", "agentMode": "", "toolPermission": "request-review"}
+        if allow_mcp:
+            settings["permissions"] = {
+                "allow": ["mcp(openrsi/research_exec)"],
+                "deny": ["command(*)", "read_file(*)", "write_file(*)",
+                         "read_url(*)", "execute_url(*)"],
+            }
         (config / "antigravity-cli/settings.json").write_text(json.dumps(settings))
+        mcp_journal = root / "mcp-calls.jsonl"
+        hook_journal = root / "hook-calls.jsonl"
+        mcp_server = {"command": "python", "args": ["/probe/mock_mcp.py"],
+                      "env": {"OPENRSI_PROBE_MCP_CALLS": str(mcp_journal)}}
+        if eager:
+            mcp_server["tools"] = {"research_exec": {"eager": True}}
         (config / "config/mcp_config.json").write_text(json.dumps({
-            "mcpServers": {"openrsi": {"command": "python", "args": ["/probe/mock_mcp.py"]}},
+            "mcpServers": {"openrsi": mcp_server},
         }))
+        if hooks:
+            (config / "config/hooks.json").write_text(json.dumps({
+                "usage-observer": {
+                    event: [{"type": "command",
+                             "command": f"python /probe/mock_hook.py {event} {hook_journal}"}]
+                    for event in ("PreInvocation", "PostInvocation")
+                },
+            }))
         agents = workspace / ".agents/agents"
         agents.mkdir(parents=True)
         (agents / "openrsi.md").write_text(
@@ -112,6 +132,12 @@ def run_case(case, always_proceed):
                         for tool in group.get("functionDeclarations", [])
                     ],
                 })
+                if eager:
+                    requests[-1]["eager_declarations"] = [
+                        tool for group in body.get("tools", [])
+                        for tool in group.get("functionDeclarations", [])
+                        if tool.get("name") == "mcp_openrsi_research_exec"
+                    ]
                 parts = [{"text": "probe ready"}]
                 if model != MODEL:
                     # Correctly shaped review response: no retry needed for invalid JSON.
@@ -120,10 +146,24 @@ def run_case(case, always_proceed):
                         "reason": "The fixture returns a fixed string without executing a command.",
                     })}]
                 elif len(requests) == 1 and case == "mcp":
-                    parts = [{"functionCall": {"name": "call_mcp_tool", "args": {
+                    tool = {"name": "call_mcp_tool", "args": {
                         "ServerName": "openrsi", "ToolName": "research_exec",
                         "Arguments": {"command": "echo 42"},
-                    }}}]
+                    }}
+                    if eager:
+                        # The CLI adds a required summary to eager MCP declarations.
+                        # Supply it only when the actual model-facing schema asks for it.
+                        declarations = [
+                            item for group in body.get("tools", [])
+                            for item in group.get("functionDeclarations", [])
+                            if item.get("name") == "mcp_openrsi_research_exec"
+                        ]
+                        arguments = {"command": "echo 42"}
+                        schema = declarations[0].get("parametersJsonSchema", {}) if declarations else {}
+                        if "toolSummary" in schema.get("properties", {}):
+                            arguments["toolSummary"] = "Return the fixed synthetic output."
+                        tool = {"name": "mcp_openrsi_research_exec", "args": arguments}
+                    parts = [{"functionCall": tool}]
                 elif len(requests) == 1 and case == "undeclared-shell":
                     parts = [{"functionCall": {"name": "run_command", "args": {
                         "CommandLine": f"printf controlled > {marker}",
@@ -162,8 +202,18 @@ def run_case(case, always_proceed):
             process = subprocess.run(
                 command, env=env, cwd=workspace, capture_output=True, text=True, timeout=25,
             )
-            result = summarize(case, requests, process.stdout, process.returncode, marker.exists())
+            mcp_calls = len(mcp_journal.read_text().splitlines()) if mcp_journal.exists() else 0
+            result = summarize(case, requests, process.stdout, process.returncode, marker.exists(), mcp_calls)
             result["permission_mode"] = "always-proceed" if always_proceed else "request-review"
+            result["explicit_mcp_allow"] = allow_mcp
+            result["eager_mcp"] = eager
+            if eager:
+                result["eager_declarations"] = requests[0].get("eager_declarations", []) if requests else []
+            if hooks:
+                result["invocation_hooks"] = (
+                    [json.loads(line) for line in hook_journal.read_text().splitlines()]
+                    if hook_journal.exists() else []
+                )
             if not result["status"]:
                 # Only the synthetic container is inspected; no real credentials are mounted.
                 result["diagnostic"] = process.stderr[-1500:]
@@ -180,6 +230,9 @@ def main():
     cases = [
         run_case("text", True), run_case("mcp", False),
         run_case("mcp", True), run_case("undeclared-shell", True),
+        run_case("mcp", False, allow_mcp=True),
+        run_case("mcp", False, allow_mcp=True, eager=True),
+        run_case("mcp", False, allow_mcp=True, hooks=True),
     ]
     report = {
         "schema_version": 1,
@@ -190,7 +243,10 @@ def main():
             and cases[2]["mcp_tool_completed"]
         ),
         "complete_usage_observed": all(case["all_observed_usage_reported"] for case in cases),
-        "undeclared_shell_rejected": cases[-1]["undeclared_shell_rejected"],
+        "undeclared_shell_rejected": cases[3]["undeclared_shell_rejected"],
+        "allowlisted_tool_usage_complete": (
+            cases[4]["mcp_tool_completed"] and cases[4]["all_observed_usage_reported"]
+        ),
     }
     print(json.dumps(report, indent=2))
 
