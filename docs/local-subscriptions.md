@@ -19,8 +19,10 @@ Both routes accept only text Chat Completions and function tools. Hosted search,
 account APIs and arbitrary upstream URLs remain unavailable. No Grok CLI identity
 headers are added. A harness must pair its client's request format with this
 route, including helper calls and tool results. Gemini CLI's subscription route
-is not enabled: its native protocol and explicit third-party OAuth restriction
-need a separate integration decision.
+is not enabled. Google's own Antigravity CLI has documented headless and ACP
+interfaces; that is different from reusing its OAuth token in a third-party
+provider adapter. The [native Antigravity assessment](native-antigravity.md)
+records real-binary probes and the unresolved complete-usage accounting gap.
 
 ## Reference pricing
 
