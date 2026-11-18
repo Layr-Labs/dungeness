@@ -45,4 +45,5 @@ make check
 [Harness interface](docs/command-harness.md) ·
 [Harness error handling](docs/command-harness.md#required-request-error-handling) ·
 [Runtime restrictions](docs/gateway-request-policy.md#supported-model-requests) ·
+[GPT-6.1 Terra](docs/gpt-terra.md) ·
 [Architecture](DESIGN.md) · [Development guide](docs/development.md)
