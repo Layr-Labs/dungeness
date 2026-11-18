@@ -261,17 +261,19 @@ def finalize_run_record(
     events_path = run_dir / "usage" / "events.jsonl"
     if events_path.is_file():
         try:
-            event_file = events_path.open(encoding="utf-8")
+            # Decode each record independently: an interrupted UTF-8 write must
+            # not hide complete evaluations elsewhere in the append-only log.
+            event_file = events_path.open("rb")
         except OSError:
             event_file = None
         if event_file is not None:
             with event_file:
                 for line in event_file:
-                    if "evaluation.completed" not in line:
+                    if b"evaluation.completed" not in line:
                         continue
                     try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
+                        event = json.loads(line.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
                     if (
                         not isinstance(event, dict)

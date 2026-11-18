@@ -1,5 +1,6 @@
 """Record storage works without importing execution or assuming a checkout root."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,41 @@ from dungeness import records
 
 
 class RecordsBoundaryTests(unittest.TestCase):
+    def test_damaged_event_line_does_not_hide_completed_evaluations_or_cancellation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "record.json"
+            records.write_json(path, {
+                "data": {"run_id": "trial", "status": "running",
+                         "metric": {"name": "accuracy", "direction": "maximize"}},
+            })
+            usage = root / "usage"
+            usage.mkdir()
+            event = {
+                "source": "evaluator", "kind": "evaluation.completed",
+                "data": {"status": "ok", "score": 42, "best_score": 42,
+                         "submissions_used": 1, "candidate_sha256": "a" * 64},
+            }
+            valid = json.dumps(event).encode() + b"\n"
+            damaged = b'{"kind":"evaluation.completed","data":{"message":"\xe2\x82'
+            # UTF-8 writes can end mid-character. A malformed earlier line
+            # must not prevent reading later complete events either.
+            for contents in (valid + damaged, damaged + b"\n" + valid):
+                with self.subTest(contents=contents):
+                    events = usage / "events.jsonl"
+                    events.write_bytes(contents)
+                    records.finalize_run_record(
+                        path, status="cancelled", error="interrupted",
+                        execution_outcome=Mock(),
+                    )
+                    result = records.read_json(path)["data"]
+                    self.assertEqual(result["status"], "cancelled")
+                    self.assertEqual(result["error"], "interrupted")
+                    self.assertEqual(result["evaluation"]["best_score"], 42)
+                    self.assertEqual(result["metrics"], {"accuracy": 42})
+                    self.assertNotIn("usage", result)
+                    self.assertEqual(events.read_bytes(), contents)
+
     def test_import_has_no_execution_dependencies_or_filesystem_side_effects(self):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
