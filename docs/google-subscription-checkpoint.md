@@ -1,17 +1,24 @@
-# Google subscription work — resumed investigation
+# Google subscription work — on hold
+
+**Current decision, 2026-11-19:** implement [Google API access](google-api.md)
+first. Subscription integration is on hold. The material below records the
+earlier investigation; it does not authorize resuming subscription work.
+
+## Earlier investigation
 
 Resumed at the user's request on 2026-11-19. The target is a **drop-in
 subscription model for arbitrary harnesses**, with authentication and metering
 in Dungeness's protected gateway. The user briefly requested a separate API
-route, then deprioritized it. No API provider was added.
+route, then deprioritized it at that stage. API work resumed after the later
+decision recorded above.
 
 **User decision, 2026-11-19:** do not use Antigravity CLI/ACP as a bridge.
 It changes the harness architecture and conflicts with Google's stated
 third-party embedding restrictions. The native bridge is rejected, not a
 fallback to pursue. Keep the existing probes as historical evidence.
 
-No working subscription adapter is qualified. Do not enable Google execution or
-describe the investigation as a completed model integration.
+No working subscription adapter is qualified. Do not enable subscription
+execution or describe that investigation as a completed subscription integration.
 
 ## Latest findings
 
@@ -98,7 +105,7 @@ No native execution adapter, direct subscription adapter, VM integration,
 credential handoff, attested qualification or new VM release was completed.
 Do not claim that adding the dropdown made Google runnable.
 
-## Integration requirements
+## Requirements if subscription work resumes
 
 The user explicitly wants subscription access, not a substitution with separately
 billed API-key access. Use **OpenRouter reference prices** for normalized cost,

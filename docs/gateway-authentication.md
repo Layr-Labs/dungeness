@@ -13,6 +13,7 @@ and authentication recipe, not a model or a blanket permission to use an account
 | Route | Access mechanism |
 | --- | --- |
 | `openai` | OpenAI API key |
+| `google-api` | Gemini API key; text Chat Completions |
 | `openai-chatgpt` | Temporary ChatGPT account access token and account ID |
 | `anthropic` | Anthropic API key |
 | `claude-subscription` | Claude access token plus an explicit future expiry |
@@ -25,9 +26,11 @@ Kimi Code remains excluded because its subscription guidelines prohibit
 non-interactive automation. A Grok model accessed through OpenRouter uses the OpenRouter API
 route and credential, not a Grok subscription credential.
 
-The checked-in `services/gateway/providers.json` supplies the Grok and MiniMax
-routes using the existing Chat Completions protocol. Both use reference credits,
-not cash billing. See [local subscription access](local-subscriptions.md).
+The checked-in `services/gateway/providers.json` supplies Google API, Grok and
+MiniMax routes using Chat Completions. Google API uses a separately billed API
+project; see [Google API access](google-api.md). Grok and MiniMax subscription
+routes use reference credits, not cash billing; see
+[local subscription access](local-subscriptions.md).
 Operators can add compatible routes through that trusted registry; harnesses
 cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field

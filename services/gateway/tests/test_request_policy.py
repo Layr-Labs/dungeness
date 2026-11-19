@@ -19,6 +19,7 @@ from gateway_request_policy import validate_model_request
 
 MODELS = {
     "openai": "gpt-5.6-sol",
+    "google-api": "gemini-4-carbon",
     "anthropic": "claude-opus-5",
     "claude-subscription": "example-model",
     "openrouter": "openai/gpt-5.6-sol",
@@ -60,6 +61,7 @@ async def harness(*, declared=True, web=False):
         "CLAUDE_ACCESS_TOKEN": "unused-claude-access",
         "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "EXAMPLE_API_KEY": "unused-example-key",
+        "GEMINI_API_KEY": "unused-google-key",
         "EXAMPLE_SESSION_TOKEN": "unused-session",
         "EXAMPLE_SESSION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "GROK_SUBSCRIPTION_TOKEN": "unused-grok-session",

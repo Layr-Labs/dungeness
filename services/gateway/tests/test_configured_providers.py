@@ -146,8 +146,9 @@ class ProviderRegistryTests(unittest.TestCase):
     def test_installed_subscription_profiles_are_inference_only(self):
         from provider_profiles import load_profiles
         profiles = load_profiles()
-        self.assertEqual(set(profiles), {'grok-subscription', 'minimax-subscription'})
-        for profile in profiles.values():
+        self.assertEqual(set(profiles), {'grok-subscription', 'minimax-subscription', 'google-api'})
+        for name in ('grok-subscription', 'minimax-subscription'):
+            profile = profiles[name]
             self.assertEqual(profile['routes'], ['chat/completions'])
             self.assertEqual(profile['headers'], {})
             self.assertIsNone(profile['model_header'])

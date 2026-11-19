@@ -1,5 +1,7 @@
 # Native Antigravity / Carbon integration
 
+**Status, 2026-11-19:** subscription integration is on hold. The active route is [Google API access](google-api.md). The CLI probes below are historical evidence.
+
 Status: subscription investigation resumed on 2026-11-19; no runnable provider.
 The requested target is a drop-in model for arbitrary harnesses. The independent
 API-key route is deprioritized. The user explicitly rejected an Antigravity

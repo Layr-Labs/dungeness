@@ -12,7 +12,7 @@ from gateway_history_diagnostics import HistoryShapeError, history_at, known_typ
 
 # Increment when the supported history contract changes. Kept in safe rejection
 # diagnostics; the exact gateway revision is recorded in the runtime manifest.
-HISTORY_SCHEMA_VERSION = 1
+HISTORY_SCHEMA_VERSION = 2
 MAX_MODEL_REQUEST_BYTES = 8 * 1024 * 1024
 
 
@@ -294,12 +294,30 @@ def content_blocks(value: Any, depth: int = 0) -> None:
                 cache_control(block.get("cache_control"))
 
 
+def google_thought_signature(value: Any) -> None:
+    """Allow only inert Gemini signature metadata, never extra request controls."""
+    extra = fields(value, {"google"}, "Gemini history metadata")
+    with history_at("google"):
+        google = fields(extra.get("google"), {"thought_signature"}, "Gemini signature")
+        signature = google.get("thought_signature")
+        if not isinstance(signature, str) or not 1 <= len(signature) <= 131072:
+            raise HistoryShapeError("invalid_thought_signature", "expected a bounded thought signature",
+                                    path=("thought_signature",))
+
+
 def messages(value: Any, provider: str = "openai", operation: str = "messages") -> None:
     for index, message in enumerate(sequence(value, "messages")):
         with history_at(index, item_index=index, item_type="message"):
+            google_history = provider == "google-api" and operation == "chat/completions"
+            extension = {"extra_content"} if google_history else set()
             obj = fields(message, {"role", "content", "name", "tool_calls", "tool_call_id",
                                    "function_call", "reasoning_content", "reasoning",
-                                   "reasoning_details", "cache_control", "refusal"}, "message")
+                                   "reasoning_details", "cache_control", "refusal"} | extension, "message")
+            if "extra_content" in obj:
+                with history_at("extra_content"):
+                    if obj.get("role") != "assistant":
+                        raise HistoryShapeError("signature_role_mismatch", "signatures belong to assistant history")
+                    google_thought_signature(obj["extra_content"])
             if obj.get("role") not in ("system", "developer", "user", "assistant", "tool", "function"):
                 raise HistoryShapeError("unsupported_role", "unsupported message role", path=("role",))
             with history_at("content"):
@@ -313,7 +331,12 @@ def messages(value: Any, provider: str = "openai", operation: str = "messages") 
                 with history_at("tool_calls"):
                     for call_index, call in enumerate(sequence(obj["tool_calls"], "tool_calls")):
                         with history_at(call_index):
-                            fields(call, {"id", "type", "function", "index"}, "tool call")
+                            fields(call, {"id", "type", "function", "index"} | extension, "tool call")
+                            if "extra_content" in call:
+                                with history_at("extra_content"):
+                                    if obj.get("role") != "assistant":
+                                        raise HistoryShapeError("signature_role_mismatch", "signatures belong to assistant history")
+                                    google_thought_signature(call["extra_content"])
                             if call.get("type") != "function":
                                 raise HistoryShapeError("unsupported_tool_call_type", "only local function call history is permitted", path=("type",))
                             with history_at("function"):

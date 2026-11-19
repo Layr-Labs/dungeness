@@ -344,3 +344,10 @@ entries:
     cached_read_per_mtok: 0.015
     output_per_mtok: 0.6
     text_only: true
+
+  # Google API text reference: docs/examples/google-api-pricing-20261119.json
+  - {"provider": "google-api", "upstream_id": "google/gemini-4-carbon", "request_models": ["gemini-4-carbon"], "text_only": true, "input_per_mtok": 2.0, "cached_read_per_mtok": 0.1, "output_per_mtok": 10.0, "note": "OpenRouter text reference, 2026-11-19; not a Google invoice. Explicit caching and hosted tools disabled."}
+  - {"provider": "google-api", "upstream_id": "google/gemini-4-neon", "request_models": ["gemini-4-neon"], "text_only": true, "input_per_mtok": 3.0, "cached_read_per_mtok": 0.15, "output_per_mtok": 15.0, "note": "OpenRouter text reference, 2026-11-19; not a Google invoice. Explicit caching and hosted tools disabled."}
+  - {"provider": "google-api", "upstream_id": "google/gemini-4-argon", "request_models": ["gemini-4-argon"], "text_only": true, "input_per_mtok": 2.0, "cached_read_per_mtok": 0.1, "output_per_mtok": 10.0, "note": "OpenRouter text reference, 2026-11-19; not a Google invoice. Explicit caching and hosted tools disabled."}
+  - {"provider": "google-api", "upstream_id": "google/gemini-4-hydrogen", "request_models": ["gemini-4-hydrogen"], "text_only": true, "input_per_mtok": 1.5, "cached_read_per_mtok": 0.075, "output_per_mtok": 7.5, "note": "OpenRouter text reference, 2026-11-19; not a Google invoice. Explicit caching and hosted tools disabled."}
+  - {"provider": "google-api", "upstream_id": "google/gemini-3.8-flash", "request_models": ["gemini-3.8-flash"], "text_only": true, "input_per_mtok": 0.825, "cached_read_per_mtok": 0.0825, "output_per_mtok": 4.125, "note": "OpenRouter text reference, 2026-11-19; not a Google invoice. Explicit caching and hosted tools disabled."}
