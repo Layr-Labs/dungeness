@@ -32,6 +32,7 @@ class CredentialStagingTests(unittest.TestCase):
     def test_private_staging_no_secrets_in_launch_and_cleanup(self):
         with gateway_credentials(self.root, self.env_file, {
                 "PATH": os.defpath, "TESTBED_EXAMPLE_TOKEN": "ambient-secret",
+                "GEMINI_API_KEY": "unselected-google-secret",
                 "EXA_API_KEY": "ambient-search", "EXAMPLE_TOKEN": "raw-ambient-secret"}) as (env, empty):
             path = Path(env["DUNGENESS_CREDENTIALS_FILE"])
             self.assertEqual(json.loads(path.read_text()), {
@@ -41,7 +42,7 @@ class CredentialStagingTests(unittest.TestCase):
             self.assertEqual(empty.stat().st_mode & 0o777, 0o600)
             self.assertEqual(env["EXAMPLE_BASE_URL"], "http://mock:8081")
             self.assertEqual(env["PATH"], os.defpath)
-            for value in ("synthetic-key", "ambient-secret", "synthetic-search-key", "must-not-propagate"):
+            for value in ("synthetic-key", "ambient-secret", "synthetic-search-key", "must-not-propagate", "unselected-google-secret"):
                 self.assertNotIn(value, json.dumps(env) + empty.read_text())
             self.assertNotIn("UNRELATED_SECRET", env)
         self.assertFalse(path.parent.exists())

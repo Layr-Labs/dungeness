@@ -42,6 +42,41 @@
       ],
       "headers": {},
       "model_header": null
+    },
+    "google-api": {
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "credential_env": "GEMINI_API_KEY",
+      "credential_kind": "api-key",
+      "billed": true,
+      "catalog_author": "google",
+      "models": {
+        "gemini-4-carbon": {
+          "upstream": "gemini-4-carbon",
+          "catalog": "google/gemini-4-carbon"
+        },
+        "gemini-4-neon": {
+          "upstream": "gemini-4-neon",
+          "catalog": "google/gemini-4-neon"
+        },
+        "gemini-4-argon": {
+          "upstream": "gemini-4-argon",
+          "catalog": "google/gemini-4-argon"
+        },
+        "gemini-4-hydrogen": {
+          "upstream": "gemini-4-hydrogen",
+          "catalog": "google/gemini-4-hydrogen"
+        },
+        "gemini-3.8-flash": {
+          "upstream": "gemini-3.8-flash",
+          "catalog": "google/gemini-3.8-flash"
+        }
+      },
+      "protocol": "openai",
+      "routes": [
+        "chat/completions"
+      ],
+      "headers": {},
+      "model_header": null
     }
   }
 }

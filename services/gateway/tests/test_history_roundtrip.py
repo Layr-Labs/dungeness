@@ -83,7 +83,7 @@ class HistoryRoundTripTests(unittest.IsolatedAsyncioTestCase):
                 diagnostic = rejected.json()['diagnostic']
                 self.assertEqual(diagnostic['code'], 'conversation_history_rejected')
                 self.assertFalse(diagnostic['upstream_request_sent'])
-                self.assertEqual(diagnostic['history_schema_version'], 1)
+                self.assertEqual(diagnostic['history_schema_version'], 2)
                 self.assertEqual(diagnostic['item_index'], 0)
                 self.assertTrue(diagnostic['request_id'])
                 self.assertNotIn('secret', rejected.text)

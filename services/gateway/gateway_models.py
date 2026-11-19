@@ -304,6 +304,57 @@ def extract_usage(body: bytes, content_type: str) -> dict[str, int]:
     return {}
 
 
+def extract_google_usage(body: bytes, content_type: str) -> dict[str, int]:
+    """Meter Google's text-only Chat Completions without losing thinking tokens.
+
+    The compatibility API can report visible completion tokens separately from
+    thinking, or include reasoning in completion_tokens as OpenAI does. The
+    authoritative output bucket is total - prompt on this inference-only route.
+    Require complete integer counters and a finished stream; a prefix is not a
+    settled receipt. Omitted cache detail receives no reference-price discount.
+    """
+    if is_sse_body(body, content_type) and not any(
+        line.strip() in (b"data: [DONE]", b"data:[DONE]")
+        for line in decode_body(body).splitlines()
+    ):
+        return {}
+    documents = decode_response_documents(body, content_type)
+    # Never settle an earlier prefix when the final event is malformed or
+    # missing counters, even if the transport itself ends with [DONE].
+    last = documents[-1] if documents else None
+    raw = last.get("usage") if isinstance(last, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    counts = [raw.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")]
+    if any(type(value) is not int or value < 0 for value in counts):
+        return {}
+    prompt, completion, total = counts
+    output = total - prompt
+    if output < completion:
+        return {}
+    input_details = raw.get("prompt_tokens_details", {})
+    output_details = raw.get("completion_tokens_details", {})
+    if not isinstance(input_details, dict) or not isinstance(output_details, dict):
+        return {}
+    cached = input_details.get("cached_tokens", 0)
+    reasoning = output_details.get("reasoning_tokens", output - completion)
+    if (type(cached) is not int or not 0 <= cached <= prompt
+            or type(reasoning) is not int or not 0 <= reasoning <= output):
+        return {}
+    if output != completion and output != completion + reasoning:
+        return {}
+    # These buckets are outside the text/function-only request contract.
+    if any(details.get(key, 0) != 0
+           for details, keys in ((input_details, ("audio_tokens", "cache_write_tokens")),
+                                 (output_details, ("audio_tokens", "accepted_prediction_tokens",
+                                                   "rejected_prediction_tokens")))
+           for key in keys):
+        return {}
+    return {"input_tokens": prompt, "cached_input_tokens": cached,
+            "cache_write_input_tokens": 0, "output_tokens": output,
+            "reasoning_tokens": reasoning, "total_tokens": total}
+
+
 def extract_reasoning_summaries(body: bytes, content_type: str) -> list[str]:
     """Extract readable OpenAI reasoning summaries, never hidden reasoning tokens."""
 
@@ -653,7 +704,8 @@ def configured_provider_config(name, profile):
         'upstream_env': name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
         'upstream_default': profile['base_url'],
         'auth': 'gateway_secret', 'billed': profile['billed'],
-        'passthrough': (), 'extract_usage': extract_usage,
+        'passthrough': (),
+        'extract_usage': extract_google_usage if name == 'google-api' else extract_usage,
     }
 
 

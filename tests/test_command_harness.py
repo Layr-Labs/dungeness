@@ -424,8 +424,19 @@ class ConfiguredProviderCompilerTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.dict(compiler.CONFIGURED_PROVIDERS, CONFIGURED_FIXTURES))
 
-    def test_installed_subscription_credentials_are_gateway_only(self):
-        for name in ('grok-subscription', 'minimax-subscription'):
+    def test_google_api_models_compile_with_pinned_prices(self):
+        for name, mapping in compiler.CONFIGURED_PROVIDERS['google-api']['models'].items():
+            model = {'provider': 'google-api', 'request_model': name, 'upstream_id': mapping['catalog'],
+                     'api': 'openai-chat-completions', 'name_format': 'request'}
+            compiled, = compiler.command_models({'model': model})
+            self.assertEqual(compiled['base_url'], 'http://gateway:8080/model/google-api/v1')
+            self.assertEqual(compiled['request_model'], name)
+            price = compiler.resolve_model_pricing({'model': model})
+            self.assertIn(name, price['request_models'])
+            self.assertTrue(price['text_only'])
+
+    def test_installed_provider_credentials_are_gateway_only(self):
+        for name in ('grok-subscription', 'minimax-subscription', 'google-api'):
             profile = compiler.CONFIGURED_PROVIDERS[name]
             model = {'provider': name, 'request_model': next(iter(profile['models'])),
                      'base_url': f'http://gateway:8080/model/{name}/v1'}

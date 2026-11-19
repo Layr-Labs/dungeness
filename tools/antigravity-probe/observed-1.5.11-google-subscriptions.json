@@ -1,0 +1,153 @@
+{
+  "observed_at": "2026-11-18T23:47:43.602079+00:00",
+  "scope": "direct official CLI subscription discovery and text-only smoke tests",
+  "authentication": "cached official CLI sign-in; API-key and ADC environment removed",
+  "available_google_models": [
+    {
+      "id": "gemini-4-neon-high",
+      "name": "Gemini 4 Neon (High)"
+    },
+    {
+      "id": "gemini-4-neon-xhigh",
+      "name": "Gemini 4 Neon (XHigh)"
+    },
+    {
+      "id": "gemini-4-neon-medium",
+      "name": "Gemini 4 Neon (Medium)"
+    },
+    {
+      "id": "gemini-4-neon-low",
+      "name": "Gemini 4 Neon (Low)"
+    },
+    {
+      "id": "gemini-4-carbon-medium",
+      "name": "Gemini 4 Carbon (Medium)"
+    },
+    {
+      "id": "gemini-4-carbon-high",
+      "name": "Gemini 4 Carbon (High)"
+    },
+    {
+      "id": "gemini-4-carbon-low",
+      "name": "Gemini 4 Carbon (Low)"
+    },
+    {
+      "id": "gemini-4-argon-medium",
+      "name": "Gemini 4 Argon (Medium)"
+    },
+    {
+      "id": "gemini-4-argon-high",
+      "name": "Gemini 4 Argon (High)"
+    },
+    {
+      "id": "gemini-4-argon-low",
+      "name": "Gemini 4 Argon (Low)"
+    },
+    {
+      "id": "gemini-4-hydrogen-high",
+      "name": "Gemini 4 Hydrogen (High)"
+    },
+    {
+      "id": "gemini-4-hydrogen-xhigh",
+      "name": "Gemini 4 Hydrogen (XHigh)"
+    },
+    {
+      "id": "gemini-4-hydrogen-medium",
+      "name": "Gemini 4 Hydrogen (Medium)"
+    },
+    {
+      "id": "gemini-4-hydrogen-low",
+      "name": "Gemini 4 Hydrogen (Low)"
+    },
+    {
+      "id": "gemini-pro-orchestrator-neon",
+      "name": "Orchestrator (Neon)"
+    },
+    {
+      "id": "gemini-pro-orchestrator",
+      "name": "Orchestrator (Carbon)"
+    },
+    {
+      "id": "gemini-pro-orchestrator-argon",
+      "name": "Orchestrator (Argon)"
+    },
+    {
+      "id": "gemini-3.8-flash-high",
+      "name": "Gemini 3.8 Flash (High)"
+    },
+    {
+      "id": "gemini-3.8-flash-medium",
+      "name": "Gemini 3.8 Flash (Medium)"
+    },
+    {
+      "id": "gemini-3.8-flash-low",
+      "name": "Gemini 3.8 Flash (Low)"
+    }
+  ],
+  "requested_models": [
+    "gemini-4-neon-low",
+    "gemini-4-argon-low",
+    "gemini-4-hydrogen-low",
+    "gemini-3.8-flash-low"
+  ],
+  "tests": [
+    {
+      "model": "gemini-4-neon-low",
+      "passed": true,
+      "exit_code": 0,
+      "response_matches": true,
+      "reported_usage": {
+        "input_tokens": 1993,
+        "output_tokens": 24,
+        "thinking_tokens": 21,
+        "cache_read_tokens": 0,
+        "total_tokens": 2017
+      },
+      "error": null
+    },
+    {
+      "model": "gemini-4-argon-low",
+      "passed": true,
+      "exit_code": 0,
+      "response_matches": true,
+      "reported_usage": {
+        "input_tokens": 2000,
+        "output_tokens": 6,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 2006
+      },
+      "error": null
+    },
+    {
+      "model": "gemini-4-hydrogen-low",
+      "passed": true,
+      "exit_code": 0,
+      "response_matches": true,
+      "reported_usage": {
+        "input_tokens": 2520,
+        "output_tokens": 28,
+        "thinking_tokens": 22,
+        "cache_read_tokens": 0,
+        "total_tokens": 2548
+      },
+      "error": null
+    },
+    {
+      "model": "gemini-3.8-flash-low",
+      "passed": true,
+      "exit_code": 0,
+      "response_matches": true,
+      "reported_usage": {
+        "input_tokens": 1997,
+        "output_tokens": 2,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 1999
+      },
+      "error": null
+    }
+  ],
+  "attested": false,
+  "accounting_verified": false
+}

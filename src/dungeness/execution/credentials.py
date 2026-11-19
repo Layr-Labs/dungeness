@@ -49,7 +49,8 @@ def gateway_credentials(render: Path, env_file: Path, environment: dict[str, str
             raise ValueError(f"Required gateway credential {source} is missing or invalid")
         values[name] = value
     secret_names = set(sources) | set(sources.values()) | {
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "EXA_API_KEY"}
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "EXA_API_KEY",
+        "GEMINI_API_KEY"}
     # Base variables are for host process execution. Env-file imports are limited
     # to the compiler's explicit non-secret interpolation points.
     safe = {k: v for k, v in environment.items()

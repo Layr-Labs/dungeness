@@ -1,0 +1,372 @@
+{
+  "schema_version": 1,
+  "scope": "synthetic native CLI checks; not subscription entitlement or attestation qualification",
+  "cases": [
+    {
+      "case": "text",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 1
+      },
+      "model_calls_observed": 1,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 80,
+        "output_tokens": 8,
+        "thinking_tokens": 3,
+        "cache_read_tokens": 20,
+        "total_tokens": 88
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 80,
+        "output_tokens": 8,
+        "thinking_tokens": 3,
+        "cache_read_tokens": 20,
+        "total_tokens": 88
+      },
+      "all_observed_usage_reported": true,
+      "mcp_tool_completed": false,
+      "mcp_calls_observed": 0,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "always-proceed",
+      "explicit_mcp_allow": false,
+      "eager_mcp": false
+    },
+    {
+      "case": "mcp",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 1,
+        "gemini-3.1-flash-lite-preview": 1
+      },
+      "model_calls_observed": 2,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 80,
+        "output_tokens": 8,
+        "thinking_tokens": 3,
+        "cache_read_tokens": 20,
+        "total_tokens": 88
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "all_observed_usage_reported": false,
+      "mcp_tool_completed": false,
+      "mcp_calls_observed": 0,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "request-review",
+      "explicit_mcp_allow": false,
+      "eager_mcp": false
+    },
+    {
+      "case": "mcp",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 2,
+        "gemini-3.1-flash-lite-preview": 1
+      },
+      "model_calls_observed": 3,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 240,
+        "output_tokens": 24,
+        "thinking_tokens": 9,
+        "cache_read_tokens": 60,
+        "total_tokens": 264
+      },
+      "all_observed_usage_reported": false,
+      "mcp_tool_completed": true,
+      "mcp_calls_observed": 1,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "always-proceed",
+      "explicit_mcp_allow": false,
+      "eager_mcp": false
+    },
+    {
+      "case": "undeclared-shell",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 2
+      },
+      "model_calls_observed": 2,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "tool_errors": [
+        "unknown tool: \"run_command\" \u2014 check spelling"
+      ],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "all_observed_usage_reported": true,
+      "mcp_tool_completed": false,
+      "mcp_calls_observed": 0,
+      "undeclared_shell_rejected": true,
+      "permission_mode": "always-proceed",
+      "explicit_mcp_allow": false,
+      "eager_mcp": false
+    },
+    {
+      "case": "mcp",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 2,
+        "gemini-3.1-flash-lite-preview": 1
+      },
+      "model_calls_observed": 3,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 240,
+        "output_tokens": 24,
+        "thinking_tokens": 9,
+        "cache_read_tokens": 60,
+        "total_tokens": 264
+      },
+      "all_observed_usage_reported": false,
+      "mcp_tool_completed": true,
+      "mcp_calls_observed": 1,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "request-review",
+      "explicit_mcp_allow": true,
+      "eager_mcp": false
+    },
+    {
+      "case": "mcp",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 2,
+        "gemini-3.1-flash-lite-preview": 1
+      },
+      "model_calls_observed": 3,
+      "model_facing_tools": [
+        "list_resources",
+        "manage_task",
+        "mcp_openrsi_research_exec",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 240,
+        "output_tokens": 24,
+        "thinking_tokens": 9,
+        "cache_read_tokens": 60,
+        "total_tokens": 264
+      },
+      "all_observed_usage_reported": false,
+      "mcp_tool_completed": true,
+      "mcp_calls_observed": 1,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "request-review",
+      "explicit_mcp_allow": true,
+      "eager_mcp": true,
+      "eager_declarations": [
+        {
+          "description": "This is a tool from the openrsi MCP server.\nReturn a fixed synthetic result; no command execution",
+          "name": "mcp_openrsi_research_exec",
+          "parametersJsonSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "toolSummary": {
+                "description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "command",
+              "toolSummary"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "case": "mcp",
+      "exit_code": 0,
+      "status": "SUCCESS",
+      "models_requested": {
+        "gemini-4-carbon": 2,
+        "gemini-3.1-flash-lite-preview": 1
+      },
+      "model_calls_observed": 3,
+      "model_facing_tools": [
+        "call_mcp_tool",
+        "list_resources",
+        "manage_task",
+        "read_resource"
+      ],
+      "reported_usage": {
+        "input_tokens": 160,
+        "output_tokens": 16,
+        "thinking_tokens": 6,
+        "cache_read_tokens": 40,
+        "total_tokens": 176
+      },
+      "tool_errors": [],
+      "expected_usage_for_all_observed_calls": {
+        "input_tokens": 240,
+        "output_tokens": 24,
+        "thinking_tokens": 9,
+        "cache_read_tokens": 60,
+        "total_tokens": 264
+      },
+      "all_observed_usage_reported": false,
+      "mcp_tool_completed": true,
+      "mcp_calls_observed": 1,
+      "undeclared_shell_rejected": false,
+      "permission_mode": "request-review",
+      "explicit_mcp_allow": true,
+      "eager_mcp": false,
+      "invocation_hooks": [
+        {
+          "phase": "PreInvocation",
+          "model": "gemini-4-carbon-high",
+          "invocation": 0,
+          "fields": [
+            "artifactDirectoryPath",
+            "conversationId",
+            "cwd",
+            "hookEventName",
+            "initialNumSteps",
+            "invocationNum",
+            "lastUserInput",
+            "modelName",
+            "transcriptPath",
+            "workspacePaths"
+          ]
+        },
+        {
+          "phase": "PostInvocation",
+          "model": "gemini-4-carbon-high",
+          "invocation": 0,
+          "fields": [
+            "artifactDirectoryPath",
+            "conversationId",
+            "cwd",
+            "hookEventName",
+            "initialNumSteps",
+            "invocationNum",
+            "lastUserInput",
+            "modelName",
+            "transcriptPath",
+            "workspacePaths"
+          ]
+        },
+        {
+          "phase": "PreInvocation",
+          "model": "gemini-4-carbon-high",
+          "invocation": 1,
+          "fields": [
+            "artifactDirectoryPath",
+            "conversationId",
+            "cwd",
+            "hookEventName",
+            "initialNumSteps",
+            "invocationNum",
+            "lastUserInput",
+            "modelName",
+            "transcriptPath",
+            "workspacePaths"
+          ]
+        },
+        {
+          "phase": "PostInvocation",
+          "model": "gemini-4-carbon-high",
+          "invocation": 1,
+          "fields": [
+            "artifactDirectoryPath",
+            "conversationId",
+            "cwd",
+            "hookEventName",
+            "initialNumSteps",
+            "invocationNum",
+            "lastUserInput",
+            "modelName",
+            "transcriptPath",
+            "workspacePaths"
+          ]
+        }
+      ]
+    }
+  ],
+  "probe_completed": true,
+  "complete_usage_observed": false,
+  "undeclared_shell_rejected": true,
+  "allowlisted_tool_usage_complete": false,
+  "cli_version": "1.5.11",
+  "archive_sha512": "5f703c88e01851061c87c07b1a4ca54c1f5a6826ffada9fb005974a099e9a552ddb1f9ba2fe1194e2829803482c86084babf8cf91530a528bc7f659613600585",
+  "container_image_id": "sha256:259b642cd2d58cd6313817dbe42d7645f186f7e4daa5d942b8646c97b55b7796"
+}
