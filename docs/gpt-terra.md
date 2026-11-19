@@ -1,9 +1,12 @@
-# GPT-6.1 Terra
+# GPT Terra
 
 Select `gpt-6.1-terra` through `openai` for API access or `openai-chatgpt`
 for local ChatGPT access. The existing gateway protects credentials, enforces
 the assigned model allowlist and accounts for each completed request.
 Account entitlement is determined by the upstream service.
+
+`gpt-5.6-terra` is also supported on both routes. Keep the exact version in the
+request and run record; the two Terra versions have different reference prices.
 
 Use the Responses API for a coding harness: Terra's tool calls require it.
 For a Dungeness command run:
@@ -35,6 +38,12 @@ unsupported. ChatGPT usage uses normalized cost, not a fabricated subscription
 cash charge. Image inputs remain unsupported by the current gateway.
 
 Source: [OpenAI's GPT-6.1 Terra model reference](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
+
+GPT-5.6 Terra's Standard text reference is $2 input, $0.20 cache read,
+$2.50 cache write and $12 output per million tokens. Above 272,000 input tokens,
+the full request uses $4, $0.40, $5 and $18 respectively. Source:
+[OpenAI's GPT-5.6 Terra model reference](https://developers.openai.com/api/docs/models/gpt-5.6-terra),
+checked 2026-11-18.
 
 This adds Dungeness gateway support. An enclosing platform with its own pricing
 snapshot or model selector must add Terra there as well. A Mac VM that bundles
