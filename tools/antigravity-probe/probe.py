@@ -43,17 +43,25 @@ def summarize(case, requests, stdout, returncode, marker_exists, mcp_calls):
         for step in steps if step.get("state") == "ERROR"
     ]
     declared = sorted({name for request in requests for name in request["tools"]})
+    model_calls = collections.Counter(request["model"] for request in requests)
+    complete_usage = bool(requests) and usage == expected_cli_usage(len(requests))
     return {
         "case": case,
         "exit_code": returncode,
         "status": final.get("status"),
-        "models_requested": dict(collections.Counter(r["model"] for r in requests)),
+        "models_requested": dict(model_calls),
         "model_calls_observed": len(requests),
         "model_facing_tools": declared,
         "reported_usage": usage,
         "tool_errors": errors,
         "expected_usage_for_all_observed_calls": expected_cli_usage(len(requests)),
-        "all_observed_usage_reported": bool(requests) and usage == expected_cli_usage(len(requests)),
+        "expected_usage_by_model": {
+            model: expected_cli_usage(count) for model, count in model_calls.items()
+        },
+        "all_observed_usage_reported": complete_usage,
+        # The final CLI result has one aggregate usage object, with no model
+        # breakdown. Even a matching total cannot price a mixed-model workflow.
+        "model_usage_attributable": complete_usage and len(model_calls) == 1,
         # A native DONE/SUCCESS can mean denied, so observe the MCP fixture itself.
         "mcp_tool_completed": mcp_calls > 0,
         "mcp_calls_observed": mcp_calls,
@@ -243,6 +251,7 @@ def main():
             and cases[2]["mcp_tool_completed"]
         ),
         "complete_usage_observed": all(case["all_observed_usage_reported"] for case in cases),
+        "model_usage_attributable": all(case["model_usage_attributable"] for case in cases),
         "undeclared_shell_rejected": cases[3]["undeclared_shell_rejected"],
         "allowlisted_tool_usage_complete": (
             cases[4]["mcp_tool_completed"] and cases[4]["all_observed_usage_reported"]

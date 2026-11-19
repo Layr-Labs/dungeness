@@ -6,6 +6,9 @@ use subscription credentials, call a live model, or establish attestation
 eligibility.
 
 The archive is pinned to the official release manifest in `cli-release.json`.
+The current pin is 1.5.12. To reproduce older observations, supply
+`--release tools/antigravity-probe/cli-release-1.5.11.json` with its matching
+archive.
 Download that URL to a temporary directory and run:
 
 ```sh
@@ -29,6 +32,8 @@ create a harmless temporary marker if incorrectly accepted.
 The report includes:
 
 - text-only usage compared with the synthetic server's observed requests;
+- per-model expected usage, plus a separate check that reported usage can
+  actually be attributed to those models;
 - a tool call in both default and unattended permission modes;
 - an explicitly allowed MCP tool, both lazy-loaded and eager-loaded;
 - invocation-hook coverage compared with the observed model calls;
@@ -38,6 +43,23 @@ The report includes:
 Exit `0` means these bounded checks pass, **not that subscription access or the
 whole execution boundary is qualified**. Exit `2` means the completed report
 contains a failed check. Other failures print a diagnostic.
+
+## Rechecked on 2026-11-19
+
+Official CLI **1.5.12** reproduces all seven 1.5.11 outcomes in the table below.
+The [new report](observed-1.5.12.json) completes and exits **2** because helper
+usage is still missing.
+
+The probe also rejects a complete aggregate report for a mixed-model workflow:
+total tokens without a model breakdown cannot price Carbon and Flash Lite
+correctly. `expected_usage_by_model` comes from the synthetic server and is not
+provider-reported usage or a production metering source.
+
+Fresh [subscription discovery](observed-20261119-discovery.json), using the
+existing signed-in Mac CLI 1.5.11, still exposes the five ordinary model
+families and three Orchestrator choices. This run performed no inference.
+The [current checkpoint](../../docs/google-subscription-checkpoint.md) records
+the direct-model target and the separate provider-support question.
 
 ## Observed on 2026-11-18
 

@@ -1,7 +1,58 @@
 # Native Antigravity / Carbon integration
 
-Status: subscription integration resumed on 2026-11-18; not enabled for
-attested execution. API-key integration is outside this work.
+Status: subscription investigation resumed on 2026-11-19; no runnable provider.
+The requested target is a drop-in model for arbitrary harnesses. The independent
+API-key route is deprioritized.
+
+## Direct model transport assessment
+
+The desired boundary is:
+
+```text
+arbitrary harness → protected Dungeness gateway → subscription model
+                           ↓
+                 trusted usage and budget ledger
+```
+
+The harness owns its tool loop. Provider credentials remain inside the gateway.
+The model transport must preserve the caller's messages, function declarations,
+tool results and provider-required history metadata; expose stream termination
+and cancellation; and return all input, cache, output and thinking usage with
+actual model attribution. Missing usage leaves a request unsettled.
+
+On 2026-11-19, the official Gemini CLI source was inspected at revision
+[`808199f5c2f64db0f2b1cf84b529c39f6791ecf7`](https://github.com/google-gemini/gemini-cli/tree/808199f5c2f64db0f2b1cf84b529c39f6791ecf7):
+
+- [`CodeAssistServer`](https://github.com/google-gemini/gemini-cli/blob/808199f5c2f64db0f2b1cf84b529c39f6791ecf7/packages/core/src/code_assist/server.ts)
+  calls `cloudcode-pa.googleapis.com/v1internal` with structured
+  `generateContent` and `streamGenerateContent` requests and forwards an abort
+  signal. It returns model responses rather than executing the CLI's tool loop.
+- The [converter](https://github.com/google-gemini/gemini-cli/blob/808199f5c2f64db0f2b1cf84b529c39f6791ecf7/packages/core/src/code_assist/converter.ts)
+  wraps caller contents/tools/configuration with model and project information.
+  Responses retain candidates, `usageMetadata` and `modelVersion`.
+- Authentication and onboarding belong to Gemini CLI. No compatibility test
+  established that Antigravity's cached sign-in, scopes, project or Carbon
+  entitlement can be reused. No tokens were extracted or private endpoint
+  requests made.
+
+This source establishes a possible wire shape, not a qualified subscription
+adapter. Google's [Gemini CLI FAQ](https://geminicli.com/docs/faq/) and
+[service terms notice](https://geminicli.com/docs/resources/tos-privacy/)
+explicitly exclude third-party reuse of Gemini CLI OAuth. Its open-source
+license does not establish service access for this integration.
+
+The [Antigravity SDK overview](https://antigravity.google/docs/sdk/overview/)
+and [authentication instructions](https://antigravity.google/docs/install/)
+also do not establish a consumer-subscription model API: their programmatic
+examples use API keys, enterprise configuration or local models. Broad claims
+about shared product sign-in are insufficient evidence for a model endpoint.
+
+**Current decision:** no supported drop-in consumer-subscription transport was
+established. Preserve the investigation and keep the provider unavailable. A
+provider-supported model interface or arrangement is needed, followed by a
+real model/tool round trip, thought-history preservation, cancellation and
+complete cost-accounting qualification. Do not replace this target with the
+native agent bridge described below or silently use API billing.
 
 ## Supported integration surface
 
@@ -42,8 +93,10 @@ we have no evidence that the proposed integration caused that error.
 ## What the real binary established
 
 The [offline probe](../tools/antigravity-probe/README.md) runs the official,
-checksum-verified Linux ARM64 CLI 1.5.11 with synthetic responses. No account or
-paid call is involved.
+checksum-verified Linux ARM64 CLI 1.5.11 and 1.5.12 with synthetic responses. No
+account or paid call is involved. The
+[1.5.12 receipt](../tools/antigravity-probe/observed-1.5.12.json) reproduces the
+same helper-usage omission on 2026-11-19.
 
 1. The binary runs in the current ARM64 gateway image.
 2. ACP initialization succeeds and advertises OAuth and API-key auth methods.
@@ -78,9 +131,10 @@ complete normalized-cost accounting. It is not a claim about actual charges
 to Google's subscription balance, and it does not prove that the OAuth
 transport behaves identically to the API transport used by the probe.
 
-## Intended execution boundary
+## Native agent alternative — outside the selected direction
 
-Keep the official CLI, sign-in state and accounting in a protected runner.
+If a native-agent integration is separately pursued, keep the official CLI,
+sign-in state and accounting in a protected runner.
 Expose a narrow MCP/ACP tool bridge to Dungeness's isolated research container.
 Harness source and generated commands must not execute in the credential-bearing
 process or mount its home directory. Trusted configuration must not load hooks,
@@ -99,6 +153,8 @@ Before enabling it:
 | Verifier policy | Approve the measured runtime and explicit provider/agent configuration after qualification |
 
 A usage fix must include helper and retry calls and identify their actual models.
+The probe now rejects even a complete aggregate token report when it covers
+multiple models without attribution; those models have different prices.
 Multiplying Carbon usage by a guessed overhead factor, treating missing usage as
 zero, or calling a partial final report “settled” would not solve the gap.
 Parsing undocumented local database internals is not currently a qualified
@@ -164,4 +220,5 @@ usage as CLI-reported and do not submit it as a fully accounted attested run.
 Carbon also has a documented Gemini API route. A separately labeled API-key
 provider can use Dungeness's metered gateway, but requires API billing and is not
 Antigravity subscription access. Do not silently substitute it for “Carbon in
-agy.” See [Gemini OpenAI compatibility](https://aistudio.google.com/docs/openai).
+agy.” The user deprioritized this route on 2026-11-19; no API provider was added.
+See [Gemini OpenAI compatibility](https://aistudio.google.com/docs/openai).

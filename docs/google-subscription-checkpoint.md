@@ -1,19 +1,62 @@
-# Google subscription work — paused
+# Google subscription work — resumed investigation
 
-Paused at the user's request on 2026-11-18. Preserve this work for resumption;
-do not merge or enable Google execution as part of the Claude/GPT changes.
+Resumed at the user's request on 2026-11-19. The target is a **drop-in
+subscription model for arbitrary harnesses**, with authentication and metering
+in Dungeness's protected gateway. The user briefly requested a separate API
+route, then deprioritized it. No API provider was added.
+
+No working subscription adapter is qualified. Do not enable Google execution or
+describe the investigation as a completed model integration.
+
+## Latest findings
+
+- Fresh discovery through the existing official CLI sign-in still exposes all
+  five ordinary Google families: 17 model/effort combinations, plus three
+  Orchestrator choices. The [new discovery receipt](../tools/antigravity-probe/observed-20261119-discovery.json)
+  contains no inference tests or account identifiers.
+- The official Linux ARM64 CLI **1.5.12** reproduces the missing-helper-usage
+  result from 1.5.11 in all completed MCP variants. The
+  [offline receipt](../tools/antigravity-probe/observed-1.5.12.json) comes from a
+  network-isolated container with a synthetic endpoint and dummy key.
+- The probe now also rejects mixed-model aggregate usage without a model
+  breakdown. Correct total tokens alone cannot price Carbon and Flash Lite
+  separately. The fixture's `expected_usage_by_model` is an independent
+  expectation, not usage reported by the CLI.
+- The official Gemini CLI source exposes a direct, structured Code Assist
+  model transport. This makes it a technical lead, but does not establish
+  Antigravity credential compatibility or Carbon entitlement. Google's current
+  [Gemini CLI FAQ](https://geminicli.com/docs/faq/) explicitly excludes
+  third-party reuse of its OAuth access. It is not a supported fallback.
+- Antigravity's documented CLI/ACP surfaces run its agent. The SDK's
+  [authentication instructions](https://antigravity.google/docs/install/)
+  document API-key, enterprise and local-model paths, without establishing a
+  consumer-subscription model endpoint for an arbitrary harness.
+
+The concrete missing interface is a supported consumer-subscription model
+transport that accepts caller-owned message/tool history and returns complete,
+model-attributed usage. A native CLI agent bridge would change the requested
+harness semantics and still has an unresolved accounting gap. Neither route is
+enabled. This is not a claim that a private protocol is technically impossible.
+
+The [transport assessment](native-antigravity.md#direct-model-transport-assessment)
+records the inspected source revision and remaining checks. No new login,
+credential extraction, live inference, VM release or manager activation was
+performed during this resumption.
 
 ## Saved branches
 
 - Dungeness: `feat/native-antigravity-carbon`, [draft PR #33](https://github.com/Layr-Labs/dungeness/pull/33).
-  The latest executable test changes are in `14b44df`.
+  The resumed branch includes current `main` through `ba38604`, the 1.5.12 probe
+  and the stricter model-attribution check.
 - Manager: `feat/native-antigravity-carbon`, commit
   [`d583f74`](https://github.com/Layr-Labs/openrsi-space-dev/commit/d583f74).
   This adds Google model choices and an authenticated, read-only subscription check.
 - Enchantment: no Google execution or VM changes were implemented.
 
-The local checkouts are under
-`/Users/bxue/Documents/enchantment/local/carbon-native/`.
+The original saved checkouts are under
+`/Users/bxue/Documents/enchantment/local/carbon-native/`. Resumed Dungeness work
+uses `/Users/bxue/.codex/worktrees/32d4/dungeness`; the original snapshots remain
+unchanged.
 `HANDOFF.md` there retains earlier investigation history.
 
 ## What works
@@ -47,7 +90,7 @@ No native execution adapter, direct subscription adapter, VM integration,
 credential handoff, attested qualification or new VM release was completed.
 Do not claim that adding the dropdown made Google runnable.
 
-## Direction when resumed
+## Integration requirements
 
 The user explicitly wants subscription access, not a substitution with separately
 billed API-key access. Use **OpenRouter reference prices** for normalized cost,
@@ -71,7 +114,9 @@ The user has not approved unknown-cost runs or relaxing attested acceptance.
 
 Google's consumer-plan restrictions on third-party access remain a separate
 provider constraint. They are not evidence that a direct adapter is technically
-impossible, or the cause of earlier account-verification errors.
+impossible, or the cause of earlier account-verification errors. Resolving the
+provider support question alone would not resolve the accounting or execution
+requirements.
 
 Sources:
 
@@ -81,7 +126,7 @@ Sources:
 - [Antigravity FAQ](https://antigravity.google/docs/faq)
 - [OpenRouter public model catalog](https://openrouter.ai/api/v1/models)
 
-## Merged work outside this pause
+## Merged work outside this investigation
 
 GPT-6.1 Terra gateway support was merged in
 [Dungeness PR #35](https://github.com/Layr-Labs/dungeness/pull/35),

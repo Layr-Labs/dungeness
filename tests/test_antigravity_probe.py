@@ -49,6 +49,24 @@ class AntigravityProbeTests(unittest.TestCase):
         self.assertFalse(result["all_observed_usage_reported"])
         self.assertTrue(self.report(mcp_calls=1)["all_observed_usage_reported"])
 
+    def test_combined_usage_cannot_price_different_models(self):
+        requests = [
+            {"model": probe.MODEL, "tools": []},
+            {"model": probe.MODEL, "tools": []},
+            {"model": "gemini-3.1-flash-lite-preview", "tools": []},
+        ]
+        final = {"event": "result", "result": {
+            "status": "SUCCESS", "usage": probe.expected_cli_usage(3),
+        }}
+        result = probe.summarize("mcp", requests, json.dumps(final), 0, False, 1)
+        self.assertTrue(result["all_observed_usage_reported"])
+        self.assertFalse(result["model_usage_attributable"])
+        self.assertEqual(result["expected_usage_by_model"], {
+            probe.MODEL: probe.expected_cli_usage(2),
+            "gemini-3.1-flash-lite-preview": probe.expected_cli_usage(1),
+        })
+        self.assertTrue(self.report(mcp_calls=1)["model_usage_attributable"])
+
     def test_mcp_fixture_records_calls_without_executing_the_command(self):
         with tempfile.TemporaryDirectory() as temporary:
             journal = Path(temporary) / "calls.jsonl"

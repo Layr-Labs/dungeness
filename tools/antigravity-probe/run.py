@@ -9,12 +9,14 @@ import tempfile
 
 
 def main():
+    source = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--archive", required=True, type=Path, help="Official archive matching cli-release.json")
+    parser.add_argument("--archive", required=True, type=Path, help="Official archive matching the selected release")
+    parser.add_argument("--release", type=Path, default=source / "cli-release.json",
+                        help="Pinned release manifest; defaults to cli-release.json")
     parser.add_argument("--image", required=True, help="Locally installed Linux ARM64 image with Python 3 and glibc")
     args = parser.parse_args()
-    source = Path(__file__).resolve().parent
-    release = json.loads((source / "cli-release.json").read_text())
+    release = json.loads(args.release.read_text())
     archive = args.archive.resolve()
     with archive.open("rb") as handle:
         digest = hashlib.file_digest(handle, "sha512").hexdigest()
@@ -71,6 +73,7 @@ def main():
         print(json.dumps(report, indent=2))
         # A completed probe can still demonstrate incompatibility.
         if (not report["probe_completed"] or not report["complete_usage_observed"]
+                or not report["model_usage_attributable"]
                 or not report["undeclared_shell_rejected"]):
             raise SystemExit(2)
 
