@@ -6,6 +6,54 @@ id: model-pricing
 # Trusted accounting prices used by the gateway for run records and USD limits.
 # Agent manifests select a provider/model but cannot supply or override prices.
 entries:
+  # General-purpose GPT 5.6+ catalog checked 2026-11-18 against each model
+  # at https://developers.openai.com/api/docs/models/ (Standard text rates).
+  - {"provider": "openai", "upstream_id": "openai/gpt-6.2-sol", "request_models": ["gpt-6.2-sol"], "text_only": true, "input_per_mtok": 2, "cached_read_per_mtok": 0.1, "cache_write_per_mtok": 2.5, "output_per_mtok": 10, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 4, "cached_read_per_mtok": 0.2, "cache_write_per_mtok": 5.0, "output_per_mtok": 15.0}}
+  - {"provider": "openai-chatgpt", "upstream_id": "openai/gpt-6.2-sol", "request_models": ["gpt-6.2-sol"], "text_only": true, "input_per_mtok": 2, "cached_read_per_mtok": 0.1, "cache_write_per_mtok": 2.5, "output_per_mtok": 10, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 4, "cached_read_per_mtok": 0.2, "cache_write_per_mtok": 5.0, "output_per_mtok": 15.0}}
+  - {"provider": "openai", "upstream_id": "openai/gpt-6.2-astra", "request_models": ["gpt-6.2-astra"], "text_only": true, "input_per_mtok": 8, "cached_read_per_mtok": 0.4, "cache_write_per_mtok": 10.0, "output_per_mtok": 40, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 16, "cached_read_per_mtok": 0.8, "cache_write_per_mtok": 20.0, "output_per_mtok": 60.0}}
+  - {"provider": "openai-chatgpt", "upstream_id": "openai/gpt-6.2-astra", "request_models": ["gpt-6.2-astra"], "text_only": true, "input_per_mtok": 8, "cached_read_per_mtok": 0.4, "cache_write_per_mtok": 10.0, "output_per_mtok": 40, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 16, "cached_read_per_mtok": 0.8, "cache_write_per_mtok": 20.0, "output_per_mtok": 60.0}}
+  - {"provider": "openai", "upstream_id": "openai/gpt-6.1-sol", "request_models": ["gpt-6.1-sol"], "text_only": true, "input_per_mtok": 2, "cached_read_per_mtok": 0.1, "cache_write_per_mtok": 2.5, "output_per_mtok": 10, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 4, "cached_read_per_mtok": 0.2, "cache_write_per_mtok": 5.0, "output_per_mtok": 15.0}}
+  - {"provider": "openai-chatgpt", "upstream_id": "openai/gpt-6.1-sol", "request_models": ["gpt-6.1-sol"], "text_only": true, "input_per_mtok": 2, "cached_read_per_mtok": 0.1, "cache_write_per_mtok": 2.5, "output_per_mtok": 10, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 4, "cached_read_per_mtok": 0.2, "cache_write_per_mtok": 5.0, "output_per_mtok": 15.0}}
+  - {"provider": "openai", "upstream_id": "openai/gpt-6-luna", "request_models": ["gpt-6-luna"], "text_only": true, "input_per_mtok": 0.1, "cached_read_per_mtok": 0.01, "cache_write_per_mtok": 0.125, "output_per_mtok": 0.5, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 0.2, "cached_read_per_mtok": 0.02, "cache_write_per_mtok": 0.25, "output_per_mtok": 0.75}}
+  - {"provider": "openai-chatgpt", "upstream_id": "openai/gpt-6-luna", "request_models": ["gpt-6-luna"], "text_only": true, "input_per_mtok": 0.1, "cached_read_per_mtok": 0.01, "cache_write_per_mtok": 0.125, "output_per_mtok": 0.5, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 0.2, "cached_read_per_mtok": 0.02, "cache_write_per_mtok": 0.25, "output_per_mtok": 0.75}}
+  - {"provider": "openai", "upstream_id": "openai/gpt-5.6-luna", "request_models": ["gpt-5.6-luna"], "text_only": true, "input_per_mtok": 0.2, "cached_read_per_mtok": 0.02, "cache_write_per_mtok": 0.25, "output_per_mtok": 1.2, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 0.4, "cached_read_per_mtok": 0.04, "cache_write_per_mtok": 0.5, "output_per_mtok": 1.7999999999999998}}
+  - {"provider": "openai-chatgpt", "upstream_id": "openai/gpt-5.6-luna", "request_models": ["gpt-5.6-luna"], "text_only": true, "input_per_mtok": 0.2, "cached_read_per_mtok": 0.02, "cache_write_per_mtok": 0.25, "output_per_mtok": 1.2, "long_context": {"threshold_input_tokens": 272000, "input_per_mtok": 0.4, "cached_read_per_mtok": 0.04, "cache_write_per_mtok": 0.5, "output_per_mtok": 1.7999999999999998}}
+
+  # https://developers.openai.com/api/docs/models/gpt-5.6-terra
+  # Standard text reference checked 2026-11-18, including cache writes and
+  # the whole-request long-context tier. ChatGPT costs are normalized.
+  - provider: openai
+    upstream_id: openai/gpt-5.6-terra
+    request_models: [gpt-5.6-terra]
+    input_per_mtok: 2.0
+    cached_read_per_mtok: 0.2
+    cache_write_per_mtok: 2.5
+    output_per_mtok: 12.0
+    text_only: true
+    long_context:
+      threshold_input_tokens: 272000
+      input_per_mtok: 4.0
+      cached_read_per_mtok: 0.4
+      cache_write_per_mtok: 5.0
+      output_per_mtok: 18.0
+    note: GPT-5.6 Terra Standard text reference; default cache retention only
+
+  - provider: openai-chatgpt
+    upstream_id: openai/gpt-5.6-terra
+    request_models: [gpt-5.6-terra]
+    input_per_mtok: 2.0
+    cached_read_per_mtok: 0.2
+    cache_write_per_mtok: 2.5
+    output_per_mtok: 12.0
+    text_only: true
+    long_context:
+      threshold_input_tokens: 272000
+      input_per_mtok: 4.0
+      cached_read_per_mtok: 0.4
+      cache_write_per_mtok: 5.0
+      output_per_mtok: 18.0
+    note: normalized GPT-5.6 Terra cost for ChatGPT access; billed USD unavailable
+
   # Standard text pricing checked 2026-11-18:
   # https://developers.openai.com/api/docs/models/gpt-6.1-terra
   # Tool calling uses Responses. Extended cache retention and service tiers

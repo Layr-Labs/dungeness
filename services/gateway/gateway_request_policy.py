@@ -424,6 +424,10 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
     model = payload.get("model")
     if not isinstance(model, str) or not model:
         raise ValueError("model must be a nonempty string")
+    if (model in {"gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra",
+                  "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna"}
+            and payload.get("prompt_cache_retention") not in (None, "in_memory", "30m")):
+        raise ValueError("This pricing catalog supports only default or 30-minute cache retention")
     if ":online" in model.lower() or "@" in model:
         raise ValueError("search-enabled model aliases and provider presets are disabled")
     if payload.get("previous_response_id") is not None or payload.get("conversation") is not None:
