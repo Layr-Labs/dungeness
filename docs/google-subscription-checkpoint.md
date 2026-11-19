@@ -5,6 +5,11 @@ subscription model for arbitrary harnesses**, with authentication and metering
 in Dungeness's protected gateway. The user briefly requested a separate API
 route, then deprioritized it. No API provider was added.
 
+**User decision, 2026-11-19:** do not use Antigravity CLI/ACP as a bridge.
+It changes the harness architecture and conflicts with Google's stated
+third-party embedding restrictions. The native bridge is rejected, not a
+fallback to pursue. Keep the existing probes as historical evidence.
+
 No working subscription adapter is qualified. Do not enable Google execution or
 describe the investigation as a completed model integration.
 
@@ -41,7 +46,10 @@ enabled. This is not a claim that a private protocol is technically impossible.
 The [transport assessment](native-antigravity.md#direct-model-transport-assessment)
 records the inspected source revision and remaining checks. No new login,
 credential extraction, live inference, VM release or manager activation was
-performed during this resumption.
+performed during this resumption. A subsequent ACP capability/session check
+reused the existing sign-in and exposed Carbon without sending a prompt. It
+did not implement a bridge or qualify tool execution; the user then explicitly
+rejected that direction.
 
 ## Saved branches
 
@@ -98,7 +106,7 @@ as in the platform's other subscription accounting. The public price snapshot
 saved alongside the probes is research input; it has not been installed as a
 trusted runtime pricing policy. Missing token usage must not become a zero cost.
 
-Do not assume the complete Antigravity CLI must be the model backend. The
+Do not use the complete Antigravity CLI as the model backend. The
 existing GPT subscription adapter sends requests directly through the protected
 gateway using the local Codex login, and meters provider response usage.
 Investigate an analogous Google adapter first. Google's open-source Gemini CLI

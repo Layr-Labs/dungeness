@@ -1,5 +1,9 @@
 # Native Antigravity qualification probe
 
+The user rejected using Antigravity CLI/ACP as a harness bridge on 2026-11-19.
+These probes and receipts are retained as investigation evidence, not an
+implementation path. See the [current decision](../../docs/google-subscription-checkpoint.md).
+
 This is an operator experiment, not an enabled model provider. It tests Google's
 unmodified Linux ARM64 `agy` CLI against synthetic Gemini responses. It does not
 use subscription credentials, call a live model, or establish attestation

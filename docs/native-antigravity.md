@@ -2,7 +2,8 @@
 
 Status: subscription investigation resumed on 2026-11-19; no runnable provider.
 The requested target is a drop-in model for arbitrary harnesses. The independent
-API-key route is deprioritized.
+API-key route is deprioritized. The user explicitly rejected an Antigravity
+CLI/ACP bridge on 2026-11-19; do not pursue it as a fallback.
 
 ## Direct model transport assessment
 
@@ -85,8 +86,8 @@ redistribution, or every proposed embedding.
 Google's current [FAQ](https://antigravity.google/docs/faq) is more explicit:
 headless mode is intended for direct scripting and CI, while wrapping `agy`
 inside third-party coding agents or applications is unsupported under consumer
-plans. The proposed OpenRSI embedding needs a provider-supported arrangement
-before rollout. A successful direct CLI test does not establish that arrangement.
+plans. The user rejected the proposed OpenRSI embedding. A successful direct
+CLI test does not establish a provider-supported arrangement.
 This is separate from the account-verification error observed during sign-in;
 we have no evidence that the proposed integration caused that error.
 
@@ -131,26 +132,18 @@ complete normalized-cost accounting. It is not a claim about actual charges
 to Google's subscription balance, and it does not prove that the OAuth
 transport behaves identically to the API transport used by the probe.
 
-## Native agent alternative — outside the selected direction
+## Rejected native agent bridge
 
-If a native-agent integration is separately pursued, keep the official CLI,
-sign-in state and accounting in a protected runner.
-Expose a narrow MCP/ACP tool bridge to Dungeness's isolated research container.
-Harness source and generated commands must not execute in the credential-bearing
-process or mount its home directory. Trusted configuration must not load hooks,
-plugins or MCP servers from the harness's writable workspace.
+The user explicitly rejected wrapping arbitrary harnesses through Antigravity
+CLI/ACP on 2026-11-19. It introduces Google's agent loop and conflicts with
+Google's stated third-party embedding restrictions. This approach is not an
+implementation plan or fallback.
 
-This is a native Antigravity agent integration, not simply another model name
-for arbitrary OpenAI-compatible harness clients.
-
-Before enabling it:
-
-| Component | Required change |
-| --- | --- |
-| Dungeness | Native CLI lifecycle and tool bridge; complete trusted usage source; budget admission/cancellation; credential isolation and hostile-workspace tests |
-| VM | Pin the qualified CLI and runner; enforce known provider egress; provision official sign-in securely; retain sealed result export; qualify and publish the new image |
-| Manager | Distinguish native agent selection from a generic model route; show account/setup status; select Carbon effort; enable only with a compatible runtime |
-| Verifier policy | Approve the measured runtime and explicit provider/agent configuration after qualification |
+A capability/session check with the signed-in official Mac CLI exposed Carbon
+and the other available models. It sent no inference prompt and established no
+tool round trip or accounting qualification. No bridge was added to Dungeness.
+Retain the existing native probes and receipts as historical evidence; further
+work must respect the direct-model architecture.
 
 A usage fix must include helper and retry calls and identify their actual models.
 The probe now rejects even a complete aggregate token report when it covers
