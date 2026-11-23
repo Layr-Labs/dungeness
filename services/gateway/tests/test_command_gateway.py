@@ -153,7 +153,7 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
                 await runtime.client.aclose()
 
     def test_ambiguous_errors_never_become_zero_cost_receipts(self):
-        from gateway_runtime import rejected_before_generation
+        from gateway_runtime import pre_generation_rejection
         error = {"error": {"type": "invalid_request_error", "message": "invalid"}}
         for status, body, mime in (
             (200, error, "application/json"), (500, error, "application/json"),
@@ -162,7 +162,7 @@ class CommandGatewayTests(unittest.IsolatedAsyncioTestCase):
             (400, error, "text/event-stream"),
         ):
             with self.subTest(status=status, body=body):
-                self.assertFalse(rejected_before_generation(json.dumps(body).encode(), mime, status))
+                self.assertFalse(pre_generation_rejection(json.dumps(body).encode(), mime, status, "openai"))
 
     async def test_sdk_chat_clients_use_api_and_new_catalog_model_with_trusted_prices(self):
         """No Codex client, provider-name spoofing, or model-specific agent."""

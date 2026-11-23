@@ -100,20 +100,47 @@ def transport_failure_category(error: BaseException) -> str:
     return "transport_failure_unknown"
 
 
-def rejected_before_generation(
-    body: bytes, content_type: str, http_status: int | None,
-) -> bool:
-    """Recognize an explicit input-validation rejection, never a missing receipt."""
+def pre_generation_rejection(
+    body: bytes, content_type: str, http_status: int | None, provider: str,
+) -> str | None:
+    """Recognize complete no-generation errors, not arbitrary missing receipts.
+
+    Anthropic's Messages envelope is shared by API and subscription auth. Other
+    routes (especially OpenRouter billing) need their own evidence; HTTP status
+    alone never proves that generation or a charge did not occur.
+    """
     mime = content_type.partition(";")[0].strip().lower()
-    if http_status != 400 or mime != "application/json":
-        return False
+    if http_status not in (400, 429) or mime != "application/json":
+        return None
     try:
         document = json.loads(body)
     except (ValueError, UnicodeError):
-        return False
-    return (isinstance(document, dict) and set(document) == {"error"}
-            and isinstance(document["error"], dict)
-            and document["error"].get("type") == "invalid_request_error")
+        return None
+    if not isinstance(document, dict) or not isinstance(document.get("error"), dict):
+        return None
+    error = document["error"]
+    # Retain the existing explicit input-validation rejection contract.
+    if http_status == 400 and set(document) == {"error"} and error.get("type") == "invalid_request_error":
+        return "provider_invalid_request"
+    if provider not in ("anthropic", "claude-subscription"):
+        return None
+    if (set(document) - {"type", "error", "request_id"}
+            or document.get("type", "error") != "error"
+            or not isinstance(document.get("request_id", ""), str)
+            or set(error) - {"type", "message", "details"}
+            or not isinstance(error.get("message"), str)):
+        return None
+    details = error.get("details", {})
+    if not isinstance(details, dict) or set(details) - {"error_code"}:
+        return None
+    if http_status == 400 and error.get("type") == "invalid_request_error" and not details:
+        return "provider_invalid_request"
+    if http_status == 429 and error.get("type") == "rate_limit_error":
+        if not details:
+            return "provider_rate_limited"
+        if details == {"error_code": "enforced_spend_limit_reached"}:
+            return "provider_usage_limit_reached"
+    return None
 
 
 def trusted_model_proxy():
@@ -276,6 +303,11 @@ class Gateway:
             if finalized:
                 return
             finalized = True
+            # Classify complete rejections before looking for token receipts.
+            # Interrupted streams/bodies cannot enter this branch.
+            rejection_code = (pre_generation_rejection(
+                response_body, content_type, upstream_status, provider)
+                if status == "provider_error" else None)
             usage = extract(response_body, content_type)
             accounting_basis = "provider_usage" if usage else "unavailable"
             if usage and request_pricing is not None:
@@ -293,13 +325,14 @@ class Gateway:
             if not usage and getattr(request.state, "transport_not_sent", False):
                 usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
                 accounting_basis = "transport_not_sent"
-            if (not usage and status == "provider_error"
-                    and rejected_before_generation(response_body, content_type, upstream_status)):
+            if not usage and rejection_code:
                 # A rejected input did not generate tokens. Successful,
                 # interrupted, and ambiguous error responses still fail closed.
                 usage = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0,
                          "cache_write_input_tokens": 0, "total_tokens": 0}
-                accounting_basis = "input_rejected_before_generation"
+                accounting_basis = ("input_rejected_before_generation"
+                                    if rejection_code == "provider_invalid_request"
+                                    else "provider_rejected_before_generation")
             # Charge the token budget using the active tier's relative cache
             # rates. USD accounting below remains the exact stopping criterion.
             billed_tokens = request_budget_tokens(usage, request_pricing)
@@ -691,7 +724,13 @@ class Gateway:
                 await close_upstream(upstream)
             await finalize(bytes(response_body), content_type)
             if not upstream.is_success:
-                return safe_provider_error(upstream.status_code, request_id, accounting_complete=bool(usage) and not self.ledger.model_accounting_incomplete)
+                return safe_provider_error(
+                    upstream.status_code, request_id,
+                    accounting_complete=bool(usage) and not self.ledger.model_accounting_incomplete,
+                    retry_after=upstream.headers.get("retry-after"),
+                    usage_limit_reached=pre_generation_rejection(
+                        bytes(response_body), content_type, upstream.status_code, provider)
+                        == "provider_usage_limit_reached")
             return Response(bytes(response_body), status_code=upstream.status_code,
                             headers=response_headers)
         except BaseException as error:

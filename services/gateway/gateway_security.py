@@ -62,23 +62,34 @@ class SecretFilter:
         return b"".join(output)
 
 
-def safe_provider_error(status, request_id, *, accounting_complete=False):
+def safe_provider_error(status, request_id, *, accounting_complete=False,
+                        retry_after=None, usage_limit_reached=False):
     code = {
         400: "provider_invalid_request", 401: "provider_authentication_failed",
         403: "provider_access_denied", 404: "provider_model_unavailable",
         429: "provider_rate_limited",
     }.get(status, "provider_unavailable" if status >= 500 else "provider_request_failed")
+    if usage_limit_reached:
+        code = "provider_usage_limit_reached"
     recovery_code = code if accounting_complete else "provider_accounting_incomplete"
-    details = {**recovery(recovery_code, retryable=status in (408, 429, 500, 502, 503, 504),
-                         action="check_accounting" if not accounting_complete else None),
+    details = {**recovery(recovery_code, retryable=not usage_limit_reached and status in (408, 429, 500, 502, 503, 504),
+                         action=("check_accounting" if not accounting_complete else
+                                 "check_provider_limits" if usage_limit_reached else None)),
                "recovery_code": recovery_code,
                "accounting_complete": accounting_complete, "upstream_request_sent": True}
+    headers = {"x-should-retry": "true" if details["retryable"] else "false"}
+    # Only a bounded integer delay, never arbitrary upstream header content.
+    # Do not shorten a provider cooldown: clients may stop at their deadline.
+    if (details["retryable"] and isinstance(retry_after, str)
+            and re.fullmatch(r"[0-9]{1,7}", retry_after)
+            and int(retry_after) <= 604800):
+        headers["retry-after"] = str(int(retry_after))
     return JSONResponse({"error": {
         "code": code, "message": "The model provider rejected or could not complete the request.",
         "request_id": request_id, "upstream_status": status,
         **details,
     }}, status_code=status if 400 <= status <= 599 else 502,
-        headers={"x-should-retry": "true" if details["retryable"] else "false"})
+        headers=headers)
 
 
 def admission_error(code, status, *, retryable=False, **details):

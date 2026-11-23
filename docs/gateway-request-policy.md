@@ -267,6 +267,19 @@ are nonfatal but **not** permission to resend an unchanged request. Bound all
 retries by attempts and the run deadline. The gateway never retries inference
 on the harness's behalf.
 
+For native Anthropic API and Claude subscription routes, a complete JSON
+`rate_limit_error` rejection before generation settles at zero tokens/credits;
+it does not make earlier accounting incomplete. HTTP 429 alone is insufficient:
+unknown error bodies, interrupted responses and other providers still need
+accounting evidence. A valid numeric provider `Retry-After` (up to seven days)
+is forwarded without shortening it. Honor that cooldown within the run deadline.
+An explicit provider `enforced_spend_limit_reached` returns
+`provider_usage_limit_reached`, `retryable: false`, and `check_provider_limits`;
+waiting a few seconds will not restore that provider allowance. Failed attempts
+still count toward the request limit. Already reported usage is always retained.
+See [Anthropic errors](https://platform.claude.com/docs/en/api/errors) and
+[rate limits](https://platform.claude.com/docs/en/api/rate-limits).
+
 Current model input is text and supported local-tool history only. **Image,
 audio and document input blocks are unsupported**, including locally rendered
 PDF pages and inline images. Assigned PDFs can still be read locally: extract
