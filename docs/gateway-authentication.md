@@ -22,26 +22,20 @@ Existing IDs and public interfaces remain unchanged.
 | Anthropic API — API key | `anthropic` | Anthropic API key |
 | Claude — account access | `claude-subscription` | Claude access token plus an explicit future expiry |
 | OpenRouter API — API key | `openrouter` | OpenRouter API key; models from multiple vendors |
-| Grok CLI service — account access | `grok-subscription` | Local Grok access token plus its actual expiry |
-| MiniMax API — plan key | `minimax-subscription` | Local MiniMax Coding/Token Plan key |
 
 These names describe access mechanisms. Account entitlement and upstream billing
 still determine which models and balances are available.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
-Kimi Code is not a registered route in this runtime. A Grok model accessed through OpenRouter uses the OpenRouter API
-route and credential, not a Grok subscription credential.
-
-The checked-in `services/gateway/providers.json` supplies the Grok and MiniMax
-routes using the existing Chat Completions protocol. Both use reference credits,
-not cash billing. See [local subscription access](local-subscriptions.md).
+The checked-in [extension registry](../services/gateway/providers.json) is empty.
 Operators can add compatible routes through that trusted registry; harnesses
 cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
 remains named `provider` for compatibility.
 
-`services/gateway/model_access.py` is the shared access-route registry. It combines
-built-in definitions with the existing `providers.json` profiles. The compiler
+[`services/gateway/model-access.json`](../services/gateway/model-access.json) holds
+the maintained route definitions. `model_access.py` loads that validated data and
+combines it with existing `providers.json` extension profiles. The compiler
 reads each route's credential requirements from its authentication recipe;
 the gateway uses the same definition for the destination, operations, model
 mapping, and usage parser. The registry contains names and recipes, never secret
@@ -77,7 +71,8 @@ has no expiry field: the caller must provide valid access, and upstream rejectio
 stops the run's model access. The resolver has no provider-name branches and does
 not use billing status to choose an authentication mechanism.
 
-Built-in recipes live beside the provider destinations in `model_access.py`.
+Recipes live beside the endpoints in `model-access.json`; they contain input
+names and field paths, never credentials.
 They preserve the existing operator input names. The launcher reads those
 inputs from the run's env file (taking precedence over host values) and stages
 only the required credentials in a private JSON file. Generated containers never

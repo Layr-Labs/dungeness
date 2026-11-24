@@ -37,7 +37,8 @@ This is a short handoff to a coding agent:
 
 ## Selecting models
 
-The trusted [route registry](../services/gateway/model_access.py) defines supported
+Model names in this guide are examples; maintained configuration lives in code.
+The trusted [route configuration](../services/gateway/model-access.json) defines supported
 protocols and endpoints. The installed [pricing schedule](../services/gateway/pricing.yaml)
 lists exact `provider`, `upstream_id` and `request_models` combinations and their
 reference rates. Use those sources rather than maintaining a separate model list
@@ -132,6 +133,16 @@ that unwinds Python. The Dungeness launcher handles SIGTERM and stops containers
 before closing it. SIGKILL or host failure cannot guarantee cleanup. Existing
 compiled renders without file-input metadata retain their original file mounts;
 recompile to receive managed file snapshots.
+
+## Where endpoints are maintained
+
+Edit `upstream_default` in [model-access.json](../services/gateway/model-access.json).
+This file also holds operations, authentication recipes and usage-parser names.
+[access_config.py](../services/gateway/access_config.py) validates the data;
+[model_access.py](../services/gateway/model_access.py) supplies the shared interface. Reviewed extensions use `base_url` in
+[providers.json](../services/gateway/providers.json), which is empty by default.
+The gateway appends an allowed API operation to this fixed URL and rejects
+conflicting environment overrides. A harness cannot choose the upstream endpoint.
 
 ## Adding an access route
 

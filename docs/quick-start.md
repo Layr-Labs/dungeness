@@ -149,8 +149,9 @@ toward the request limit. HTTP 422 responses, ambiguous errors, and successful
 responses without usage remain accounting failures and block subsequent model
 calls. No provider-name exception infers free usage from a plain-text error.
 
-`services/gateway/model_access.py` defines built-in routes;
-`services/gateway/providers.json` currently adds Grok and MiniMax account routes.
+[`services/gateway/model-access.json`](../services/gateway/model-access.json) defines
+the standard routes;
+`services/gateway/providers.json` is an empty extension registry by default.
 Operators can add reviewed profiles for compatible upstreams before compiling a
 run and building its gateway image. Profiles define the fixed HTTPS endpoint,
 protocol routes, credential injection and reference model mappings; the gateway

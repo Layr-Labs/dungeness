@@ -34,12 +34,13 @@ class RuntimeDistributionTests(unittest.TestCase):
             "docs/README.md", "script/README.md", "tools/README.md",
             "docs/quick-start.md", "docs/evaluation-events.md",
             "services/gateway/gateway.py", ".env.example",
+            "services/gateway/model-access.json", "services/gateway/access_config.py",
             "runtime-contract.json", "pyproject.toml", "uv.lock",
             "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
             "docs/problem-service.md", "docs/runtime-contract.md",
             "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
             "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
-            "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
+            "tools/validate-model-request.py",
             "tools/transcripts/render_gateway_transcript.py", "tools/transcripts/serve_gateway_transcripts.py",
         ):
             self.write(path, f"runtime {path}\n")
@@ -87,6 +88,8 @@ class RuntimeDistributionTests(unittest.TestCase):
             names = archive.getnames()
             self.assertIn("dungeness-runtime/.env.example", names)
             self.assertIn("dungeness-runtime/runtime-contract.json", names)
+            self.assertIn("dungeness-runtime/services/gateway/model-access.json", names)
+            self.assertIn("dungeness-runtime/services/gateway/access_config.py", names)
             self.assertIn("dungeness-runtime/src/dungeness/execution/harbor.py", names)
             self.assertIn("dungeness-runtime/src/dungeness/execution/runner.py", names)
             self.assertIn("dungeness-runtime/src/dungeness/execution/environments.py", names)
@@ -100,7 +103,7 @@ class RuntimeDistributionTests(unittest.TestCase):
             for path in (
                 "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
                 "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
-                "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
+                "tools/validate-model-request.py",
             ):
                 self.assertIn(f"dungeness-runtime/{path}", names)
             self.assertNotIn("dungeness-runtime/docs/local-notes.md", names)

@@ -78,8 +78,8 @@ See [trusted scaffolds](scaffolds.md).
 `credential_access.py` owns the trusted launcher's explicit credential preparation
 API. `execution/credentials.py` adapts compiled Compose metadata and env-file
 precedence to that API. Neither performs login, refresh or account discovery.
-The shared registry under `services/gateway/model_access.py` defines access routes
-and authentication recipes; the gateway applies them to inference requests.
+The shared `model_access.py` interface loads access routes and authentication
+recipes from `services/gateway/model-access.json`; the gateway applies them to inference requests.
 See [integration](integrating-model-access.md) before adding an access route.
 
 ## Making changes

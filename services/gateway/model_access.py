@@ -13,94 +13,14 @@ from gateway_auth import profile_authentication
 from provider_profiles import PROFILES
 
 
-OPENAI_ROUTES = {"responses", "chat/completions", "embeddings", "models"}
-ANTHROPIC_ROUTES = {"messages", "messages/count_tokens"}
-OPENROUTER_ROUTES = {"responses", "chat/completions", "completions", "messages", "models"}
-CHATGPT_ROUTES = {"responses", "responses/compact"}
+# Configuration is data; retain the historical exports for existing callers.
+from access_config import ACCESS_ROUTES
 
-MODEL_ACCESS = {
-    "openai": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENAI_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENAI_ROUTES,
-        "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.openai.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": ("openai-beta", "idempotency-key"),
-        "usage_parser": "openai",
-    },
-    "anthropic": {
-        "authentication": {"sources": [{"headers": {
-            "x-api-key": {"env": "ANTHROPIC_API_KEY"},
-            "anthropic-version": {"env": "ANTHROPIC_VERSION", "default": "2023-06-01"},
-        }}]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "usage_parser": "anthropic",
-    },
-    "claude-subscription": {
-        "authentication": {"sources": [{
-            "expires_at": {"env": "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
-            "headers": {
-                "authorization": {"env": "CLAUDE_ACCESS_TOKEN", "prefix": "Bearer "},
-                "anthropic-version": {"literal": "2023-06-01"},
-            },
-        }]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": False,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "usage_parser": "anthropic",
-    },
-    "openrouter": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENROUTER_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENROUTER_ROUTES,
-        "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
-        "upstream_default": "https://openrouter.ai/api/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        # OpenRouter serves both OpenAI and Anthropic operations.
-        "passthrough": ("http-referer", "x-title", "openai-beta",
-                        "anthropic-beta", "anthropic-version"),
-        "usage_parser": "openai",
-    },
-    "openai-chatgpt": {
-        "authentication": {"sources": [{
-            "file_env": "DUNGENESS_CHATGPT_AUTH_FILE",
-            "host_env": "DUNGENESS_CODEX_AUTH_FILE",
-            "mount_path": "/run/dungeness/auth.json",
-            "headers": {
-                "authorization": {"path": ["tokens", "access_token"], "prefix": "Bearer "},
-                "chatgpt-account-id": {"path": ["tokens", "account_id"]},
-            },
-        }]},
-        "gateway_route": "chatgpt",
-        "routes": CHATGPT_ROUTES,
-        "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
-        "upstream_default": "https://chatgpt.com/backend-api/codex",
-        "auth": "gateway_secret",
-        "billed": False,
-        # Trusted account headers override any client-supplied metadata.
-        "passthrough": (
-            "chatgpt-account-id", "originator", "version", "session_id",
-            "session-id", "thread-id", "conversation_id", "x-openai-subagent",
-            "x-client-request-id", "x-codex-turn-metadata", "x-codex-installation-id",
-            "x-oai-attestation", "x-responsesapi-include-timing", "traceparent",
-            "user-agent", "openai-beta",
-        ),
-        "usage_parser": "openai",
-    },
-}
+MODEL_ACCESS = dict(ACCESS_ROUTES)
+OPENAI_ROUTES = MODEL_ACCESS["openai"]["routes"]
+ANTHROPIC_ROUTES = MODEL_ACCESS["anthropic"]["routes"]
+OPENROUTER_ROUTES = MODEL_ACCESS["openrouter"]["routes"]
+CHATGPT_ROUTES = MODEL_ACCESS["openai-chatgpt"]["routes"]
 
 
 def configured_provider(name, profile):

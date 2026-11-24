@@ -9,7 +9,7 @@ tool_search_output text input_text output_text thinking redacted_thinking tool_u
 tool_result refusal input_image image input_audio audio document input_file file
 server_tool_use web_search_call file_search_call mcp_call'''.split())
 PROVIDERS = frozenset(('openai', 'openai-chatgpt', 'anthropic', 'claude-subscription',
-                       'openrouter', 'grok-subscription', 'minimax', 'gemini'))
+                       'openrouter'))
 OPERATIONS = frozenset(('responses', 'responses/compact', 'chat/completions',
                         'messages', 'messages/count_tokens'))
 

@@ -8,7 +8,9 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-BUILTINS = frozenset({'openai', 'openai-chatgpt', 'anthropic', 'claude-subscription', 'openrouter'})
+from access_config import ACCESS_ROUTES
+
+BUILTINS = frozenset(ACCESS_ROUTES)
 PROFILE_PATH = Path(__file__).with_name('providers.json')
 
 

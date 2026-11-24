@@ -12,6 +12,7 @@ COPY gateway.py /app/gateway.py
 COPY gateway_errors.py /app/gateway_errors.py
 COPY gateway_models.py /app/gateway_models.py
 COPY model_access.py /app/model_access.py
+COPY access_config.py model-access.json /app/
 COPY gateway_auth.py /app/gateway_auth.py
 COPY gateway_security.py /app/gateway_security.py
 COPY provider_profiles.py providers.json /app/

@@ -14,8 +14,6 @@ These are the account routes bundled in this revision:
 | --- | --- | --- |
 | `openai-chatgpt` | `DUNGENESS_CODEX_AUTH_FILE`: private JSON with `tokens.access_token` and `tokens.account_id` | Responses and compaction |
 | `claude-subscription` | `TESTBED_CLAUDE_ACCESS_TOKEN` and `TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT` | Messages and token counting |
-| `grok-subscription` | `TESTBED_GROK_SUBSCRIPTION_TOKEN` and `TESTBED_GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT` | Text Chat Completions |
-| `minimax-subscription` | `TESTBED_MINIMAX_CODING_PLAN_KEY` | Text Chat Completions |
 
 Use the actual expiry supplied by the login flow; do not invent a future expiry
 to make a token pass validation. Expiry is checked only where the recipe declares
@@ -23,9 +21,6 @@ it. ChatGPT's recipe has no expiry field: the caller supplies valid access and
 upstream authentication errors stop model access. No route silently refreshes,
 chooses another account or falls back to an API key.
 
-A MiniMax billing key must not be relabeled as a plan key; upstream account
-configuration determines which balance is consumed. Dungeness does not infer
-remaining subscription allowance from the credential or route name.
 Google subscription access and Kimi Code are not registered in this revision.
 Adding either requires a reviewed integration and separate account validation.
 
@@ -56,10 +51,6 @@ route/model combinations and their normalized comparison rates. A caller may
 install another reviewed, pinned schedule. The actual schedule used must be
 recorded with the run. A normalized dollar budget is not a subscription cash bill
 or a guarantee about the provider's remaining allowance.
-
-The [2026-10-30 JSON snapshot](examples/local-subscription-pricing-20261030.json)
-is retained for reproducing older experiments; it is not a live catalog or the
-current default. Use the installed schedule when validating a new request.
 
 Synthetic tests cover protocol compatibility, expiry, no fallback, accounting
 and credential exclusion. Live account validation and qualification of the

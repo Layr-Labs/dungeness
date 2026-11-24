@@ -24,8 +24,6 @@ class ModelAccessContractTests(unittest.TestCase):
             "claude-subscription": {"CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
             "openrouter": {"OPENROUTER_API_KEY"},
             "openai-chatgpt": set(),
-            "grok-subscription": {"GROK_SUBSCRIPTION_TOKEN", "GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT"},
-            "minimax-subscription": {"MINIMAX_CODING_PLAN_KEY"},
         }
         for provider, keys in expected.items():
             with self.subTest(provider=provider):

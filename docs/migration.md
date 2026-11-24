@@ -47,6 +47,14 @@ Direct integrations keep the preparation context open until every container
 using its mounts has stopped. See the
 [launcher guide](integrating-model-access.md#integrating-a-trusted-launcher).
 
+## Route configuration
+
+Endpoints and authentication recipes now live in
+[`services/gateway/model-access.json`](../services/gateway/model-access.json).
+Package this file and its loader with the runtime; there is no embedded fallback
+when it is absent or invalid. Existing `providers.json` extension profiles remain
+supported. The default extension registry is empty.
+
 ## Fixed upstream destinations
 
 The trusted registry determines each upstream. Legacy `*_UPSTREAM_BASE_URL`
@@ -58,6 +66,13 @@ Older smoke tests that redirect `OPENAI_UPSTREAM_BASE_URL` to a local mock must
 be migrated. Use a disposable test runtime with a synthetic registry destination,
 as the Docker checks do. Never re-enable arbitrary destinations in production
 just to make an old test pass. Keep fixture changes out of release artifacts.
+
+## Removed bundled routes
+
+Grok and MiniMax access routes and reference prices have been removed, including
+their OpenRouter model entries. Existing runs requiring them need their previous
+runtime pin; this revision does not fall back to another model or account.
+OpenAI API, ChatGPT, Anthropic API, Claude account access and OpenRouter remain.
 
 ## Retired interfaces
 

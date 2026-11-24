@@ -64,8 +64,10 @@ for permissions and cleanup.
 
 ## Access routes and authentication
 
-`gateway/model_access.py` combines built-in routes with the trusted
-`gateway/providers.json` profiles. The compiler and gateway use this same registry.
+[`gateway/model-access.json`](gateway/model-access.json) holds endpoints,
+operations and authentication recipes. `gateway/model_access.py` loads that
+validated configuration and combines it with the trusted `gateway/providers.json`
+extension profiles. The compiler and gateway use this same registry.
 Each definition supplies its fixed upstream URL, supported operations,
 authentication recipe and usage interpretation.
 
@@ -131,7 +133,8 @@ publication and leaderboard policy belong to the enclosing platform.
 | Module | Responsibility |
 | --- | --- |
 | `gateway.py` | Stable HTTP entrypoint, middleware, routes and lifecycle. |
-| `model_access.py`, `provider_profiles.py` | Trusted route definitions and profile validation. |
+| `model-access.json` | Maintained endpoints, operations and authentication recipes. |
+| `access_config.py`, `model_access.py`, `provider_profiles.py` | Configuration validation, shared interface and legacy profile loading. |
 | `gateway_auth.py` | Private credential reads and authentication recipes. |
 | `gateway_models.py` | Protocol/model mapping, response interpretation and usage extraction. |
 | `gateway_request_policy.py`, `gateway_reservations.py` | Request validation and admission estimates. |
