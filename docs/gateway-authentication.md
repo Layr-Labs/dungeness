@@ -33,6 +33,27 @@ cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
 remains named `provider` for compatibility.
 
+`services/gateway/model_access.py` is the shared connection registry. It combines
+built-in definitions with the existing `providers.json` profiles. The compiler
+reads each connection's credential requirements from its authentication recipe;
+the gateway uses the same definition for the destination, operations, model
+mapping, and usage parser. The registry contains names and recipes, never secret
+values. Public provider IDs, gateway URLs, and credential input names are unchanged.
+
+Destinations are fixed by that registry. Legacy `*_UPSTREAM_BASE_URL` settings
+(including `CHATGPT_UPSTREAM_BASE_URL`) are accepted only when they match the
+registered URL, with an optional trailing slash. A different or empty value in
+the gateway environment prevents startup before credential use or provider
+traffic. Compiled runs pass the selected connections' settings through for this
+validation; requests always use the registry URL. Before upgrading a deployment,
+check its endpoint settings and remove obsolete overrides. A supported alternate
+destination requires a reviewed registry change, not a run parameter or proxy URL.
+
+The Mac runtime's operator-configured `DUNGENESS_MODEL_HTTPS_PROXY` is unchanged:
+it is an HTTP CONNECT transport for a TLS connection to the fixed provider.
+Certificate verification and redirect rejection remain enabled. It does not
+select a replacement model API endpoint.
+
 ## Authentication recipes
 
 `services/gateway/gateway_auth.py` resolves authentication recipes. Recipes
@@ -41,7 +62,7 @@ credential JSON file, or a fixed value. An optional expiry source is checked
 before request admission. The resolver has no provider-name branches and does
 not use billing status to choose an authentication mechanism.
 
-Built-in recipes live beside the provider destinations in `gateway_models.py`.
+Built-in recipes live beside the provider destinations in `model_access.py`.
 They preserve the existing operator input names. The launcher reads those
 inputs from the run's env file (taking precedence over host values) and stages
 only the required credentials in a private JSON file. Generated containers never
@@ -92,6 +113,11 @@ resolved authentication values.
 Usage parsing, pricing, allowed models, request restrictions, and budget
 enforcement remain separate from authentication. Streaming requests still
 request usage where required. The harness owns reasoning preferences.
+
+This registry refactor adds no credential discovery, subscription login, vault,
+or execution backend. Local private-file staging remains in place. Subscription
+eligibility and actual provider billing are not inferred from a credential's
+format or the route's name; the existing experiment-accounting behavior is kept.
 
 ## External web access
 

@@ -136,6 +136,7 @@ class ModuleLayoutTests(unittest.TestCase):
             "gateway.py",
             "gateway_errors.py",
             "gateway_models.py",
+            "model_access.py",
             "gateway_auth.py",
             "gateway_request_policy.py",
             "gateway_history_diagnostics.py",

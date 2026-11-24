@@ -42,7 +42,7 @@ ADAPTERS_ROOT = REPOSITORY_ROOT / "adapters"
 RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
 sys.path.insert(0, str(GATEWAY_ROOT))
-from provider_profiles import PROFILES as CONFIGURED_PROVIDERS
+from model_access import MODEL_ACCESS, credential_names, credential_files, gateway_base_url
 PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
@@ -988,10 +988,8 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
         if identity in seen:
             raise ValueError("duplicate allowed model")
         seen.add(identity)
-        route = "chatgpt" if provider == "openai-chatgpt" else provider
-        suffix = "" if model["api"] == "anthropic-messages" else "/v1"
         result.append({**model, "name": model["request_model"],
-                       "base_url": f"http://gateway:8080/model/{route}{suffix}"})
+                       "base_url": gateway_base_url(provider, model["api"])})
     return result
 
 
@@ -1016,13 +1014,7 @@ def agent_provider(agent: dict[str, Any]) -> str:
 
     model = agent_model(agent)
     provider = model.get("provider")
-    if provider in CONFIGURED_PROVIDERS or provider in {
-        "anthropic",
-        "claude-subscription",
-        "openai",
-        "openai-chatgpt",
-        "openrouter",
-    }:
+    if provider in MODEL_ACCESS:
         return provider
     raise ValueError(f"unsupported model provider: {provider!r}")
 
@@ -1443,40 +1435,17 @@ def build_compose(
         main_depends["dev-scorer"] = {"condition": "service_healthy"}
         main_environment["DEV_SCORER_URL"] = f"http://dev-scorer:{dev_scorer['port']}"
 
-    # Inject the real provider credential into the gateway only (never the agent),
-    # via a differently named host variable so Harbor's agent adapter can never
-    # receive it as the agent's own key.
     if provider == "openai-chatgpt" and command_policy is None:
         raise ValueError("ChatGPT access requires command model_access; native subscription agents are retired.")
-    elif provider in CONFIGURED_PROVIDERS:
-        profile = CONFIGURED_PROVIDERS[provider]
-        key = profile['credential_env']
-        provider_secret_env = {key: '${TESTBED_' + key + ':?provider access required}'}
-        for env in profile.get('credential_headers', {}).values():
-            provider_secret_env[env] = '${TESTBED_' + env + ':?provider metadata required}'
-        if profile['credential_kind'] == 'session-token':
-            provider_secret_env[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
-    elif provider == "claude-subscription":
-        provider_secret_env = {
-            "CLAUDE_ACCESS_TOKEN": "${TESTBED_CLAUDE_ACCESS_TOKEN:?Claude access required}",
-            "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "${TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT:?Claude expiry required}",
-            "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL": "${CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL:-https://api.anthropic.com/v1}",
-        }
-    elif provider == "anthropic":
-        provider_secret_env = {
-            "ANTHROPIC_API_KEY": "${TESTBED_ANTHROPIC_API_KEY:?TESTBED_ANTHROPIC_API_KEY is required}",
-            "ANTHROPIC_UPSTREAM_BASE_URL": "${ANTHROPIC_UPSTREAM_BASE_URL:-https://api.anthropic.com/v1}",
-        }
-    elif provider == "openrouter":
-        provider_secret_env = {
-            "OPENROUTER_API_KEY": "${TESTBED_OPENROUTER_API_KEY:?TESTBED_OPENROUTER_API_KEY is required}",
-            "OPENROUTER_UPSTREAM_BASE_URL": "${OPENROUTER_UPSTREAM_BASE_URL:-https://openrouter.ai/api/v1}",
-        }
-    else:
-        provider_secret_env = {
-            "OPENAI_API_KEY": "${TESTBED_OPENAI_API_KEY:?TESTBED_OPENAI_API_KEY is required}",
-            "OPENAI_UPSTREAM_BASE_URL": "${OPENAI_UPSTREAM_BASE_URL:-https://api.openai.com/v1}",
-        }
+    providers = {model["provider"] for model in command_policy["models"]} if command_policy else {provider}
+    provider_secret_env = {}
+    for name in sorted(providers):
+        access = MODEL_ACCESS[name]
+        for key in sorted(credential_names(access)):
+            provider_secret_env[key] = "${TESTBED_" + key + ":?provider access required}"
+        # Legacy variables are passed only for validation, never URL selection.
+        variable = access["upstream_env"]
+        provider_secret_env[variable] = "${" + variable + ":-" + access["upstream_default"] + "}"
 
     # The gateway resolves trusted pricing from the actual provider/model in
     # each request. Compose supplies only the optional USD cap.
@@ -1585,7 +1554,6 @@ def build_compose(
         main_environment["DUNGENESS_PROBLEM_URL"] = "http://gateway:8080/task"
     if command_policy is not None:
         models = command_policy["models"]
-        providers = {model["provider"] for model in models}
         gateway_environment = document["services"]["gateway"]["environment"]
         # No ambient provider can be used, even if a key was accidentally present.
         gateway_environment["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"] = "1"
@@ -1597,33 +1565,6 @@ def build_compose(
             command_policy.get("max_parallel_requests", 4))
         gateway_environment["DUNGENESS_REQUEST_RESERVATION_USD"] = str(
             command_policy.get("request_reservation_usd", min(max_usd or 1, 1)))
-        for api_provider, key in (
-            ("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
-            ("openrouter", "OPENROUTER_API_KEY"),
-        ):
-            gateway_environment.pop(key, None)
-            if api_provider in providers:
-                gateway_environment[key] = "${TESTBED_" + key + ":?provider access required}"
-        for key in ("CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"):
-            gateway_environment.pop(key, None)
-            if "claude-subscription" in providers:
-                gateway_environment[key] = "${TESTBED_" + key + ":?Claude access required}"
-        for name, profile in CONFIGURED_PROVIDERS.items():
-            key = profile['credential_env']
-            gateway_environment.pop(key, None)
-            gateway_environment.pop(key + '_EXPIRES_AT', None)
-            for env in profile.get('credential_headers', {}).values():
-                gateway_environment.pop(env, None)
-            if name in providers:
-                gateway_environment[key] = '${TESTBED_' + key + ':?provider access required}'
-                for env in profile.get('credential_headers', {}).values():
-                    gateway_environment[env] = '${TESTBED_' + env + ':?provider metadata required}'
-                if profile['credential_kind'] == 'session-token':
-                    gateway_environment[key + '_EXPIRES_AT'] = '${TESTBED_' + key + '_EXPIRES_AT:?session expiry required}'
-        if "openai-chatgpt" in providers:
-            gateway_environment["DUNGENESS_CHATGPT_AUTH_FILE"] = "/run/dungeness/auth.json"
-            document["services"]["gateway"]["volumes"].append(
-                "${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:/run/dungeness/auth.json:ro")
         main_environment["DUNGENESS_MODELS"] = json.dumps(models)
         main_environment["OPENAI_API_KEY"] = "testbed"
         main_environment["OPENAI_BASE_URL"] = models[0]["base_url"]
@@ -1678,14 +1619,16 @@ def build_compose(
     # Keep credential *names* in the trusted render, never their values in
     # Docker Config.Env. The launcher resolves these into a private bind file.
     gateway = document["services"]["gateway"]
-    credential_names = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
-                        "CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"}
-    for profile in CONFIGURED_PROVIDERS.values():
-        credential_names.add(profile["credential_env"])
-        credential_names.add(profile["credential_env"] + "_EXPIRES_AT")
-        credential_names.update(profile.get("credential_headers", {}).values())
+    private_names = set()
+    for name in sorted(providers):
+        access = MODEL_ACCESS[name]
+        private_names.update(credential_names(access))
+        for source in credential_files(access):
+            gateway["environment"][source["file_env"]] = source["mount_path"]
+            gateway["volumes"].append(
+                "${" + source["host_env"] + ":?provider access required}:" + source["mount_path"] + ":ro")
     credential_sources = {}
-    for name in sorted(credential_names & gateway["environment"].keys()):
+    for name in sorted(private_names & gateway["environment"].keys()):
         expression = gateway["environment"].pop(name)
         credential_sources[name] = expression[2:].split(":", 1)[0]
     gateway["x-dungeness-credential-env"] = credential_sources

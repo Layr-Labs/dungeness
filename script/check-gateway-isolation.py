@@ -45,6 +45,14 @@ def main():
             'account_id': ACCOUNT, 'id_token': ID_TOKEN}})); auth.chmod(0o600)
         credentials = root / 'credentials.json'
         credentials.write_text(json.dumps(API_KEYS)); credentials.chmod(0o600)
+        # Fixture-only trusted code replaces destinations before gateway import.
+        # Production has no environment switch for arbitrary provider URLs.
+        gateway_fixture = root / 'gateway_fixture.py'
+        gateway_fixture.write_text(
+            "from model_access import MODEL_ACCESS\n"
+            "for name in ('openai', 'anthropic', 'openrouter', 'openai-chatgpt'):\n"
+            "    MODEL_ACCESS[name]['upstream_default'] = 'http://mock:8081/v1'\n"
+            "import runpy\nrunpy.run_path('/app/gateway.py', run_name='__main__')\n")
         mock = root / 'mock.py'
         mock.write_text('''from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json, threading
@@ -88,18 +96,15 @@ ThreadingHTTPServer(('0.0.0.0',8081),Handler).serve_forever()
                        ['openrouter','openai/gpt-5.6-sol']]),
                    'DUNGENESS_OPENROUTER_INFERENCE_ONLY':'1',
                    'DUNGENESS_CREDENTIALS_FILE':'/run/dungeness/credentials.json',
-                   'OPENAI_UPSTREAM_BASE_URL':'http://mock:8081/v1',
-                   'ANTHROPIC_UPSTREAM_BASE_URL':'http://mock:8081/v1',
-                   'OPENROUTER_UPSTREAM_BASE_URL':'http://mock:8081/v1',
-                   'DUNGENESS_CHATGPT_AUTH_FILE':'/run/dungeness/auth.json',
-                   'CHATGPT_UPSTREAM_BASE_URL':'http://mock:8081/v1'}
+                   'DUNGENESS_CHATGPT_AUTH_FILE':'/run/dungeness/auth.json'}
             command = ['run','-d','--name',names[1],'--network',tag,*hardening,
                        '--user',f'{os.getuid()}:{os.getgid()}',
                        '--mount',f'type=bind,src={usage},dst=/var/lib/testbed/usage',
                        '--mount',f'type=bind,src={auth},dst=/run/dungeness/auth.json,readonly',
+                       '--mount',f'type=bind,src={gateway_fixture},dst=/app/gateway_fixture.py,readonly',
                        '--mount',f'type=bind,src={credentials},dst=/run/dungeness/credentials.json,readonly']
             for key,value in env.items(): command += ['-e',key+'='+value]
-            run(*command,tag,stdout=subprocess.DEVNULL)
+            run(*command,tag,'python','/app/gateway_fixture.py',stdout=subprocess.DEVNULL)
             inspection=json.loads(run('inspect',names[1],capture_output=True).stdout)[0]
             config_env=json.dumps(inspection['Config']['Env'])
             for value in (SECRET,ID_TOKEN,ACCOUNT,*API_KEYS.values()): assert value not in config_env

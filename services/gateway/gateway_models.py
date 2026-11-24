@@ -9,22 +9,12 @@ import sys
 import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from provider_profiles import PROFILES
-from gateway_auth import authentication_headers, profile_authentication
+from gateway_auth import authentication_headers
+from model_access import (MODEL_ACCESS, OPENAI_ROUTES, ANTHROPIC_ROUTES,
+                          OPENROUTER_ROUTES, CHATGPT_ROUTES, configured_provider)
 from typing import Any
 import zlib
 
-
-OPENAI_ROUTES = {"responses", "chat/completions", "embeddings", "models"}
-ANTHROPIC_ROUTES = {"messages", "messages/count_tokens"}
-OPENROUTER_ROUTES = {
-    "responses",
-    "chat/completions",
-    "completions",
-    "messages",
-    "models",
-}
-CHATGPT_ROUTES = {"responses", "responses/compact"}
 
 def openrouter_cache_ttl(provider, operation, payload, pricing):
     """Resolve Claude Chat Completions' aggregate cache-write duration.
@@ -527,118 +517,18 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
     return result
 
 
-# Per-provider proxy configuration. Model calls for every provider share the
-# same streaming, accounting, and budget machinery (proxy_model); only the
-# route allowlist, upstream origin, auth header, pass-through headers, and usage
-# parser differ.
-MODEL_PROVIDERS: dict[str, dict[str, Any]] = {
-    "openai": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENAI_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENAI_ROUTES,
-        "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.openai.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": (
-            "openai-beta",
-            "idempotency-key",
-        ),
-        "extract_usage": extract_usage,
-    },
-    "anthropic": {
-        "authentication": {"sources": [{"headers": {
-            "x-api-key": {"env": "ANTHROPIC_API_KEY"},
-            "anthropic-version": {"env": "ANTHROPIC_VERSION", "default": "2023-06-01"},
-        }}]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "extract_usage": extract_anthropic_usage,
-    },
-    "claude-subscription": {
-        "authentication": {"sources": [{
-            "expires_at": {"env": "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
-            "headers": {
-                "authorization": {"env": "CLAUDE_ACCESS_TOKEN", "prefix": "Bearer "},
-                "anthropic-version": {"literal": "2023-06-01"},
-            },
-        }]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": False,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "extract_usage": extract_anthropic_usage,
-    },
-    "openrouter": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENROUTER_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENROUTER_ROUTES,
-        "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
-        "upstream_default": "https://openrouter.ai/api/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        # OpenRouter accepts (and echoes) optional attribution headers. The
-        # Anthropic headers matter only for the `messages` operation, where
-        # Claude Code declares beta features (prompt caching, thinking, 1M
-        # context) and the API version it speaks.
-        "passthrough": (
-            "http-referer",
-            "x-title",
-            "openai-beta",
-            "anthropic-beta",
-            "anthropic-version",
-        ),
-        "extract_usage": extract_usage,
-    },
-    "openai-chatgpt": {
-        "authentication": {"sources": [
-            {"file_env": "DUNGENESS_CHATGPT_AUTH_FILE", "headers": {
-                "authorization": {"path": ["tokens", "access_token"], "prefix": "Bearer "},
-                "chatgpt-account-id": {"path": ["tokens", "account_id"]},
-            }},
-        ]},
-        "routes": CHATGPT_ROUTES,
-        "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
-        "upstream_default": "https://chatgpt.com/backend-api/codex",
-        "auth": "gateway_secret",
-        "billed": False,
-        # ChatGPT's Codex backend uses these client/account headers in addition
-        # to the bearer credential. Keep this a fixed allowlist; never forward
-        # arbitrary agent-controlled headers.
-        "passthrough": (
-            "chatgpt-account-id",
-            "originator",
-            "version",
-            "session_id",
-            "session-id",
-            "thread-id",
-            "conversation_id",
-            "x-openai-subagent",
-            "x-client-request-id",
-            "x-codex-turn-metadata",
-            "x-codex-installation-id",
-            "x-oai-attestation",
-            "x-responsesapi-include-timing",
-            "traceparent",
-            "user-agent",
-            "openai-beta",
-        ),
-        "extract_usage": extract_usage,
-    },
-}
+def gateway_provider_config(config):
+    """Attach runtime parsing to the shared, credential-free connection definition."""
+    parsers = {"openai": extract_usage, "anthropic": extract_anthropic_usage}
+    return {**config, "extract_usage": parsers[config["usage_parser"]]}
+
+
+# Preserve the historical gateway import surface and one shared runtime table.
+MODEL_PROVIDERS = {name: gateway_provider_config(config) for name, config in MODEL_ACCESS.items()}
 
 
 def provider_auth_headers(provider: str, *, private_values=None) -> dict[str, str]:
     """Resolve upstream authentication without ever logging credential values."""
-
     cfg = MODEL_PROVIDERS.get(provider)
     if cfg is None:
         raise ValueError("Unknown authentication provider.")
@@ -646,19 +536,7 @@ def provider_auth_headers(provider: str, *, private_values=None) -> dict[str, st
 
 
 def configured_provider_config(name, profile):
-    """Compile a trusted profile into the gateway protocol configuration."""
-    return {
-        'authentication': profile_authentication(profile),
-        'routes': set(profile['routes']),
-        'upstream_env': name.upper().replace('-', '_') + '_UPSTREAM_BASE_URL',
-        'upstream_default': profile['base_url'],
-        'auth': 'gateway_secret', 'billed': profile['billed'],
-        'passthrough': (), 'extract_usage': extract_usage,
-    }
-
-
-for _name, _profile in PROFILES.items():
-    MODEL_PROVIDERS[_name] = configured_provider_config(_name, _profile)
+    return gateway_provider_config(configured_provider(name, profile))
 
 
 def usage_extractor(cfg: dict[str, Any], operation: str):

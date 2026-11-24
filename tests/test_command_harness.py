@@ -25,6 +25,8 @@ def load(name, path):
 
 
 compiler = load("command_compiler", "src/dungeness/compiler.py")
+from model_access import MODEL_ACCESS, configured_provider
+from provider_profiles import PROFILES
 CONFIGURED_FIXTURES = json.loads((ROOT / "tests/fixtures/provider-registry.json").read_text())["providers"]
 usage = load("command_usage", "services/gateway/gateway_usage.py")
 models = load("command_models", "services/gateway/gateway_models.py")
@@ -115,7 +117,7 @@ class CommandHarnessTests(unittest.TestCase):
     def test_configured_account_metadata_is_exposed_only_to_authorized_gateway(self):
         profile = {**CONFIGURED_FIXTURES["example-api"],
                    "credential_headers": {"account-id": "EXAMPLE_API_KEY_ACCOUNT"}}
-        with patch.dict(compiler.CONFIGURED_PROVIDERS, {"example-api": profile}):
+        with patch.dict(MODEL_ACCESS, {"example-api": configured_provider("example-api", profile)}):
             for selected in ("example-api", "openai"):
                 with self.subTest(selected=selected):
                     compose = yaml.safe_load(compiler.build_compose(
@@ -266,7 +268,7 @@ class CommandHarnessTests(unittest.TestCase):
         self.assertEqual(gateway_service["environment"]["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"], "1")
         self.assertNotIn("read_only", compose["services"]["main"])
         self.assertEqual(gateway_service["user"], "1234:5678")
-        self.assertIn("${DUNGENESS_CODEX_AUTH_FILE:?ChatGPT access required}:"
+        self.assertIn("${DUNGENESS_CODEX_AUTH_FILE:?provider access required}:"
                       "/run/dungeness/auth.json:ro", gateway_service["volumes"])
         self.assertNotIn("auth.json", json.dumps(compose["services"]["main"]))
         self.assertEqual(compose["services"]["main"]["networks"], ["agent_internal"])
@@ -422,11 +424,12 @@ if __name__ == "__main__":
 
 class ConfiguredProviderCompilerTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch.dict(compiler.CONFIGURED_PROVIDERS, CONFIGURED_FIXTURES))
+        self.enterContext(patch.dict(MODEL_ACCESS, {
+            name: configured_provider(name, profile) for name, profile in CONFIGURED_FIXTURES.items()}))
 
     def test_installed_subscription_credentials_are_gateway_only(self):
         for name in ('grok-subscription', 'minimax-subscription'):
-            profile = compiler.CONFIGURED_PROVIDERS[name]
+            profile = PROFILES[name]
             model = {'provider': name, 'request_model': next(iter(profile['models'])),
                      'base_url': f'http://gateway:8080/model/{name}/v1'}
             compose = yaml.safe_load(compiler.build_compose(

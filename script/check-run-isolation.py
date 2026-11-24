@@ -103,8 +103,15 @@ def main():
             doc['services']['main'].update(image=image,command=['python','-c',
                 f'RUN={run!r}\nPORT=8092\nTASK=b""\nCANARY=None\n'+SERVER])
             gateway = doc['services']['gateway'];gateway.pop('build');gateway['image']=image
-            gateway['environment']['OPENAI_UPSTREAM_BASE_URL']='http://provider:8081/v1'
+            gateway['environment'].pop('OPENAI_UPSTREAM_BASE_URL', None)
             gateway['volumes'][-1]['source']=str(credential)
+            gateway_fixture = folder/'gateway_fixture.py'
+            gateway_fixture.write_text(
+                "from model_access import MODEL_ACCESS\n"
+                "MODEL_ACCESS['openai']['upstream_default'] = 'http://provider:8081/v1'\n"
+                "import runpy\nrunpy.run_path('/app/gateway.py', run_name='__main__')\n")
+            gateway['command'] = ['python', '/app/gateway_fixture.py']
+            gateway['volumes'].append(str(gateway_fixture) + ':/app/gateway_fixture.py:ro')
             # Replace only trusted task/scorer/provider implementations with fixtures.
             for name,port in (('problem',8091),('dev-scorer',8090),('provider',8081)):
                 service=doc['services'].setdefault(name,{'networks':['external_egress']})

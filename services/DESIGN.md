@@ -128,7 +128,8 @@ stable executable and import surface:
 services/gateway/
 ├── gateway.py          # stable entrypoint, HTTP routes, middleware, lifecycle
 ├── gateway_runtime.py  # run-scoped web and model request orchestration
-├── gateway_models.py   # provider definitions and protocol/usage parsing
+├── model_access.py     # trusted connections shared with the compiler
+├── gateway_models.py   # protocol/usage parsing and runtime registry view
 ├── gateway_auth.py     # provider-neutral trusted credential recipes
 ├── gateway_pricing.py  # trusted pricing policy and request-cost calculation
 ├── gateway_usage.py    # canonical events, budgets, metrics, operational logs
