@@ -47,7 +47,9 @@ in documentation. A caller may install its own reviewed schedule.
 The caller selects models in the run spec; the harness uses the resulting
 `DUNGENESS_TASK` entries. For OpenAI/ChatGPT coding harnesses, use Responses and
 preserve tool and encrypted reasoning history. Follow the
-[request policy](gateway-request-policy.md) for supported controls.
+[request policy](gateway-request-policy.md#thinking-controls) for thinking options
+and signature handling. Use the model's supported effort on each request; keep
+the full assistant history when returning locally executed tool results.
 
 Reference prices measure comparison cost, not subscription billing or account
 entitlement. Adding a model requires qualifying the caller's catalog and packaged

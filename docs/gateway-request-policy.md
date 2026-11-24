@@ -89,6 +89,46 @@ The gateway does not translate requests or responses into another protocol.
 - Arbitrary request headers are not forwarded. OpenAI organization/project selection and
   opaque Codex routing/turn-state override headers are not forwarded either.
 
+## Thinking controls
+
+The harness sets thinking on each request; the gateway preserves these reviewed
+fields. The selected upstream model determines which levels it supports.
+
+| API | Request option |
+| --- | --- |
+| OpenAI Responses, including ChatGPT | `reasoning: {"effort": "high"}` |
+| Anthropic Messages, including Claude subscription | `thinking: {"type": "enabled", "budget_tokens": 1024}`, or model-supported adaptive thinking with `output_config.effort` |
+| Chat Completions | `reasoning_effort: "high"` |
+| Google's Chat Completions extension | `extra_body.google.thinking_config` |
+
+For the Google extension, the **wire JSON** is:
+
+```json
+{
+  "extra_body": {
+    "google": {
+      "thinking_config": {
+        "thinking_level": "high",
+        "include_thoughts": true
+      }
+    }
+  }
+}
+```
+
+Use one of `reasoning_effort`, `thinking_level` or `thinking_budget`.
+`include_thoughts` is optional. Thinking levels are `minimal`, `low`, `medium`,
+`high` and `xhigh`; a budget is an integer, with `-1` for dynamic thinking and
+`0` to disable it where the model permits. Other fields inside `extra_body`
+remain rejected, including hosted tools and remote cached content.
+
+The Python OpenAI SDK merges its `extra_body` argument into the wire request:
+pass `extra_body={"extra_body": {"google": {"thinking_config": ...}}}` to that
+SDK. See [Google's compatibility examples](https://aistudio.google.com/docs/openai#thinking).
+This reviewed wire format works with configured route names; it does not
+register a Google endpoint or make a subscription token compatible with the
+Gemini API-key service.
+
 ## Conversation history compatibility
 
 History is validated for the configured provider and API operation, separately
@@ -99,6 +139,14 @@ nonempty string of at most 128 characters, rather than one of a fixed list of
 versions. The gateway preserves accepted history, including signatures,
 encrypted content, item order and tool associations, without removing fields.
 Requests are limited to 8 MiB and 64 levels of JSON nesting.
+
+History schema 2 also accepts Google's
+`extra_content.google.thought_signature` on assistant Chat Completions messages
+and their function calls. Preserve the complete returned message, including
+signatures arriving in late streaming deltas, when sending local tool results.
+Only the nonempty opaque signature string is accepted in that extension.
+Bounded admission treats it as opaque state rather than estimating tokens from
+its encoded length. See [Google's signature format](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures).
 
 Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
 `conversation_history_rejected`. Diagnostics version 1 adds a structural `path`
@@ -114,9 +162,7 @@ event and sanitized local/owner diagnostics, not public result descriptions.
 Keep the run records and report the request ID and structural diagnostic. Do not
 remove reasoning or signatures to work around a rejection, or automatically
 restart a paid run. Operators can group reports by route, schema version, rule
-and known item/block type before releasing compatibility fixes together. This
-adds diagnostics only; capability restrictions and accepted history are unchanged.
-
+and known item/block type before releasing compatibility fixes together.
 
 Streaming preserves accepted protocol history, with credential-echo filtering
 and accounting completion barriers. Some protocols request usage metadata; this

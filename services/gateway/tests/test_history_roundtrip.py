@@ -5,7 +5,7 @@ import unittest
 
 import httpx
 from test_request_policy import harness, request_body, route
-from gateway_request_policy import validate_model_request, validate_model_transport, MAX_MODEL_REQUEST_BYTES
+from gateway_request_policy import validate_model_request, validate_model_transport, MAX_MODEL_REQUEST_BYTES, HISTORY_SCHEMA_VERSION
 
 
 REASONING = {'type': 'reasoning', 'id': 'rs_synthetic', 'status': 'completed',
@@ -83,7 +83,7 @@ class HistoryRoundTripTests(unittest.IsolatedAsyncioTestCase):
                 diagnostic = rejected.json()['diagnostic']
                 self.assertEqual(diagnostic['code'], 'conversation_history_rejected')
                 self.assertFalse(diagnostic['upstream_request_sent'])
-                self.assertEqual(diagnostic['history_schema_version'], 1)
+                self.assertEqual(diagnostic['history_schema_version'], HISTORY_SCHEMA_VERSION)
                 self.assertEqual(diagnostic['item_index'], 0)
                 self.assertTrue(diagnostic['request_id'])
                 self.assertNotIn('secret', rejected.text)

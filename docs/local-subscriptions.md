@@ -24,6 +24,28 @@ chooses another account or falls back to an API key.
 Google subscription access and Kimi Code are not registered in this revision.
 Adding either requires a reviewed integration and separate account validation.
 
+## Google integration status
+
+Checked on 2026-11-24:
+
+- The gateway now accepts Google's Chat Completions thinking controls and opaque
+  thought signatures. Synthetic HTTP tests cover two-turn local function calls,
+  fragmented streaming, the existing compatible usage format and rejection of
+  hosted tools. See [thinking controls](gateway-request-policy.md#thinking-controls).
+- One direct official Antigravity CLI subscription call to Carbon Low passed,
+  with API-key/ADC inputs and tools disabled. The CLI reported 2,066 input and
+  6 output tokens. This checks account access, not a Dungeness harness run.
+- A direct Google subscription adapter is still missing. Google's documented
+  OpenAI-compatible **API-key endpoint** is not a subscription endpoint.
+  Live usage metering, trusted token renewal for longer runs, and a complete
+  harness run still need implementation or qualification.
+
+The saved [subscription probes](https://github.com/Layr-Labs/dungeness/tree/feat/native-antigravity-carbon/tools/antigravity-probe)
+also found an unreported reviewer call when testing the full Antigravity CLI
+with a synthetic tool workflow. Do not treat that CLI's final usage as proven
+complete metering, or turn missing usage into zero cost. No Google route,
+manager option or VM release is enabled by the thinking-policy change.
+
 ## Google access-token lifetime
 
 Checked against Google's documentation on 2026-11-24. Google documents a

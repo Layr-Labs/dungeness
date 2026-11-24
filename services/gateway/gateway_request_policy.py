@@ -12,7 +12,7 @@ from gateway_history_diagnostics import HistoryShapeError, history_at, known_typ
 
 # Increment when the supported history contract changes. Kept in safe rejection
 # diagnostics; the exact gateway revision is recorded in the runtime manifest.
-HISTORY_SCHEMA_VERSION = 1
+HISTORY_SCHEMA_VERSION = 2
 MAX_MODEL_REQUEST_BYTES = 8 * 1024 * 1024
 
 
@@ -118,7 +118,7 @@ CHAT_FIELDS = frozenset("""
 model messages tools tool_choice functions function_call parallel_tool_calls
 stream stream_options max_tokens max_completion_tokens temperature top_p n stop
 logprobs top_logprobs logit_bias presence_penalty frequency_penalty seed user
-response_format reasoning_effort service_tier metadata store modalities
+response_format reasoning_effort service_tier metadata store modalities extra_body
 """.split())
 MESSAGES_FIELDS = frozenset("""
 model messages max_tokens system tools tool_choice thinking output_config
@@ -164,6 +164,48 @@ def sequence(value: Any, where: str) -> list:
     if not isinstance(value, list):
         raise HistoryShapeError("expected_array", f"{where} must be a list", expected="array", actual=value)
     return value
+
+
+def google_thinking(payload: dict) -> None:
+    """Reviewed Chat Completions extension, independent of the access-route name.
+
+    extra_body is not a passthrough escape hatch: Google also uses it for hosted
+    tools and remote cached content, which remain unsupported.
+    """
+    extra = fields(payload["extra_body"], {"google"}, "extra_body")
+    google = fields(extra.get("google"), {"thinking_config"}, "google")
+    config = fields(google.get("thinking_config"),
+                    {"thinking_level", "thinking_budget", "include_thoughts"}, "thinking_config")
+    if "thinking_level" in config:
+        level = config["thinking_level"]
+        if not isinstance(level, str) or level not in {"minimal", "low", "medium", "high", "xhigh"}:
+            raise ValueError("unsupported thinking_level")
+    if "thinking_budget" in config:
+        budget = config["thinking_budget"]
+        # -1 requests dynamic thinking; 0 disables it on supporting models.
+        # Model-specific limits are enforced by the selected upstream.
+        if type(budget) is not int or not -1 <= budget <= 2**31 - 1:
+            raise ValueError("thinking_budget must be an integer of at least -1")
+    if "include_thoughts" in config and type(config["include_thoughts"]) is not bool:
+        raise ValueError("include_thoughts must be a boolean")
+    selectors = sum(name in config for name in ("thinking_level", "thinking_budget"))
+    if selectors > 1 or selectors and payload.get("reasoning_effort") is not None:
+        raise ValueError("choose one of reasoning_effort, thinking_level or thinking_budget")
+
+
+def google_thought_signature(value: Any, role: str, operation: str) -> None:
+    """Opaque history only; never interpret or discard a returned signature."""
+    if operation != "chat/completions" or role != "assistant":
+        raise HistoryShapeError("signature_protocol_mismatch",
+                                "thought signatures require assistant Chat Completions history")
+    extra = fields(value, {"google"}, "extra_content")
+    with history_at("google"):
+        google = fields(extra.get("google"), {"thought_signature"}, "google")
+        signature = google.get("thought_signature")
+        if not isinstance(signature, str) or not signature:
+            raise HistoryShapeError("invalid_thought_signature",
+                                    "thought_signature must be a nonempty string",
+                                    path=("thought_signature",))
 
 
 def cache_control(value: Any) -> None:
@@ -299,11 +341,15 @@ def messages(value: Any, provider: str = "openai", operation: str = "messages") 
         with history_at(index, item_index=index, item_type="message"):
             obj = fields(message, {"role", "content", "name", "tool_calls", "tool_call_id",
                                    "function_call", "reasoning_content", "reasoning",
-                                   "reasoning_details", "cache_control", "refusal"}, "message")
+                                   "reasoning_details", "cache_control", "refusal",
+                                   "extra_content"}, "message")
             if obj.get("role") not in ("system", "developer", "user", "assistant", "tool", "function"):
                 raise HistoryShapeError("unsupported_role", "unsupported message role", path=("role",))
             with history_at("content"):
                 content_blocks(obj.get("content"))
+            if "extra_content" in obj:
+                with history_at("extra_content"):
+                    google_thought_signature(obj["extra_content"], obj["role"], operation)
             if obj.get("reasoning_details") is not None:
                 if operation != "chat/completions":
                     raise HistoryShapeError("reasoning_protocol_mismatch", "reasoning_details requires Chat Completions", path=("reasoning_details",))
@@ -313,11 +359,14 @@ def messages(value: Any, provider: str = "openai", operation: str = "messages") 
                 with history_at("tool_calls"):
                     for call_index, call in enumerate(sequence(obj["tool_calls"], "tool_calls")):
                         with history_at(call_index):
-                            fields(call, {"id", "type", "function", "index"}, "tool call")
+                            fields(call, {"id", "type", "function", "index", "extra_content"}, "tool call")
                             if call.get("type") != "function":
                                 raise HistoryShapeError("unsupported_tool_call_type", "only local function call history is permitted", path=("type",))
                             with history_at("function"):
                                 fields(call.get("function"), {"name", "arguments"}, "function call")
+                            if "extra_content" in call:
+                                with history_at("extra_content"):
+                                    google_thought_signature(call["extra_content"], obj["role"], operation)
             if obj.get("function_call") is not None:
                 with history_at("function_call"):
                     fields(obj["function_call"], {"name", "arguments"}, "function call")
@@ -421,6 +470,8 @@ def validate_model_request(provider: str, operation: str, payload: Any) -> None:
         elif isinstance(value, list):
             stack.extend((entry, depth + 1) for entry in value)
     fields(payload, allowed, f"{operation} request")
+    if "extra_body" in payload:
+        google_thinking(payload)
     model = payload.get("model")
     if not isinstance(model, str) or not model:
         raise ValueError("model must be a nonempty string")
