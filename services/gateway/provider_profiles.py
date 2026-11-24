@@ -100,14 +100,3 @@ def load_profiles(path=PROFILE_PATH):
 
 
 PROFILES = load_profiles()
-
-
-def upstream_model(provider, model):
-    profile = PROFILES[provider]
-    if profile['models']:
-        if model not in profile['models']:
-            raise ValueError('Model is not mapped by the trusted provider profile.')
-        return profile['models'][model]['upstream']
-    if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._:-]{1,120}', model):
-        raise ValueError('Use the direct provider model ID without a vendor prefix.')
-    return model

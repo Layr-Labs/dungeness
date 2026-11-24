@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import math
 import json
-from provider_profiles import PROFILES, upstream_model
+from model_access import upstream_model, validate_upstream_settings
 import os
 from pathlib import Path
 import time
@@ -161,6 +161,7 @@ class Gateway:
     """One trusted gateway instance and budget ledger for one benchmark run."""
 
     def __init__(self) -> None:
+        validate_upstream_settings(os.environ)
         try:
             self.request_timeout_seconds = float(os.environ.get("DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS", "3600"))
             if not math.isfinite(self.request_timeout_seconds) or self.request_timeout_seconds <= 0:
@@ -214,8 +215,7 @@ class Gateway:
         # Access policy is independent of command/legacy harness identity,
         # pricing mode, web budgets, and whether a model allowlist was supplied.
         validate_model_request(provider, operation, payload)
-        if provider in PROFILES:
-            upstream_model(provider, payload['model'])
+        upstream_model(MODEL_PROVIDERS[provider], payload["model"])
         # All credential types are checked before admitting a model request.
         try:
             private_values = set()
@@ -548,15 +548,12 @@ class Gateway:
                     "request": safe_payload,
                 }
             )
-            upstream_base = os.environ.get(
-                cfg["upstream_env"], cfg["upstream_default"]
-            ).rstrip("/")
+            upstream_base = cfg["upstream_default"].rstrip("/")
             profile_headers = {}
-            if provider in PROFILES:
-                profile = PROFILES[provider]
-                routed_model = upstream_model(provider, model)
-                if profile['model_header']:
-                    profile_headers[profile['model_header']] = routed_model
+            if "models" in cfg:
+                routed_model = upstream_model(cfg, model)
+                if cfg['model_header']:
+                    profile_headers[cfg['model_header']] = routed_model
                 body = json.dumps({**payload, 'model': routed_model}, separators=(',', ':')).encode()
             upstream_request = self.client.build_request(
                 request.method,

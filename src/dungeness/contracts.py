@@ -12,9 +12,9 @@ def model_providers(root: Path) -> dict:
     Used by the standalone CLI in a fresh process, so gateway imports cannot
     share module state with a different runtime checkout.
     """
-    gateway = runpy.run_path(str(root / "services/gateway/gateway_models.py"))
+    gateway = runpy.run_path(str(root / "services/gateway/model_access.py"))
     return {"schema_version": 1, "runtime": "dungeness",
-            "providers": sorted(gateway["MODEL_PROVIDERS"])}
+            "providers": sorted(gateway["MODEL_ACCESS"])}
 
 
 def runtime_contract(root: Path) -> dict:
