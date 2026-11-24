@@ -24,6 +24,21 @@ chooses another account or falls back to an API key.
 Google subscription access and Kimi Code are not registered in this revision.
 Adding either requires a reviewed integration and separate account validation.
 
+## Google access-token lifetime
+
+Checked against Google's documentation on 2026-11-24. Google documents a
+[one-hour OAuth access-token lifetime](https://developers.google.com/google-ads/api/docs/oauth/credential-management#reuse_user_credentials_across_your_api_requests).
+Its [OAuth token response](https://developers.google.com/identity/protocols/oauth2/web-server#exchange-authorization-code)
+provides the actual remaining lifetime in `expires_in`; use that value rather
+than assuming a fixed duration. This is OAuth guidance, not a confirmed
+Antigravity-specific lifetime or a test of the user's account.
+
+A fresh token does not establish two hours of uninterrupted access. Without
+in-run refresh, check that remaining validity covers startup, the run and a
+safety margin. Longer runs need renewal on the trusted side. The refresh token
+is separate authorization material and must not enter the harness. This revision
+does not implement Google login or live credential renewal.
+
 ## Credential boundary
 
 The caller prepares the selected account's input. Newly compiled runs privately

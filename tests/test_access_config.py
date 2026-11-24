@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from access_config import CONFIG_PATH, load_access_routes
-from model_access import MODEL_ACCESS, credential_requirements, validate_upstream_settings
+from model_access import MODEL_ACCESS, credential_requirements, validate_upstream_settings, upstream_model
 from gateway_auth import authentication_headers
 
 
@@ -56,6 +56,11 @@ class AccessConfigurationTests(unittest.TestCase):
                 "host": {"env": "EXAMPLE_TOKEN"}}}]}),
             ("authentication", {"sources": [{"headers": {
                 "authorization": {"env": "EXAMPLE_TOKEN", "literal": "private-sentinel"}}}]}),
+            ("models", {"alias": {"upstream": "../account", "catalog": "example/model"}}),
+            ("models", {"alias": {"upstream": "model"}}),
+            ("models", []),
+            ("model_header", "host"),
+            ("model_header", "openai-beta"),
         ]
         for key, value in changes:
             with self.subTest(key=key, value=value):
@@ -64,6 +69,26 @@ class AccessConfigurationTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as error:
                     self.load(document)
                 self.assertNotIn("private-sentinel", str(error.exception))
+
+    def test_model_mapping_and_alias_are_configuration(self):
+        config = copy.deepcopy(self.document["access_routes"]["openai"])
+        config.update(gateway_route="example", models={
+            "public-name": {"upstream": "upstream-name", "catalog": "example/reference"}},
+            model_header="x-selected-model")
+        routes = self.load({"schema_version": 1, "access_routes": {"example-api": config}})
+        self.assertEqual(upstream_model(routes["example-api"], "public-name"), "upstream-name")
+        with self.assertRaises(ValueError):
+            upstream_model(routes["example-api"], "unlisted-model")
+        with patch.dict(MODEL_ACCESS, routes, clear=True):
+            from model_access import gateway_base_url
+            self.assertEqual(gateway_base_url("example-api", "openai-chat"),
+                             "http://gateway:8080/model/example/v1")
+
+    def test_alias_cannot_shadow_another_route_id(self):
+        self.document["access_routes"]["openai"]["gateway_route"] = "other"
+        self.document["access_routes"]["anthropic"]["gateway_route"] = "openai"
+        with self.assertRaises(ValueError):
+            self.load(self.document)
 
     def test_missing_or_unsupported_configuration_has_no_embedded_fallback(self):
         with self.assertRaises(FileNotFoundError):

@@ -74,7 +74,11 @@ def load_access_routes(path=CONFIG_PATH):
     document = json.loads(Path(path).read_text())
     _require(isinstance(document, dict) and set(document) == {"schema_version", "access_routes"})
     _require(type(document["schema_version"]) is int and document["schema_version"] == 1)
-    entries = document["access_routes"]
+    return validate_access_routes(document["access_routes"])
+
+
+def validate_access_routes(entries):
+    """Validate the single registry, including any translated legacy profiles."""
     _require(isinstance(entries, dict) and bool(entries))
     required = {
         "authentication", "routes", "upstream_env", "upstream_default",
@@ -84,7 +88,7 @@ def load_access_routes(path=CONFIG_PATH):
     for name, config in entries.items():
         _require(_matches(r"[a-z][a-z0-9-]{0,47}", name))
         _require(isinstance(config, dict) and required <= set(config)
-                 and not set(config) - required - {"gateway_route"})
+                 and not set(config) - required - {"gateway_route", "models", "model_header"})
         url = config["upstream_default"]
         _require(_text(url) and bool(url) and " " not in url and "\\" not in url)
         parsed = urlsplit(url)
@@ -102,12 +106,26 @@ def load_access_routes(path=CONFIG_PATH):
         variables.add(variable)
         alias = config.get("gateway_route", name)
         _require(_matches(r"[a-z][a-z0-9-]{0,47}", alias) and alias not in aliases)
+        _require(alias == name or alias not in entries)
         aliases.add(alias)
         headers = config["passthrough"]
         _require(isinstance(headers, list) and all(
             _matches(r"[a-z][a-z0-9_-]*", header) and header not in TRANSPORT_HEADERS
             for header in headers))
         _authentication(config["authentication"])
+        if "models" in config:
+            _require(isinstance(config["models"], dict))
+            for model, mapping in config["models"].items():
+                _require(_matches(r"[A-Za-z0-9._:-]{1,120}", model))
+                _require(isinstance(mapping, dict) and set(mapping) == {"upstream", "catalog"})
+                _require(_matches(r"[A-Za-z0-9._:-]{1,120}", mapping["upstream"]))
+                _require(_matches(r"[a-z0-9-]+/[A-Za-z0-9._:-]{1,120}", mapping["catalog"]))
+        model_header = config.get("model_header")
+        if model_header is not None:
+            _require(_matches(r"x-[a-z0-9-]+", model_header))
+            _require(all(model_header not in source["headers"]
+                         for source in config["authentication"]["sources"]))
+            _require(model_header not in headers)
         result[name] = {**config, "routes": set(operations), "passthrough": tuple(headers)}
     return result
 

@@ -21,8 +21,6 @@ import tempfile
 import time
 from typing import Any
 
-from provider_profiles import PROFILES
-
 import httpx
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -117,24 +115,14 @@ gateway = Gateway()
 def instrumentation_route(path: str) -> str:
     """Return a bounded route label; never use an arbitrary URL path as a label."""
 
-    for provider in PROFILES:
-        if path.startswith(f"/model/{provider}/v1/"):
-            return f"/model/{provider}/v1/{{operation}}"
+    for name, config in MODEL_PROVIDERS.items():
+        route = config.get("gateway_route", name)
+        if path.startswith(f"/model/{route}/v1/"):
+            return f"/model/{route}/v1/{{operation}}"
     if path.startswith("/task/files/"):
         return "/task/files/{name}"
     if re.fullmatch(r"/[^/]+(?:/[^/]+)?/(?:description|knowledge-base|resources/[^/]+)", path):
         return "/{problem}/{release}/resources/{resource}"
-    if path.startswith("/model/openai/v1/"):
-        return "/model/openai/v1/{operation}"
-    if path.startswith("/model/claude-subscription/v1/"):
-        return "/model/claude-subscription/v1/{operation}"
-    if path.startswith("/model/anthropic/v1/"):
-        return "/model/anthropic/v1/{operation}"
-    if path.startswith("/model/openrouter/v1/"):
-        return "/model/openrouter/v1/{operation}"
-    if path.startswith("/model/chatgpt/v1/"):
-        return "/model/chatgpt/v1/{operation}"
-
     if path in {
         "/healthz",
         "/status",
@@ -439,46 +427,27 @@ def model_transport_failed(request):
 
 
 async def model_openai(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model("openai", request.path_params["path"], request)
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.openai", error)
-    except ValueError as error:
-        return model_request_rejected(request, error)
-    except httpx.HTTPError as error:
-        return model_transport_failed(request)
+    return await proxy_registered_model("openai", request)
 
 
 async def model_anthropic(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model(
-            "anthropic", request.path_params["path"], request
-        )
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.anthropic", error)
-    except ValueError as error:
-        return model_request_rejected(request, error)
-    except httpx.HTTPError as error:
-        return model_transport_failed(request)
+    return await proxy_registered_model("anthropic", request)
 
 
 async def model_openrouter(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model(
-            "openrouter", request.path_params["path"], request
-        )
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.openrouter", error)
-    except ValueError as error:
-        return model_request_rejected(request, error)
-    except httpx.HTTPError as error:
-        return model_transport_failed(request)
+    return await proxy_registered_model("openrouter", request)
 
 
 async def model_configured(request: Request) -> Response:
-    provider = request.path_params['provider']
-    if provider not in PROFILES and provider != 'claude-subscription':
-        return JSONResponse({'error': 'Unknown configured provider.'}, status_code=404)
+    route = request.path_params["provider"]
+    provider = next((name for name, config in MODEL_PROVIDERS.items()
+                     if config.get("gateway_route", name) == route), None)
+    if provider is None:
+        return JSONResponse({"error": "Unknown model access route."}, status_code=404)
+    return await proxy_registered_model(provider, request)
+
+
+async def proxy_registered_model(provider: str, request: Request) -> Response:
     try:
         return await gateway.proxy_model(provider, request.path_params['path'], request)
     except BudgetExceeded as error:
@@ -490,16 +459,7 @@ async def model_configured(request: Request) -> Response:
 
 
 async def model_chatgpt(request: Request) -> Response:
-    try:
-        return await gateway.proxy_model(
-            "openai-chatgpt", request.path_params["path"], request
-        )
-    except BudgetExceeded as error:
-        return budget_rejected(request, "model.openai-chatgpt", error)
-    except ValueError as error:
-        return model_request_rejected(request, error)
-    except httpx.HTTPError as error:
-        return model_transport_failed(request)
+    return await proxy_registered_model("openai-chatgpt", request)
 
 
 async def drain_background_tasks(timeout_seconds: float | None = None) -> None:
@@ -581,24 +541,6 @@ app = Starlette(
         Route("/internal/events", internal_event, methods=["POST"]),
         Route("/web/search", external_web_disabled, methods=["POST"]),
         Route("/web/fetch", external_web_disabled, methods=["POST"]),
-        Route(
-            "/model/openai/v1/{path:path}", model_openai, methods=["GET", "POST"]
-        ),
-        Route(
-            "/model/anthropic/v1/{path:path}",
-            model_anthropic,
-            methods=["GET", "POST"],
-        ),
-        Route(
-            "/model/openrouter/v1/{path:path}",
-            model_openrouter,
-            methods=["GET", "POST"],
-        ),
-        Route(
-            "/model/chatgpt/v1/{path:path}",
-            model_chatgpt,
-            methods=["GET", "POST"],
-        ),
         Route('/model/{provider}/v1/{path:path}', model_configured, methods=['GET', 'POST']),
     ],
     lifespan=lifespan,

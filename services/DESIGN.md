@@ -66,8 +66,9 @@ for permissions and cleanup.
 
 [`gateway/model-access.json`](gateway/model-access.json) holds endpoints,
 operations and authentication recipes. `gateway/model_access.py` loads that
-validated configuration and combines it with the trusted `gateway/providers.json`
-extension profiles. The compiler and gateway use this same registry.
+validated configuration. Older operator `gateway/providers.json` files are optional
+compatibility inputs, translated into the same registry with conflicts rejected.
+The compiler, credential resolver and HTTP handler use this single registry.
 Each definition supplies its fixed upstream URL, supported operations,
 authentication recipe and usage interpretation.
 

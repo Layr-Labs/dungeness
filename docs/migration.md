@@ -52,8 +52,29 @@ using its mounts has stopped. See the
 Endpoints and authentication recipes now live in
 [`services/gateway/model-access.json`](../services/gateway/model-access.json).
 Package this file and its loader with the runtime; there is no embedded fallback
-when it is absent or invalid. Existing `providers.json` extension profiles remain
-supported. The default extension registry is empty.
+when it is absent or invalid. The shipped runtime has one route file.
+Existing operator `providers.json` files are optional compatibility inputs and
+are included when building the gateway image. Malformed files and conflicting
+route IDs, HTTP aliases or endpoint-variable names prevent startup.
+
+To migrate an old profile into `access_routes`:
+
+- `base_url` becomes `upstream_default`; use `<ID>_UPSTREAM_BASE_URL` for
+  `upstream_env`, uppercasing the ID and replacing hyphens with underscores.
+- Keep `routes`, `billed` and `models`; set `auth` to `gateway_secret`,
+  `usage_parser` to `openai` and `passthrough` to `[]`.
+- Convert credential fields into an `authentication` recipe using
+  [the examples](integrating-model-access.md#adding-an-access-route).
+  Fixed `headers` become literal recipe values; additional credential headers
+  become environment selectors. For `session-token`, retain the
+  `<credential_env>_EXPIRES_AT` selector.
+- Keep `model_header` if used. `protocol`, `credential_kind` and `catalog_author`
+  are no longer separate fields; their behavior is represented by operations,
+  the recipe, usage parser and model mappings.
+
+Remove the migrated entry from `providers.json`; remove the file when empty.
+Keep the same ID and credential names to preserve existing callers. Discovery,
+credential preparation and HTTP dispatch all use the resulting single registry.
 
 ## Fixed upstream destinations
 

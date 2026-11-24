@@ -139,18 +139,52 @@ recompile to receive managed file snapshots.
 Edit `upstream_default` in [model-access.json](../services/gateway/model-access.json).
 This file also holds operations, authentication recipes and usage-parser names.
 [access_config.py](../services/gateway/access_config.py) validates the data;
-[model_access.py](../services/gateway/model_access.py) supplies the shared interface. Reviewed extensions use `base_url` in
-[providers.json](../services/gateway/providers.json), which is empty by default.
+[model_access.py](../services/gateway/model_access.py) supplies the shared interface.
+All routes use the same HTTP handler, including configured `gateway_route` aliases.
 The gateway appends an allowed API operation to this fixed URL and rejects
 conflicting environment overrides. A harness cannot choose the upstream endpoint.
 
 ## Adding an access route
 
-Modify the trusted runtime, not a submitted harness. Define its fixed destination,
-supported operations, authentication recipe, model mapping and usage parser.
-An existing OpenAI-compatible protocol may fit `providers.json`; a new protocol
-needs its own request/response handling and policy tests. An auth token alone
-does not make protocols or model entitlements interchangeable.
+Add an entry to `access_routes` in `model-access.json`, then add its model rates
+to `pricing.yaml`. For example, this complete entry reuses Chat Completions:
+
+```json
+{
+  "example-api": {
+    "upstream_default": "https://api.example.invalid/v1",
+    "upstream_env": "EXAMPLE_API_UPSTREAM_BASE_URL",
+    "routes": ["chat/completions"],
+    "auth": "gateway_secret",
+    "billed": true,
+    "passthrough": [],
+    "usage_parser": "openai",
+    "authentication": {
+      "sources": [{
+        "headers": {
+          "authorization": {"env": "EXAMPLE_API_KEY", "prefix": "Bearer "}
+        }
+      }]
+    },
+    "models": {
+      "example-model": {"upstream": "example-model", "catalog": "example/example-model"}
+    }
+  }
+}
+```
+
+The caller supplies `TESTBED_EXAMPLE_API_KEY`. Discovery, credential preparation,
+compiler selection and `/model/example-api/v1/chat/completions` use this entry
+without adding a Python handler. `models` optionally restricts and maps public
+model names; pricing and the run's model allowlist are still required.
+An optional `model_header` sends the mapped model in a fixed `x-*` header.
+
+This is trusted runtime configuration, not a harness input. An existing protocol
+and authentication recipe can be configured here; a new wire format or unsupported
+history fields require gateway code and policy tests. No token alone establishes
+protocol compatibility or account entitlement. Older `providers.json` files are
+read for compatibility; use [the migration guide](migration.md#route-configuration)
+instead of maintaining both formats.
 
 The compiler and credential resolver derive inputs from the same registry.
 Current recipes support one explicit source per access route; multiple accounts,

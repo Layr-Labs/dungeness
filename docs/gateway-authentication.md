@@ -27,15 +27,16 @@ These names describe access mechanisms. Account entitlement and upstream billing
 still determine which models and balances are available.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
-The checked-in [extension registry](../services/gateway/providers.json) is empty.
-Operators can add compatible routes through that trusted registry; harnesses
+Operators add compatible routes to the trusted
+[model-access.json registry](../services/gateway/model-access.json); harnesses
 cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
 remains named `provider` for compatibility.
 
 [`services/gateway/model-access.json`](../services/gateway/model-access.json) holds
-the maintained route definitions. `model_access.py` loads that validated data and
-combines it with existing `providers.json` extension profiles. The compiler
+all maintained route definitions. `model_access.py` loads that validated data;
+an optional legacy `providers.json` is translated into the same registry. Conflicting
+IDs, HTTP aliases or endpoint-variable names are rejected. The compiler
 reads each route's credential requirements from its authentication recipe;
 the gateway uses the same definition for the destination, operations, model
 mapping, and usage parser. The registry contains names and recipes, never secret
@@ -92,28 +93,29 @@ credential maps. Standalone integrations using broadly readable files must set
 configured file never falls back to another identity. Compiled runs already stage
 private files.
 
-For compatible providers in `providers.json`, bearer substitution remains the
-default. These optional fields configure different authentication headers:
+Authentication recipes can supply additional account metadata:
 
 ```json
 {
-  "credential_env": "EXAMPLE_API_KEY",
-  "credential_header": "x-api-key",
-  "credential_prefix": "",
-  "credential_headers": {
-    "account-id": "EXAMPLE_API_KEY_ACCOUNT"
+  "authentication": {
+    "sources": [{
+      "headers": {
+        "x-api-key": {"env": "EXAMPLE_API_KEY"},
+        "account-id": {"env": "EXAMPLE_API_KEY_ACCOUNT"}
+      }
+    }]
   }
 }
 ```
 
-This is a fragment of a complete trusted provider profile. Additional credential
-names must be namespaced under `credential_env` and must not collide with
-other credentials or transport headers. Operators supply the corresponding
+This is a fragment of a complete trusted route. Use distinct credential names
+for different accounts/routes. Operators supply the corresponding
 `TESTBED_EXAMPLE_API_KEY_ACCOUNT` variable; the launcher stages its value only
 for the gateway, for a run that permits this provider. These fields are not a new
 solver-controlled credential-grant format.
 
-Session-token profiles require their existing `*_EXPIRES_AT` value. Credential
+Session recipes declare an `expires_at` selector alongside `headers`. Legacy
+session-token profiles keep their existing `*_EXPIRES_AT` value. Credential
 expiry does not trigger an API-key fallback or an automatic login/refresh.
 OpenRSI's local login readers remain responsible for extracting temporary
 access from provider login files.

@@ -14,13 +14,7 @@ from provider_profiles import PROFILES
 
 
 # Configuration is data; retain the historical exports for existing callers.
-from access_config import ACCESS_ROUTES
-
-MODEL_ACCESS = dict(ACCESS_ROUTES)
-OPENAI_ROUTES = MODEL_ACCESS["openai"]["routes"]
-ANTHROPIC_ROUTES = MODEL_ACCESS["anthropic"]["routes"]
-OPENROUTER_ROUTES = MODEL_ACCESS["openrouter"]["routes"]
-CHATGPT_ROUTES = MODEL_ACCESS["openai-chatgpt"]["routes"]
+from access_config import ACCESS_ROUTES, validate_access_routes
 
 
 def configured_provider(name, profile):
@@ -39,7 +33,19 @@ def configured_provider(name, profile):
     }
 
 
-MODEL_ACCESS.update({name: configured_provider(name, profile) for name, profile in PROFILES.items()})
+MODEL_ACCESS = validate_access_routes({
+    name: {**config, "routes": sorted(config["routes"]), "passthrough": list(config["passthrough"])}
+    for name, config in {
+        **ACCESS_ROUTES,
+        **{name: configured_provider(name, profile) for name, profile in PROFILES.items()},
+    }.items()
+})
+
+# Historical import aliases; HTTP registration uses the full registry.
+OPENAI_ROUTES = MODEL_ACCESS.get("openai", {}).get("routes", set())
+ANTHROPIC_ROUTES = MODEL_ACCESS.get("anthropic", {}).get("routes", set())
+OPENROUTER_ROUTES = MODEL_ACCESS.get("openrouter", {}).get("routes", set())
+CHATGPT_ROUTES = MODEL_ACCESS.get("openai-chatgpt", {}).get("routes", set())
 
 
 def credential_names(config):
