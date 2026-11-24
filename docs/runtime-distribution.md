@@ -50,7 +50,7 @@ git commit -m "Install Dungeness runtime"
 Git, uv, uvx and Docker remain prerequisites. Initialize the local Git tree
 because execution records require committed inputs. Keep `RUNTIME_SOURCE.json`
 to identify the upstream revision separately from local experiment commits.
-Follow the [quick start](../README.md); model calls use the operator's account.
+Follow the [quick start](quick-start.md); model calls use the operator's account.
 Checkpoint source access and image-build dependency downloads are still required.
 
 ## Local run output
@@ -68,36 +68,14 @@ Reports, result charts and result tables are also excluded from the current
 source tree and ignored for future commits. Store them with the corresponding
 run artifacts.
 
-This repository starts from a reviewed source snapshot with fresh history;
-historical runs and reports are retained in the separate private research archive.
-Authorized operators can recover an earlier run from that archive at its original
-revision, including any required LFS objects. Do not merge or push archive branches
-into this repository: doing so would reintroduce their historical records.
+## Historical runs and migrations
 
-## Retired research-state experiments
+Historical artifacts remain readable where supported; replay retired execution
+implementations at their original pinned revision. Do not import private run
+archives into the maintained runtime repository. [Migration notes](migration.md)
+cover retired research-state, web, native-agent and scaffold interfaces.
 
-The experimental research-state profiles, controller, prompt injection and
-completion gates have been removed. Their recipes are no longer active run
-specs. Recover them from the original source revision in the private research
-archive; the cleanup also retained an external backup of the removed files.
-The CLI and transcript viewer can still read historical records, but cannot
-launch the removed controller. Knowledge-base services and read hooks are also
-removed. Personal corpora and experiment recipes have been moved out of this tree.
-
-## Research-strategy migration
-
-Run-spec `evaluation` profiles and strategy-bearing `web_search.profile` values
-are rejected before source checkout or model execution. Put evaluation cadence,
-search planning and worker orchestration in the harness. The runtime reports
-interfaces, budgets and deadlines without prescribing a research loop.
-
-External web search and fetch are disabled. `web_search: {mode: disabled}` is
-the effective setting; legacy `optional` requests also resolve to disabled.
-Only the old `disabled-v1` and `optional-v1` profile references remain accepted
-as compatibility aliases, without loading profile files. Disabled access still
-zeros search and fetch budgets. Direct agent egress remains blocked.
-
-The unused world-map development/holdout split evaluator is retired; tasks
-requesting it fail explicitly. Full-benchmark verification is retained. The old
-Dungeness-specific Yukon manifest, placeholder workflow and submission slot are
-removed; OpenRSI owns its Yukon integration.
+The bundle includes the public integration guides and offline model-request
+checker. Tests, CI scripts and development Make targets require a full source
+checkout. The exporter uses an explicit documentation allowlist: local notes
+and credential examples are not automatically included.

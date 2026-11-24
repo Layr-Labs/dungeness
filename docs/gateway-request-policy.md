@@ -2,7 +2,7 @@
 
 ## Offline checks and output limits
 
-OpenRSI enables bounded request reservations with a default maximum of **65,536
+When `model_access.bounded_requests` is enabled, its default maximum is **65,536
 output tokens per request**, separately from the run's spending limit. Oversized
 explicit limits are rejected before generation, not silently truncated. Claude
 Code harnesses should set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000`. This is a gateway
@@ -11,13 +11,14 @@ policy, not the provider model's maximum output capacity.
 Use the same field and reservation validator as the gateway without making calls:
 
 ```sh
-python tools/validate-model-request.py --provider claude-subscription \
-  --operation messages --request request.json \
-  --pricing docs/examples/local-subscription-pricing-20261030.json
+uv run --locked --group gateway python tools/validate-model-request.py \
+  --provider claude-subscription --operation messages --request request.json
 ```
 
-The JSON request must include the selected model. This checks body fields and
-output limits and reports the conservative reservation. It does not validate
+The JSON request must include the selected model. The tool defaults to the
+bundled YAML pricing schedule; use `--pricing PATH` for the exact JSON or YAML
+schedule installed by your caller. It checks the registered route/operation,
+body fields and output limits and reports the conservative reservation. It does not validate
 credentials, live balance, provider eligibility, transport headers or actual
 upstream behavior. A strict mock can import `validate_generation` from
 `services/gateway/gateway_reservations.py`. Rejected live requests emit a safe
@@ -25,8 +26,8 @@ upstream behavior. A strict mock can import `validate_generation` from
 
 The gateway accepts a reviewed subset of provider APIs. Every inference route
 validates requests **before provider traffic or budget
-reservation**. This applies to command harnesses, legacy named agents, and runs
-without `model_access`. It does not depend on the harness obeying its own settings.
+reservation**. This applies to compiled command runs and standalone gateway configurations,
+including compatibility modes without a model allowlist. It does not depend on the harness obeying its own settings.
 
 The submitted container has no direct internet route. Only the trusted gateway
 has provider credentials and external network access in command-harness runs.
@@ -117,7 +118,9 @@ and known item/block type before releasing compatibility fixes together. This
 adds diagnostics only; capability restrictions and accepted history are unchanged.
 
 
-Streaming is relayed unchanged. Clients must retain complete items delivered by
+Streaming preserves accepted protocol history, with credential-echo filtering
+and accounting completion barriers. Some protocols request usage metadata; this
+is not a byte-for-byte transparent proxy. Clients must retain complete items delivered by
 `response.output_item.done`, even when the final response has an empty `output`,
 and must not treat unfinished items from an interrupted stream as complete.
 Normal output streams immediately; response-completion events and their trailing
@@ -161,8 +164,7 @@ cannot attest to a provider's private server implementation.
 Run:
 
 ```sh
-PYTHONPATH=services/gateway python -m unittest discover -s services/gateway/tests
-python -m unittest discover -s tests
+make check-core
 ```
 
 The boundary tests use mock providers. They exercise all registered inference
@@ -231,8 +233,8 @@ the gateway returns HTTP 400 with `retryable: false` and `x-should-retry: false`
 Shorten the context or lower the explicit output limit before trying again;
 repeating the same request will not help. A reservation that could fit after
 active calls settle still returns HTTP 429 with `retryable: true`.
-Use ordinary generation routes. OpenRSI local and remote runs enable this same
-policy; standalone Dungeness runs can select it in the run spec.
+Use ordinary generation routes. The trusted caller selects this policy in the
+run spec; inspect the compiled run rather than assuming a deployment's defaults.
 
 A provider-enforced, expiring per-run key is an additional financial boundary;
 gateway estimates do not protect a key stolen from the gateway or host.

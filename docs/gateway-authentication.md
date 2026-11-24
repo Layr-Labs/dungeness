@@ -29,8 +29,7 @@ These names describe access mechanisms. Account entitlement and upstream billing
 still determine which models and balances are available.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
-Kimi Code remains excluded because its subscription guidelines prohibit
-non-interactive automation. A Grok model accessed through OpenRouter uses the OpenRouter API
+Kimi Code is not a registered route in this runtime. A Grok model accessed through OpenRouter uses the OpenRouter API
 route and credential, not a Grok subscription credential.
 
 The checked-in `services/gateway/providers.json` supplies the Grok and MiniMax
@@ -50,9 +49,10 @@ values. Public provider IDs, gateway URLs, and credential input names are unchan
 
 Destinations are fixed by that registry. Legacy `*_UPSTREAM_BASE_URL` settings
 (including `CHATGPT_UPSTREAM_BASE_URL`) are accepted only when they match the
-registered URL, with an optional trailing slash. A different or empty value in
-the gateway environment prevents startup before credential use or provider
-traffic. Compiled runs pass the selected routes' settings through for this
+registered URL, with an optional trailing slash. A different value prevents gateway startup before credential use or provider
+traffic. Compiled Compose settings use the registered default when unset or
+empty; an explicitly empty setting passed directly to a standalone gateway is
+rejected. Compiled runs pass only the selected routes' settings through for
 validation; requests always use the registry URL. Before upgrading a deployment,
 check its endpoint settings and remove obsolete overrides. A supported alternate
 destination requires a reviewed registry change, not a run parameter or proxy URL.
@@ -72,7 +72,9 @@ required inputs without reading credentials.
 `services/gateway/gateway_auth.py` resolves authentication recipes. Recipes
 specify headers whose values come from a credential name, a field in a
 credential JSON file, or a fixed value. An optional expiry source is checked
-before request admission. The resolver has no provider-name branches and does
+before request admission when the recipe declares one. ChatGPT's current recipe
+has no expiry field: the caller must provide valid access, and upstream rejection
+stops the run's model access. The resolver has no provider-name branches and does
 not use billing status to choose an authentication mechanism.
 
 Built-in recipes live beside the provider destinations in `model_access.py`.
@@ -141,7 +143,7 @@ Exa search and fetch are disabled. Both `/web/search` and `/web/fetch` return
 HTTP 410 with `external_web_disabled`, regardless of supplied keys or budgets.
 Generated runs set search/fetch budgets to zero and never forward `EXA_API_KEY`.
 There is no outbound Exa implementation in the gateway. Assigned problem
-descriptions and knowledge-base resources remain available.
+descriptions and assigned resources remain available.
 
 ## Credential non-disclosure and container boundary
 
@@ -210,27 +212,11 @@ access:
 python3 script/check-gateway-isolation.py  # add --sudo if Docker requires it
 ```
 
-It verifies synthetic inference on all four built-in access routes, absence of
+It verifies synthetic inference on four built-in access routes, absence of
 credentials from Docker's environment, usage records, credential redaction,
 read-only root and credential mounts, private accounting permissions,
 temporary-file spooling, dropped capabilities and
 `no-new-privileges`. CI runs this check on pushes and pull requests.
-
-### Live integration evidence (2026-10-24)
-
-Local run `local-8dd9cb86b0344bfb` exercised stock Codex with GPT-6 Astra/high
-through the hardened gateway. Docker inspection confirmed the read-only root,
-read-only credential mount, writable usage volume and temporary directory,
-zero effective capabilities, and `NoNewPrivs=1`. Six model requests completed
-with settled accounting. Further model admission returned 429 after exhaustion;
-the harness exited and the separate final verifier accepted its retained circuit
-(local score 22,711,406,592). All run containers were removed on completion.
-
-The configured one-credit admission cap resulted in 1.721452 normalized credits
-of settled usage, including in-flight overshoot. This check validates gateway
-compatibility and isolation, not a strict one-dollar spending guarantee. A scan
-of 119 retained output files found no literal credential values. This is local
-test evidence, not an official remote result or proof of a production rollout.
 
 ## Claude session route
 
@@ -241,12 +227,13 @@ private gateway credential file; neither value is exposed in the harness contain
 or Docker environment metadata. Expiry is checked before request admission.
 No refresh/account endpoints or API-key fallback are available.
 
-The gateway passes the request body unchanged and does not insert an official
-client identity. The harness is responsible for its client and protocol headers.
+The gateway preserves accepted conversation history and does not insert an
+official client identity. Request policy and bounded admission may add a default
+output allowance; response filtering removes literal credential echoes. The harness is responsible for its client and protocol headers.
 Reported cache/input/output usage is normalized with the run's pinned reference
 prices; subscription billing is not reported as a cash API charge. Supply a pricing
 entry for this access route explicitly; historical pricing files are unchanged.
 
-Synthetic streaming, expiry, no-fallback and container-credential-boundary tests
-cover the route. A live Claude credential validation and hosted AMI rollout are
-still required before claiming production support.
+Synthetic streaming, expiry and no-fallback tests cover the route. A consumer
+must separately qualify its packaged runtime and account access; these tests do
+not establish that a deployed service uses this revision.

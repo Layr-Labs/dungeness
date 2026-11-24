@@ -94,7 +94,8 @@ The example illustrates preparation, not a complete backend launcher.
 `selected_api_key` and `selected_private_login_path` are values supplied by your
 existing trusted account setup. The resolver reads only `supplied`; it does not
 search ambient credentials, choose another account, refresh access or contact a
-provider. The gateway checks token expiry on every admitted request, as before.
+provider. The gateway checks expiry on admitted requests when the route's recipe
+declares an expiry field; it does not infer expiry for every token format.
 
 The returned `DUNGENESS_CREDENTIALS_FILE` is the private JSON map containing
 selected key/token values. Mount it read-only at `/run/dungeness/credentials.json`

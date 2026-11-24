@@ -21,7 +21,7 @@ historical access-route selectors. They remain valid for compatibility. In prose
 | Account | The upstream identity whose access or quota is used. Project or organization context may further select the resources or billing arrangement. |
 | Credential | Authorization material, such as an API key or access token. Protect credential documents as secrets even when they also contain public account metadata. |
 | Credential source | Where the trusted runtime obtains credentials: for example, a selected local login file, keychain entry or supplied key. |
-| Credential resolver | Code that obtains credentials from the selected source, validates the required fields and prepares them privately for a run. The gateway checks expiry when admitting requests. |
+| Credential resolver | Code that obtains credentials from the selected source, validates the required fields and prepares them privately for a run. The gateway checks recipe-declared expiry when admitting requests. |
 | Authentication recipe | Trusted instructions for applying credentials to an upstream request, such as constructing an authorization header and required account metadata. |
 | Usage policy | The rules for measuring usage, applying reference prices and enforcing run budgets. |
 | Gateway | The trusted component that mediates model requests, applies authentication and enforces the run's access and usage policies. |

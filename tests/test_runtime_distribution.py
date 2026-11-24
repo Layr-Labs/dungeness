@@ -37,6 +37,10 @@ class RuntimeDistributionTests(unittest.TestCase):
             "runtime-contract.json", "pyproject.toml", "uv.lock",
             "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
             "docs/problem-service.md", "docs/runtime-contract.md",
+            "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
+            "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
+            "docs/gpt-model-catalog.md", "docs/gpt-terra.md",
+            "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
             "tools/transcripts/render_gateway_transcript.py", "tools/transcripts/serve_gateway_transcripts.py",
         ):
             self.write(path, f"runtime {path}\n")
@@ -51,6 +55,7 @@ class RuntimeDistributionTests(unittest.TestCase):
             "checkpoints/sample/source.yaml", "verifiers/sample/grade.py",
             "scaffolds/sample/candidate.py", "run-specs/projects/dungeness/sample.yaml",
             "tests/fixtures/runtime/tasks/sample/task.yaml",
+            "docs/local-notes.md", "docs/examples/private-credentials.json",
         ):
             self.write(path, "synthetic-private-data\n")
         self.commit()
@@ -93,6 +98,15 @@ class RuntimeDistributionTests(unittest.TestCase):
             self.assertIn("dungeness-runtime/docs/runtime-contract.md", names)
             self.assertIn("dungeness-runtime/docs/quick-start.md", names)
             self.assertIn("dungeness-runtime/docs/evaluation-events.md", names)
+            for path in (
+                "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
+                "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
+                "docs/gpt-model-catalog.md", "docs/gpt-terra.md",
+                "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
+            ):
+                self.assertIn(f"dungeness-runtime/{path}", names)
+            self.assertNotIn("dungeness-runtime/docs/local-notes.md", names)
+            self.assertNotIn("dungeness-runtime/docs/examples/private-credentials.json", names)
             self.assertNotIn("dungeness-runtime/tools/transcripts/serve_gateway_transcripts.py", names)
             self.assertFalse(any(name.startswith("dungeness-runtime/tasks/users/") for name in names))
             self.assertEqual(archive.getmember("dungeness-runtime/dungeness").mode, 0o755)

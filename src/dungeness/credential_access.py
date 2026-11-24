@@ -83,7 +83,7 @@ def prepare_credentials(requirements, supplied):
     ``requirements`` comes from credential_requirements() or a trusted compiled
     render. ``supplied`` maps input names to values/private source-file paths.
     No ambient environment is read. Errors identify input names, never values.
-    Gateway authentication still validates expiry on each model request.
+    Gateway authentication checks recipe-declared expiry on each model request.
     """
     sources, files = _validate(requirements)
     values = {}

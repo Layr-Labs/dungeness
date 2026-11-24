@@ -1,6 +1,6 @@
 # Dungeness CLI reference
 
-Start with [the runtime quick start](../README.md). Personal experiments, knowledge
+Start with [the runtime quick start](quick-start.md). Personal experiments, knowledge
 bases and recorded outputs are archived separately from this repository. Examples
 below show configurations you can author; they are not bundled historical runs.
 
@@ -13,8 +13,8 @@ different source states, use different budgets, or have access to knowledge
 published at different times. Dungeness makes those conditions explicit and
 reproducible.
 
-Each run starts an agent from an immutable public checkpoint, routes model and
-web access through a metered gateway, limits which files can be submitted, and
+Each run starts an agent from an immutable public checkpoint, routes model
+access through a metered gateway, limits which files can be submitted, and
 grades the result with a clean verifier. Dungeness preserves the resolved
 configuration, provenance, usage, metrics, and outputs as a canonical run
 record.
@@ -25,7 +25,7 @@ framework's generated files as the source of truth.
 
 ## Quick Start
 
-Follow the [runtime quick start](../README.md#quick-start-for-operators).
+Follow the [runtime quick start](quick-start.md#quick-start-for-operators).
 Create a `dungeness-command-v1` descriptor and Dockerfile for your harness,
 then select its model policy independently in `model_access` in the run spec.
 The bundled `command` example only prints its task and makes no model calls.
@@ -42,9 +42,8 @@ the harness image, including any CLI flags or session-resume behavior.
 
 A run must start from a clean, committed Dungeness worktree. Before launching:
 
-1. Finish and validate every intended input, including the run spec, knowledge
-   base, prompt profile, agent profile, policy, service code, and framework
-   changes.
+1. Finish and validate the run spec, harness descriptor, trusted task assets,
+   model policy, and any runtime changes.
 2. Commit those inputs to a dedicated branch.
 3. Confirm that `git status --porcelain` prints nothing.
 4. Launch the committed run spec from that exact checkout.
@@ -71,10 +70,8 @@ has a schema version, source, event kind, run-local sequence number,
 - model requests, including the effective prompt and tool definitions;
 - provider-visible reasoning summaries or `reasoning_content`;
 - complete model response events, tool calls, and usage;
-- web-search queries and returned results; and
-- web-fetch URLs and returned contents;
 - evaluator scores with the cumulative normalized USD at that point; and
-- retained historical knowledge-base and research-state records, when present.
+- historical web, knowledge-base and research-state records, when reading older runs.
 
 Trusted sidecars submit events to the gateway's authenticated internal
 collector; the agent container cannot read the collector token. `summary.json`
@@ -84,8 +81,8 @@ The event log never records authorization headers or provider credentials. It ca
 contain source code, tool output, prompts, and retrieved documents, so treat it
 as a potentially sensitive run artifact. OpenAI does not expose raw hidden
 chain-of-thought; OpenAI routes therefore record requested reasoning summaries
-and token counts, while models such as Kimi can expose readable
-`reasoning_content`.
+and token counts. Other protocols may expose `reasoning_content`; the gateway
+retains accepted provider-visible history rather than inventing hidden reasoning.
 
 ## Command Line
 
@@ -371,14 +368,12 @@ finished runs:
 ./dungeness clean
 ```
 
-Every run creates two Docker networks and several run-scoped images. `run`
-tears down the environment and removes those images by default, including
-after an interrupt. Use `--keep-images` or `runtime.keep_images: true` only
-when the images are needed for debugging. Docker's built-in address pools hold
-only 31 networks in total, so environments orphaned by an earlier kill will
-eventually make every new run fail during compose with `all predefined address
-pools have been fully subnetted`. `run` checks for room before rendering and
-points here when it is short.
+A run creates internal and outbound Docker networks, with an additional private
+network when an assigned problem service is present, plus run-scoped images.
+`run` removes these by default, including after an interrupt. Use `--keep-images`
+or `runtime.keep_images: true` only for debugging. Orphaned networks can exhaust
+Docker's address pools. The preflight estimates capacity for the default pools;
+custom pool configuration and the actual topology determine the available room.
 
 `clean` refuses to touch anything while a run is still executing, since a live
 environment is indistinguishable from a leaked one; pass `--force` only when
@@ -405,21 +400,17 @@ include `budget.max_model_tokens`, `initialization.resume_from`, and additional
 labels.
 
 Research strategy, memory, worker topology and evaluation cadence belong to the
-harness. Configure only web access in the run spec:
+harness. External web access is disabled:
 
 ```yaml
 web_search:
-  mode: disabled  # or optional, subject to trusted web policy and budget
+  mode: disabled
 ```
 
-`disabled` sets search and fetch budgets to zero. `optional` exposes only the
-trusted, metered web tools allowed by the task. Neither grants direct internet
-access or injects search instructions. The old `disabled-v1` and `optional-v1`
-profile references are accepted as access-only compatibility aliases. They do
-not select or constrain the harness architecture. The mandatory
-[gateway request policy](gateway-request-policy.md) blocks provider-hosted search
-and accepts only reviewed inference fields and locally executed tools in either
-mode.
+Search and fetch budgets are always zero. Legacy `optional`, `disabled-v1` and
+`optional-v1` settings remain parseable but do not enable web traffic. Assigned
+problem resources remain available. The [gateway request policy](gateway-request-policy.md)
+also rejects provider-hosted search; local tools may search bundled files.
 
 Strategy profiles, run-spec `evaluation`, `research_state`, and
 `initialization.knowledge_base` are rejected with migration messages. Bundle
@@ -458,11 +449,6 @@ can therefore be associated with its run spec and experiment without opening
 the record or running a lookup command. Explicit `run_id` and `--run-id` values
 still override this convention.
 
-Future run specs will also declare which prior artifacts the research agent may
-search and retrieve. Access will go through the trusted gateway rather than a
-direct run-directory mount, and the resolved view will be recorded with the
-run.
-
 An agent manifest declares a Docker image and `dungeness-command-v1`
 entrypoint. It cannot select a host adapter, native authentication or host
 launcher configuration. Choose access routes (the existing `provider` field) and
@@ -472,10 +458,6 @@ The harness owns its coding-agent installation and options.
 Prices, credentials and upstream endpoints remain trusted gateway configuration.
 Accounting uses `services/gateway/pricing.yaml`; unpriced combinations are
 rejected before reaching the provider.
-
-> Whether access to another agent's artifacts is appropriate is a decision for
-> the run-spec author. Dungeness will enforce and record the declared policy; it
-> will not impose one universal definition of cheating.
 
 ## Namespaces and Types
 
@@ -629,13 +611,10 @@ the record.
 1. Dungeness checks out the selected checkpoint.
 2. It renders a temporary Harbor task in the OS temporary directory.
 3. The agent works inside an internal-only Docker network.
-4. Model and web calls pass through the trusted gateway for metering, budgets,
-   tracing, credential policy, and historical web cutoff enforcement.
-   Provider credentials are held only by the gateway. No refresh proxy is
-   supplied to the harness.
-   Historical web search fails closed: undated, post-cutoff, and known mutable
-   results are removed before the agent sees them. Mutable dated pages are
-   metadata-only, and full fetches require immutable version-pinned URLs.
+4. Model calls pass through the trusted gateway for metering, request policy,
+   tracing and fixed upstream authentication. Provider credentials stay in the
+   gateway. External web routes return `external_web_disabled`; there is no
+   login or refresh proxy for the harness.
 5. Only approved candidate paths reach the evaluation sidecar and final clean
    verifier.
 6. Run containers, networks, volumes, and run-scoped Docker images are removed

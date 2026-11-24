@@ -29,21 +29,12 @@ assigned gateway URL from `DUNGENESS_TASK`; it must not read the credential.
 In the request, `reasoning.effort` can be `none`, `low`, `medium`, `high`,
 `xhigh` or `max`. Keep encrypted reasoning history intact across tool calls.
 
-The bundled standard text reference, checked on 2026-11-18, charges per million
-tokens: $1 input, $0.05 cache read, $1.25 cache write and $5 output. Above 272,000
-input tokens the full request uses $2, $0.10, $2.50 and $7.50 respectively.
-These cache-write rates apply to standard 30-minute retention. Extended
-retention, discounted/background execution and premium service tiers remain
-unsupported. ChatGPT usage uses normalized cost, not a fabricated subscription
-cash charge. Image inputs remain unsupported by the current gateway.
-
-Source: [OpenAI's GPT-6.1 Terra model reference](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
-
-GPT-5.6 Terra's Standard text reference is $2 input, $0.20 cache read,
-$2.50 cache write and $12 output per million tokens. Above 272,000 input tokens,
-the full request uses $4, $0.40, $5 and $18 respectively. Source:
-[OpenAI's GPT-5.6 Terra model reference](https://developers.openai.com/api/docs/models/gpt-5.6-terra),
-checked 2026-11-18.
+Use the exact route/model entry in the bundled
+[reference schedule](../services/gateway/pricing.yaml); the Terra versions have
+different rates, including long-context tiers. These are pinned comparison
+prices, not live billing quotes. Extended retention and discounted/premium tiers
+remain unsupported. Image inputs are outside the current text-only gateway
+contract. See the [request policy](gateway-request-policy.md).
 
 This adds Dungeness gateway support. An enclosing platform with its own pricing
 snapshot or model selector must add Terra there as well. A Mac VM that bundles

@@ -74,7 +74,9 @@ def docker_network_capacity() -> int | None:
 def check_docker_network_capacity() -> None:
     """Fail before rendering when compose could not allocate this run's networks.
 
-    Each run needs two networks. Exhausting the pools produces a hundred-line
+    Every run needs at least two networks; an assigned problem service adds
+    another. This is a preliminary default-pool estimate, not a topology check.
+    Exhausting the pools produces a hundred-line
     docker traceback whose one useful line is buried at the end, so say plainly
     what is wrong and how to clear it.
     """
@@ -254,8 +256,8 @@ def teardown_run_environments(
     """Release a finished run's Docker containers, networks, and images.
 
     Harbor removes its own environment when a trial ends normally, but an
-    interrupt aborts that cleanup mid-flight and leaks two networks per run.
-    Docker's built-in address pools hold only 31 networks, so a handful of
+    interrupt aborts that cleanup mid-flight and leaks run networks.
+    Default address pools are finite, so a handful of
     interrupted runs is enough to make every later run fail at compose time.
     Compose-built images are run-scoped and can consume several gigabytes each,
     so they are removed by default as well. Teardown is best-effort: it must
