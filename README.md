@@ -42,6 +42,8 @@ make check
 ```
 
 [Standalone setup](docs/quick-start.md) · [CLI reference](docs/cli-reference.md) ·
+[Model-access terms](docs/model-access.md) ·
+[Integrate model access](docs/integrating-model-access.md) ·
 [Harness interface](docs/command-harness.md) ·
 [Harness error handling](docs/command-harness.md#required-request-error-handling) ·
 [Runtime restrictions](docs/gateway-request-policy.md#supported-model-requests) ·

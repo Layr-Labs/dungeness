@@ -6,15 +6,26 @@ from pathlib import Path
 import runpy
 
 
-def model_providers(root: Path) -> dict:
+def model_providers(root: Path, *, details: bool = False) -> dict:
     """Describe the actual gateway registry; no credentials or model calls.
 
     Used by the standalone CLI in a fresh process, so gateway imports cannot
     share module state with a different runtime checkout.
     """
     gateway = runpy.run_path(str(root / "services/gateway/model_access.py"))
-    return {"schema_version": 1, "runtime": "dungeness",
-            "providers": sorted(gateway["MODEL_ACCESS"])}
+    document = {"schema_version": 1, "runtime": "dungeness",
+                "providers": sorted(gateway["MODEL_ACCESS"])}
+    if details:
+        document["access_routes"] = [
+            {
+                "id": name,
+                "upstream": config["upstream_default"],
+                "operations": sorted(config["routes"]),
+                "credential_inputs": gateway["credential_requirements"]([name]),
+            }
+            for name, config in sorted(gateway["MODEL_ACCESS"].items())
+        ]
+    return document
 
 
 def runtime_contract(root: Path) -> dict:

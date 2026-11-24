@@ -50,12 +50,15 @@ model_access:
   request_reservation_usd: 0.5
 ```
 
-All models require entries in the trusted pricing schedule. Credentials come
-from the operator's environment file using `TESTBED_<PROVIDER>_API_KEY`.
-ChatGPT instead uses `DUNGENESS_CODEX_AUTH_FILE`, pointing to a private temporary
-file with `tokens.access_token` and `tokens.account_id`. Mount that file only
-into the gateway; no native credentials or refresh proxy are supplied to a
-command harness. The caller owns credential lifetime and cleanup.
+All models require entries in the trusted pricing schedule. The trusted launcher
+supplies the private input names reported by `dungeness providers --details`;
+these vary by access route and are not derived from the vendor name.
+ChatGPT uses `DUNGENESS_CODEX_AUTH_FILE`, pointing to private JSON with
+`tokens.access_token` and `tokens.account_id`. Newly compiled runs stage only the
+required fields and remove that snapshot after container teardown. The caller's
+original login remains unchanged. The harness receives placeholder access only.
+See [integrating model access](integrating-model-access.md) for a coding-agent
+handoff and the credential preparation contract.
 
 The pricing schedule is runtime data, not a source-code model whitelist.
 An enclosing service such as OpenRSI can install a frozen, authenticated

@@ -1,4 +1,4 @@
-"""Trusted model connections shared by the compiler and gateway.
+"""Trusted model access routes shared by the compiler and gateway.
 
 The public selector is still called ``provider``. Definitions contain no secret
 values and are never supplied by a harness. Runtime parsers are named here and
@@ -104,7 +104,7 @@ MODEL_ACCESS = {
 
 
 def configured_provider(name, profile):
-    """Normalize the existing providers.json format into a connection definition."""
+    """Normalize the existing providers.json format into an access-route definition."""
     return {
         "authentication": profile_authentication(profile),
         "routes": set(profile["routes"]),
@@ -135,6 +135,32 @@ def credential_names(config):
 def credential_files(config):
     """Existing private-file inputs; no credential is opened during compilation."""
     return [source for source in config["authentication"]["sources"] if "file_env" in source]
+
+
+def credential_requirements(access_routes):
+    """Describe selected private inputs without reading credentials or logging in.
+
+    Each current route uses one explicit authentication source. Alternative
+    sources/account selection need a deliberate contract instead of requiring
+    every possible credential or silently choosing a fallback.
+    """
+    result = {"schema_version": 1, "environment": {}, "files": {}}
+    for name in sorted(set(access_routes)):
+        if name not in MODEL_ACCESS:
+            raise ValueError("Unknown model access route.")
+        config = MODEL_ACCESS[name]
+        if len(config["authentication"]["sources"]) != 1:
+            raise ValueError("Access route requires explicit authentication source selection.")
+        for key in sorted(credential_names(config)):
+            result["environment"][key] = "TESTBED_" + key
+        for source in credential_files(config):
+            specs = [*source["headers"].values(), source.get("expires_at", {})]
+            result["files"][source["host_env"]] = {
+                "gateway_env": source["file_env"],
+                "mount_path": source["mount_path"],
+                "paths": [spec["path"] for spec in specs if "path" in spec],
+            }
+    return result
 
 
 def gateway_base_url(provider, api):

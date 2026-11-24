@@ -2013,7 +2013,11 @@ def main() -> int:
     )
     capabilities_parser.set_defaults(handler=show_capabilities)
     providers_parser = subparsers.add_parser(
-        "providers", help="print the trusted gateway's implemented provider IDs as JSON"
+        "providers", help="print implemented access-route IDs as JSON (legacy provider IDs)"
+    )
+    providers_parser.add_argument(
+        "--details", action="store_true",
+        help="include fixed upstreams, operations and required credential input names",
     )
     providers_parser.set_defaults(handler=show_providers)
     init_parser = subparsers.add_parser(
@@ -2180,10 +2184,10 @@ def main() -> int:
         return 130
 
 
-def show_providers(_args: argparse.Namespace) -> int:
+def show_providers(args: argparse.Namespace) -> int:
     from dungeness.contracts import model_providers
 
-    print(json.dumps(model_providers(REPO_ROOT), sort_keys=True, indent=2))
+    print(json.dumps(model_providers(REPO_ROOT, details=args.details), sort_keys=True, indent=2))
     return 0
 
 

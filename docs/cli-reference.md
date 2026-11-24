@@ -137,8 +137,9 @@ needed:
 
 ### Model access
 
-Use the [command model-access contract](command-harness.md) and
-[gateway authentication configuration](gateway-authentication.md). Provider keys
+Use the [model-access terms](model-access.md),
+[command model-access contract](command-harness.md) and
+[gateway authentication configuration](gateway-authentication.md). Real credentials
 are passed only to the gateway. Agent images receive a placeholder token and
 allowed model URLs; they never receive native credentials or a refresh proxy.
 
@@ -464,8 +465,9 @@ run.
 
 An agent manifest declares a Docker image and `dungeness-command-v1`
 entrypoint. It cannot select a host adapter, native authentication or host
-launcher configuration. Choose providers and models independently in
-`model_access`. The harness owns its coding-agent installation and options.
+launcher configuration. Choose access routes (the existing `provider` field) and
+models in `model_access`, subject to their protocol and model compatibility.
+The harness owns its coding-agent installation and options.
 
 Prices, credentials and upstream endpoints remain trusted gateway configuration.
 Accounting uses `services/gateway/pricing.yaml`; unpriced combinations are
@@ -688,8 +690,16 @@ to disable one inherited from a custom policy. In a run spec,
 `budget.max_model_tokens: null` explicitly disables the policy ceiling.
 The gateway represents an unlimited token allowance as JSON `null` in `/status`.
 
-## Provider discovery
+## Access-route discovery
 
-`./dungeness providers` prints the gateway's implemented provider IDs as JSON.
+`./dungeness providers` prints the gateway's implemented access-route IDs as JSON.
+The command and its `providers` field retain their historical names. For example,
+`openai` selects OpenAI API access with an API key; `openai-chatgpt` selects
+ChatGPT Codex account access. See the [route table](gateway-authentication.md#llm-access-routes).
 It requires no Docker, credentials, user configuration or model calls. See the
 [runtime contract](runtime-contract.md) for schema and availability semantics.
+
+Add `--details` to include the fixed upstream, operations and required credential
+input names for each access route. The [integration guide](integrating-model-access.md)
+explains how a trusted launcher prepares those inputs and how a solver harness
+uses the assigned gateway without receiving real credentials.

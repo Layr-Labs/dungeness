@@ -1,0 +1,134 @@
+# Integrating model access
+
+For a coding agent building a solver harness, start with the harness section
+below. Credential preparation belongs to the trusted launcher running outside
+the harness. See [terms](model-access.md) and the
+[access-route table](gateway-authentication.md#llm-access-routes).
+
+## Building or adapting a solver harness
+
+1. Read the `models` entries in the JSON file named by `DUNGENESS_TASK`. Use each
+   selected model's `provider` (historical access-route ID), `request_model`,
+   `api` and assigned `base_url`. Match the client's protocol to `api`.
+2. Configure the client to call that gateway URL using the placeholder `testbed`
+   credential. Real account credentials, login files and account discovery
+   belong outside the harness. Do not copy them into its source or image.
+3. Preserve streaming usage and tool history. Handle the gateway's structured
+   [recovery responses](command-harness.md#required-request-error-handling):
+   stop when instructed, retry with bounded backoff when permitted, and correct
+   rejected requests before resending. Preserve the best evaluated candidate.
+4. Test a complete tool-call turn, recovery and cancellation using synthetic
+   upstream responses. Verify the actual harness wrapper, not only the gateway.
+   Model discovery or a successful text response alone is insufficient.
+
+The [command-harness contract](command-harness.md) documents the task file,
+execution entrypoint and evaluator interface. The harness owns its agent loop.
+Choosing an access route does not select Codex, Claude Code or another harness.
+
+This is a short handoff to a coding agent:
+
+> Integrate this harness with Dungeness's command-harness contract. Read the
+> selected models and gateway URLs from DUNGENESS_TASK; use the declared protocol,
+> requested model and placeholder testbed credential. Keep real credentials and
+> login discovery outside the harness. Implement the documented gateway recovery
+> responses and preserve evaluated candidates. Test tool history, retry, stop
+> and cancellation with synthetic responses. Report the tested access routes,
+> protocol limitations and remaining live checks.
+
+## Discovering credential inputs
+
+Run from a trusted, pinned Dungeness checkout:
+
+```sh
+./dungeness capabilities
+./dungeness providers --details
+```
+
+`model-credential-inputs-v1` advertises the detailed description and preparation
+interface. `providers` without the flag retains its original JSON exactly.
+Detailed output adds `access_routes`, with each route's ID, fixed upstream,
+operations and `credential_inputs`. No login, credential read or inference occurs.
+For OpenAI API access, the input description is:
+
+```json
+{
+  "schema_version": 1,
+  "environment": {"OPENAI_API_KEY": "TESTBED_OPENAI_API_KEY"},
+  "files": {}
+}
+```
+
+`environment` maps the gateway's private field name to the launcher's input name.
+It does not instruct the launcher to put real values into Docker's environment.
+ChatGPT's `files` entry instead names `DUNGENESS_CODEX_AUTH_FILE`, its gateway
+variable, mount destination and required JSON field paths. These descriptions
+are recipes with names only. Implementation availability, account eligibility,
+model availability and attested qualification are separate checks.
+
+## Integrating a trusted launcher
+
+Ordinary `dungeness run` already prepares credentials and tears them down after
+the containers stop. A launcher supplies its existing private env file and,
+for ChatGPT, the access-file path. Existing input names remain unchanged.
+
+For a different trusted launcher, the pinned checkout exposes
+`dungeness.credential_access` under `src`:
+
+```python
+from dungeness.credential_access import credential_requirements, prepare_credentials
+
+requirements = credential_requirements(["openai", "openai-chatgpt"])
+# Obtain these inputs through your trusted local setup, never a harness or prompt.
+supplied = {
+    "TESTBED_OPENAI_API_KEY": selected_api_key,
+    "DUNGENESS_CODEX_AUTH_FILE": selected_private_login_path,
+}
+with prepare_credentials(requirements, supplied) as (private_paths, empty_env_file):
+    # Start your backend with these private file mounts and no real-key env vars.
+    # Keep this context open until every container using the files has stopped.
+    # private_paths contains host paths, never credential values.
+    pass
+```
+
+The example illustrates preparation, not a complete backend launcher.
+`selected_api_key` and `selected_private_login_path` are values supplied by your
+existing trusted account setup. The resolver reads only `supplied`; it does not
+search ambient credentials, choose another account, refresh access or contact a
+provider. The gateway checks token expiry on every admitted request, as before.
+
+The returned `DUNGENESS_CREDENTIALS_FILE` is the private JSON map containing
+selected key/token values. Mount it read-only at `/run/dungeness/credentials.json`
+and set the gateway's variable to that container path. For each described file
+input, mount its returned host path at `mount_path`, then set `gateway_env` to
+that container path. Only the gateway receives these mounts. The generated
+Compose configuration already does this.
+
+Files are 0600 inside a 0700 temporary directory. Source JSON must be a bounded,
+private, regular file with no symlinks or extra hard links. Only JSON fields named
+by the authentication recipe are staged; unrelated refresh tokens and login
+metadata stay in the original source. The original file is never deleted or
+modified. Missing/malformed inputs fail with input names, not secret values.
+
+The context removes staged files on normal exit, exceptions and cancellation
+that unwinds Python. The Dungeness launcher handles SIGTERM and stops containers
+before closing it. SIGKILL or host failure cannot guarantee cleanup. Existing
+compiled renders without file-input metadata retain their original file mounts;
+recompile to receive managed file snapshots.
+
+## Adding an access route
+
+Modify the trusted runtime, not a submitted harness. Define its fixed destination,
+supported operations, authentication recipe, model mapping and usage parser.
+An existing OpenAI-compatible protocol may fit `providers.json`; a new protocol
+needs its own request/response handling and policy tests. An auth token alone
+does not make protocols or model entitlements interchangeable.
+
+The compiler and credential resolver derive inputs from the same registry.
+Current recipes support one explicit source per access route; multiple accounts,
+alternative sources and refresh require a separate explicit design. Keep model
+usage and reference prices complete, with no silent paid-API fallback.
+
+Validate private staging, missing/expired credentials, field filtering and
+cleanup; then streaming, tool history, accounting, error recovery and an actual
+harness run. VM packaging and attested qualification follow separately.
+Neither this interface nor Google discovery adds a Google execution adapter.

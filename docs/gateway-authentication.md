@@ -2,23 +2,31 @@
 
 The harness sends inference in a supported wire protocol using its assigned
 gateway URL and a placeholder credential. The gateway authenticates the upstream
-connection using operator-owned configuration. Authentication does not translate
+request using operator-owned configuration. Authentication does not translate
 the request or choose research settings.
 
 ## LLM access routes
 
-The gateway ships built-in and configured access routes. A route identifies an upstream endpoint
-and authentication recipe, not a model or a blanket permission to use an account.
+The gateway ships built-in and configured access routes. Each describes a service,
+protocol, authentication recipe and trusted routing rules. See
+[model-access terms](model-access.md) for the distinction between a provider,
+service, route, account and credential.
 
-| Route | Access mechanism |
-| --- | --- |
-| `openai` | OpenAI API key |
-| `openai-chatgpt` | Temporary ChatGPT account access token and account ID |
-| `anthropic` | Anthropic API key |
-| `claude-subscription` | Claude access token plus an explicit future expiry |
-| `openrouter` | OpenRouter API key; models from multiple vendors |
-| `grok-subscription` | Local Grok access token plus its actual expiry |
-| `minimax-subscription` | Local MiniMax Coding/Token Plan key |
+The `provider` field holds the historical route ID, not just the vendor name.
+Existing IDs and public interfaces remain unchanged.
+
+| Access route | Existing `provider` ID | Required access material |
+| --- | --- | --- |
+| OpenAI API — API key | `openai` | OpenAI API key |
+| ChatGPT Codex — account access | `openai-chatgpt` | Temporary ChatGPT access token and account ID |
+| Anthropic API — API key | `anthropic` | Anthropic API key |
+| Claude — account access | `claude-subscription` | Claude access token plus an explicit future expiry |
+| OpenRouter API — API key | `openrouter` | OpenRouter API key; models from multiple vendors |
+| Grok CLI service — account access | `grok-subscription` | Local Grok access token plus its actual expiry |
+| MiniMax API — plan key | `minimax-subscription` | Local MiniMax Coding/Token Plan key |
+
+These names describe access mechanisms. Account entitlement and upstream billing
+still determine which models and balances are available.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
 Kimi Code remains excluded because its subscription guidelines prohibit
@@ -33,9 +41,9 @@ cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
 remains named `provider` for compatibility.
 
-`services/gateway/model_access.py` is the shared connection registry. It combines
+`services/gateway/model_access.py` is the shared access-route registry. It combines
 built-in definitions with the existing `providers.json` profiles. The compiler
-reads each connection's credential requirements from its authentication recipe;
+reads each route's credential requirements from its authentication recipe;
 the gateway uses the same definition for the destination, operations, model
 mapping, and usage parser. The registry contains names and recipes, never secret
 values. Public provider IDs, gateway URLs, and credential input names are unchanged.
@@ -44,7 +52,7 @@ Destinations are fixed by that registry. Legacy `*_UPSTREAM_BASE_URL` settings
 (including `CHATGPT_UPSTREAM_BASE_URL`) are accepted only when they match the
 registered URL, with an optional trailing slash. A different or empty value in
 the gateway environment prevents startup before credential use or provider
-traffic. Compiled runs pass the selected connections' settings through for this
+traffic. Compiled runs pass the selected routes' settings through for this
 validation; requests always use the registry URL. Before upgrading a deployment,
 check its endpoint settings and remove obsolete overrides. A supported alternate
 destination requires a reviewed registry change, not a run parameter or proxy URL.
@@ -55,6 +63,11 @@ Certificate verification and redirect rejection remain enabled. It does not
 select a replacement model API endpoint.
 
 ## Authentication recipes
+
+The [integration guide](integrating-model-access.md) explains the shared
+`credential_requirements` / `prepare_credentials` interface and the separate
+instructions for solver harnesses. `dungeness providers --details` describes
+required inputs without reading credentials.
 
 `services/gateway/gateway_auth.py` resolves authentication recipes. Recipes
 specify headers whose values come from a credential name, a field in a
@@ -67,7 +80,10 @@ They preserve the existing operator input names. The launcher reads those
 inputs from the run's env file (taking precedence over host values) and stages
 only the required credentials in a private JSON file. Generated containers never
 receive API keys or account metadata as environment-variable values.
-ChatGPT's recipe reads its access token and account ID from the staged file.
+For newly compiled runs, the same resolver stages ChatGPT's access token and
+account ID in a separate private file. It copies only recipe-selected fields;
+refresh tokens and unrelated login metadata are omitted. The original login
+file stays unchanged.
 A missing, malformed, or incomplete credential file fails closed. Caller-supplied
 bearer tokens are never used to authenticate upstream requests.
 
@@ -173,7 +189,9 @@ Staged files are removed after container teardown on completion, failure,
 Ctrl-C and SIGTERM cancellation. SIGKILL or host failure cannot run cleanup;
 operators should clear abandoned private staging directories after confirming
 their runs have stopped. The caller's original credential inputs are not deleted.
-ChatGPT keeps its existing private read-only access-file mount. This does not
+ChatGPT keeps its existing input name and read-only gateway mount; newly compiled
+runs mount the resolver's private snapshot. Earlier renders without file-input
+metadata retain their original mount behavior until recompiled. This does not
 protect credentials from the trusted gateway process, host root or Docker-daemon
 administrators, who can read mounted files.
 

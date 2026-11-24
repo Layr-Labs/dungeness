@@ -22,7 +22,8 @@ additive changes do not require an envelope version change.
 | `assigned-problem-service-v1` | A pinned read-only task service and declared attachments/resources are accessible through the gateway; attachment integrity and path constraints are checked during compilation. |
 | `optional-model-token-limit-v1` | An explicit null model-token cap disables that ceiling while preserving USD and execution limits and token accounting. |
 | `declarative-scaffolds-v2` | Trusted schema-v2 scaffolds declare candidate files, support files and checked text edits without problem-specific compiler code or executable host hooks. |
-| `model-provider-registry-v1` | `dungeness providers` reports provider IDs from the gateway's actual registry, including trusted runtime extensions, without credentials or model calls. |
+| `model-provider-registry-v1` | `dungeness providers` reports access-route IDs from the gateway's actual registry, including trusted runtime extensions, without credentials or model calls. The command and capability names remain unchanged. |
+| `model-credential-inputs-v1` | `dungeness providers --details` describes credential inputs from the registry; `dungeness.credential_access` describes and stages explicit inputs privately. Newly compiled runs include managed file-credential snapshots and cleanup. |
 
 This declaration is a compatibility interface, not a security attestation.
 Consumers must still select a trusted runtime revision and verify that the
@@ -31,11 +32,22 @@ The capability file is committed and included in runtime exports. Existing
 run-spec, command-agent, gateway and record schemas remain unchanged.
 
 `./dungeness providers` returns `{"schema_version": 1, "runtime": "dungeness",
-"providers": [...]}`. Consumers use it to check provider availability for their
+"providers": [...]}`. The historical `providers` field contains access-route IDs;
+see [model-access terms](model-access.md). Consumers use it to check route availability for their
 selected runtime instead of maintaining a second allowlist. It describes
 implemented routes, not credential validity, model prices or operator-dependent
 features such as OpenRouter inference-only routing. Configure extensions only
 in the trusted runtime; harnesses must not supply or replace that registry.
+
+With `--details`, the same envelope adds `access_routes`: a list of objects with
+`id`, `upstream`, `operations` and `credential_inputs`. Input descriptions have
+`schema_version: 1`, `environment` (gateway field to host input name), and `files`
+(host input name to `gateway_env`, `mount_path` and selected JSON `paths`).
+No source-file paths, credentials or current account state are discovered.
+See the [integration guide](integrating-model-access.md) for the Python interface,
+mounting, lifetime and failure behavior. The compiler's
+`x-dungeness-credential-files` metadata is additive; existing
+`x-dungeness-credential-env` selectors and gateway paths are preserved.
 
 ## OpenRSI migration
 
