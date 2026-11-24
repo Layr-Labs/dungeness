@@ -19,7 +19,7 @@ the agent loop; the runtime owns execution, model mediation and evidence.
 | --- | --- |
 | Model access | [Terms](model-access.md), [authentication](gateway-authentication.md), [local account access](local-subscriptions.md). |
 | Requests and failures | [Request policy](gateway-request-policy.md), [harness recovery](command-harness.md#required-request-error-handling), [transport diagnostics](model-failures.md). |
-| Bundled model data | [GPT catalog](gpt-model-catalog.md), [Terra configuration](gpt-terra.md). These describe the pinned runtime, not live account entitlement. |
+| Model selection | [Selecting models](integrating-model-access.md#selecting-models) and the [bundled reference schedule](../services/gateway/pricing.yaml). |
 | Problems and evaluation | [Assigned resources](problem-service.md), [scaffolds](scaffolds.md), [evaluation events](evaluation-events.md). |
 | Architecture | [Records and execution](../DESIGN.md), [gateway](../services/DESIGN.md), [network isolation](network-isolation.md). |
 | Distribution | [Source bundles and retained outputs](runtime-distribution.md). |

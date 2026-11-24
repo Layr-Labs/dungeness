@@ -57,5 +57,5 @@ make check
 [Harness interface](docs/command-harness.md) ·
 [Harness error handling](docs/command-harness.md#required-request-error-handling) ·
 [Runtime restrictions](docs/gateway-request-policy.md#supported-model-requests) ·
-[Bundled GPT models](docs/gpt-model-catalog.md) ·
+[Model selection](docs/integrating-model-access.md#selecting-models) ·
 [Architecture](DESIGN.md) · [Development guide](docs/development.md)

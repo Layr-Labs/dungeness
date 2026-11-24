@@ -35,6 +35,23 @@ This is a short handoff to a coding agent:
 > and cancellation with synthetic responses. Report the tested access routes,
 > protocol limitations and remaining live checks.
 
+## Selecting models
+
+The trusted [route registry](../services/gateway/model_access.py) defines supported
+protocols and endpoints. The installed [pricing schedule](../services/gateway/pricing.yaml)
+lists exact `provider`, `upstream_id` and `request_models` combinations and their
+reference rates. Use those sources rather than maintaining a separate model list
+in documentation. A caller may install its own reviewed schedule.
+
+The caller selects models in the run spec; the harness uses the resulting
+`DUNGENESS_TASK` entries. For OpenAI/ChatGPT coding harnesses, use Responses and
+preserve tool and encrypted reasoning history. Follow the
+[request policy](gateway-request-policy.md) for supported controls.
+
+Reference prices measure comparison cost, not subscription billing or account
+entitlement. Adding a model requires qualifying the caller's catalog and packaged
+runtime together; a selector change alone is insufficient.
+
 ## Discovering credential inputs
 
 Run from a trusted, pinned Dungeness checkout:

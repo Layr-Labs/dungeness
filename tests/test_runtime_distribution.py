@@ -39,7 +39,6 @@ class RuntimeDistributionTests(unittest.TestCase):
             "docs/problem-service.md", "docs/runtime-contract.md",
             "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
             "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
-            "docs/gpt-model-catalog.md", "docs/gpt-terra.md",
             "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
             "tools/transcripts/render_gateway_transcript.py", "tools/transcripts/serve_gateway_transcripts.py",
         ):
@@ -101,7 +100,6 @@ class RuntimeDistributionTests(unittest.TestCase):
             for path in (
                 "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
                 "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
-                "docs/gpt-model-catalog.md", "docs/gpt-terra.md",
                 "docs/examples/local-subscription-pricing-20261030.json", "tools/validate-model-request.py",
             ):
                 self.assertIn(f"dungeness-runtime/{path}", names)
