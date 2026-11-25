@@ -135,7 +135,7 @@ The Python OpenAI SDK merges its `extra_body` argument into the wire request:
 pass `extra_body={"extra_body": {"google": {"thinking_config": ...}}}` to that
 SDK. See [Google's compatibility examples](https://aistudio.google.com/docs/openai#thinking).
 This reviewed wire format works with configured route names; it does not
-register a Google endpoint or make a subscription token compatible with the
+register a Google endpoint or make a credential compatible with the
 Gemini API-key service.
 
 ## Conversation history compatibility

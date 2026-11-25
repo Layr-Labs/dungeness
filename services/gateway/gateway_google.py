@@ -1,4 +1,4 @@
-"""Text/function-call translation for Gemini and the Code Assist envelope.
+"""Text/function-call translation for the Gemini and Vertex APIs.
 
 No login, refresh, account discovery, CLI subprocess or provider-side tools.
 Destinations and authentication are supplied by the trusted route registry.
@@ -272,12 +272,7 @@ def upstream_request(config, payload, model, request_id, headers=None):
         require(isinstance(project, str) and re.fullmatch(r"(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]{1,20})", project),
                 "Vertex project ID is missing or invalid")
         base += f"/projects/{project}/locations/global/publishers/google"
-    if config["transport"] == "google-code-assist":
-        body = {"model": model, "request": body, "user_prompt_id": request_id,
-                **({"project": config["project"]} if "project" in config else {})}
-        url = f"{base}:{method}"
-    else:
-        url = f"{base}/models/{quote(model, safe='')}:{method}"
+    url = f"{base}/models/{quote(model, safe='')}:{method}"
     return url, {"alt": "sse"} if payload.get("stream") else {}, body
 
 
@@ -286,8 +281,8 @@ def protocol_error():
 
 
 class ResponseTranslator:
-    def __init__(self, model, request_id, wrapped=False):
-        self.model, self.request_id, self.wrapped = model, request_id, wrapped
+    def __init__(self, model, request_id):
+        self.model, self.request_id = model, request_id
         self.call_index = 0
         self.finish_reason = None
         self.usage = {}
@@ -297,8 +292,6 @@ class ResponseTranslator:
     def consume(self, value):
         try:
             require(isinstance(value, dict))
-            if self.wrapped:
-                value = value.get("response")
             require(isinstance(value, dict) and "error" not in value)
             # Accounting is not a signal that provider-side tool execution is allowed.
             require(not value.get("automaticFunctionCallingHistory"))
@@ -365,12 +358,12 @@ class ResponseTranslator:
 
 class GoogleResponse:
     """Adapt a streamed HTTP response while retaining the gateway's one-request lifecycle."""
-    def __init__(self, source, config, payload, request_id):
+    def __init__(self, source, payload, request_id):
         self.source = source
         self.streaming = payload.get("stream", False)
         self.headers = httpx.Headers({"content-type": "text/event-stream" if self.streaming else "application/json"})
         self.status_code, self.is_success = source.status_code, source.is_success
-        self.translator = ResponseTranslator(payload["model"], request_id, config["transport"] == "google-code-assist")
+        self.translator = ResponseTranslator(payload["model"], request_id)
 
     async def aclose(self):
         await self.source.aclose()

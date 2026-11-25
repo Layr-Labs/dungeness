@@ -1,4 +1,4 @@
-"""Google-compatible wire shapes; synthetic upstream, not subscription qualification."""
+"""Google-compatible wire shapes with a synthetic upstream."""
 import copy
 import json
 import unittest
@@ -27,7 +27,6 @@ ASSISTANT = {
     ],
 }
 # An OpenAI-compatible usage contract: reasoning is included in completion.
-# This fixture does not establish the live Google subscription usage contract.
 USAGE = {"prompt_tokens": 20, "completion_tokens": 7, "total_tokens": 27,
          "prompt_tokens_details": {"cached_tokens": 5},
          "completion_tokens_details": {"reasoning_tokens": 3}}

@@ -1,4 +1,4 @@
-"""Real gateway HTTP boundary with synthetic Gemini/Code Assist responses."""
+"""Real gateway HTTP boundary with synthetic Gemini API responses."""
 import copy
 from contextlib import asynccontextmanager
 import json
@@ -30,13 +30,10 @@ RESULT = {"candidates": [{"index": 0, "content": {"role": "model", "parts": PART
 
 
 @asynccontextmanager
-async def google_harness(transport="google-generate-content"):
+async def google_harness():
     async with harness() as (client, runtime, calls):
-        config = {**MODEL_PROVIDERS[PROVIDER], "transport": transport, "authentication_method": "bearer",
-                  "upstream_default": "https://google.invalid/v1internal" if transport == "google-code-assist"
-                  else "https://google.invalid/v1beta"}
-        if transport == "google-code-assist":
-            config["project"] = "synthetic-project"
+        config = {**MODEL_PROVIDERS[PROVIDER], "transport": "google-generate-content",
+                  "authentication_method": "bearer", "upstream_default": "https://google.invalid/v1beta"}
         selection = {"endpoint": config["upstream_default"], "authentication": "bearer"}
         provider = resolve_endpoint({PROVIDER: config}, selection)
         config = resolve_routes({PROVIDER: config}, {provider: selection})[provider]
@@ -58,14 +55,12 @@ def accounting(runtime):
             if item["kind"] == "model.accounting"]
 
 
-def stream_events(wrapped=False):
+def stream_events():
     events = []
     for part in PARTS:
         events.append({"candidates": [{"content": {"role": "model", "parts": [part]}}]})
     events += [{"candidates": [{"finishReason": "STOP"}]}, {"usageMetadata": COUNTS},
                {"usageMetadata": COUNTS}]  # repeated cumulative receipt must not double charge
-    if wrapped:
-        events = [{"response": event, "traceId": "private-provider-trace"} for event in events]
     return "".join("data: " + json.dumps(event) + "\r\n\r\n" for event in events).encode()
 
 
@@ -90,67 +85,58 @@ def collect_message(response):
 
 class GoogleTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_json_and_fragmented_stream_roundtrip_and_meter_thoughts_once(self):
-        for transport in ("google-generate-content", "google-code-assist"):
-            for streaming in (False, True):
-                with self.subTest(transport=transport, streaming=streaming):
-                    async with google_harness(transport) as (client, runtime, _, config):
-                        requests = []
-                        def upstream(request):
-                            requests.append(request)
-                            if streaming:
-                                return httpx.Response(200, headers={"content-type": "text/event-stream"},
-                                                      stream=Fragments(stream_events(transport == "google-code-assist")))
-                            return httpx.Response(200, json={"response": RESULT} if transport == "google-code-assist" else RESULT)
-                        await runtime.client.aclose()
-                        runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
-                        response = await client.post(route(PROVIDER, OPERATION), json=payload(stream=streaming),
-                                                     headers={"authorization": "Bearer spoofed"})
-                        self.assertEqual(response.status_code, 200, response.text)
-                        message = collect_message(response) if streaming else response.json()["choices"][0]["message"]
-                        self.assertEqual(message["extra_content"]["google"]["parts"], PARTS)
-                        self.assertEqual(message["reasoning_content"], "Consider a candidate.")
-                        validate_model_request(PROVIDER, OPERATION, payload(messages=[message]))
-                        followup = payload(stream=streaming)
-                        followup["messages"] += [message, *[
-                            {"role": "tool", "tool_call_id": call["id"], "content": "valid candidate: 42"}
-                            for call in message["tool_calls"]]]
-                        response = await client.post(route(PROVIDER, OPERATION), json=followup)
-                        self.assertEqual(response.status_code, 200, response.text)
-                        for req in requests:
-                            method = "streamGenerateContent" if streaming else "generateContent"
-                            expected = (config["upstream_default"] + ":" + method if transport == "google-code-assist"
-                                        else config["upstream_default"] + "/models/example-model:" + method)
-                            self.assertEqual(str(req.url), expected + ("?alt=sse" if streaming else ""))
-                            self.assertNotIn("spoofed", dict(req.headers).values())
-                            self.assertEqual(req.headers["authorization"], "Bearer unused-session")
-                            self.assertNotIn("unused-session", req.content.decode())
-                            body = json.loads(req.content)
-                            if transport == "google-code-assist":
-                                self.assertEqual(body["project"], "synthetic-project")
-                                self.assertEqual(body["model"], "example-model")
-                                self.assertNotIn("enabled_credit_types", body)
-                                body = body["request"]
-                            self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "HIGH"})
-                            self.assertEqual(body["generationConfig"]["maxOutputTokens"], 4096)
-                            self.assertEqual(body["tools"][0]["functionDeclarations"][0]["name"], "evaluate")
-                        body = json.loads(requests[1].content)
-                        if transport == "google-code-assist":
-                            body = body["request"]
-                        self.assertEqual(body["contents"][1], {"role": "model", "parts": PARTS})
-                        self.assertEqual(body["contents"][2]["parts"][0]["functionResponse"]["name"], "evaluate")
-                        self.assertNotIn("id", body["contents"][2]["parts"][0]["functionResponse"])
-                        self.assertEqual(body["contents"][2]["parts"][1]["functionResponse"]["id"], "native-two")
-                        receipts = accounting(runtime)
-                        self.assertEqual(len(receipts), 2)
-                        for receipt in receipts:
-                            self.assertEqual(receipt["input_tokens"], 100)
-                            self.assertEqual(receipt["cached_input_tokens"], 40)
-                            self.assertEqual(receipt["output_tokens"], 30)
-                            self.assertEqual(receipt["reasoning_tokens"], 20)
-                            self.assertAlmostEqual(receipt["normalized_usd"], .00032)
-                            self.assertIsNone(receipt["billed_usd"])
-                        events = (runtime.ledger.directory / "events.jsonl").read_text()
-                        self.assertNotIn("unused-session", events)
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                async with google_harness() as (client, runtime, _, config):
+                    requests = []
+                    def upstream(request):
+                        requests.append(request)
+                        if streaming:
+                            return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                                  stream=Fragments(stream_events()))
+                        return httpx.Response(200, json=RESULT)
+                    await runtime.client.aclose()
+                    runtime.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+                    response = await client.post(route(PROVIDER, OPERATION), json=payload(stream=streaming),
+                                                 headers={"authorization": "Bearer spoofed"})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    message = collect_message(response) if streaming else response.json()["choices"][0]["message"]
+                    self.assertEqual(message["extra_content"]["google"]["parts"], PARTS)
+                    self.assertEqual(message["reasoning_content"], "Consider a candidate.")
+                    validate_model_request(PROVIDER, OPERATION, payload(messages=[message]))
+                    followup = payload(stream=streaming)
+                    followup["messages"] += [message, *[
+                        {"role": "tool", "tool_call_id": call["id"], "content": "valid candidate: 42"}
+                        for call in message["tool_calls"]]]
+                    response = await client.post(route(PROVIDER, OPERATION), json=followup)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    for req in requests:
+                        method = "streamGenerateContent" if streaming else "generateContent"
+                        expected = config["upstream_default"] + "/models/example-model:" + method
+                        self.assertEqual(str(req.url), expected + ("?alt=sse" if streaming else ""))
+                        self.assertNotIn("spoofed", dict(req.headers).values())
+                        self.assertEqual(req.headers["authorization"], "Bearer unused-session")
+                        self.assertNotIn("unused-session", req.content.decode())
+                        body = json.loads(req.content)
+                        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "HIGH"})
+                        self.assertEqual(body["generationConfig"]["maxOutputTokens"], 4096)
+                        self.assertEqual(body["tools"][0]["functionDeclarations"][0]["name"], "evaluate")
+                    body = json.loads(requests[1].content)
+                    self.assertEqual(body["contents"][1], {"role": "model", "parts": PARTS})
+                    self.assertEqual(body["contents"][2]["parts"][0]["functionResponse"]["name"], "evaluate")
+                    self.assertNotIn("id", body["contents"][2]["parts"][0]["functionResponse"])
+                    self.assertEqual(body["contents"][2]["parts"][1]["functionResponse"]["id"], "native-two")
+                    receipts = accounting(runtime)
+                    self.assertEqual(len(receipts), 2)
+                    for receipt in receipts:
+                        self.assertEqual(receipt["input_tokens"], 100)
+                        self.assertEqual(receipt["cached_input_tokens"], 40)
+                        self.assertEqual(receipt["output_tokens"], 30)
+                        self.assertEqual(receipt["reasoning_tokens"], 20)
+                        self.assertAlmostEqual(receipt["normalized_usd"], .00032)
+                        self.assertIsNone(receipt["billed_usd"])
+                    events = (runtime.ledger.directory / "events.jsonl").read_text()
+                    self.assertNotIn("unused-session", events)
 
     async def test_unmapped_controls_and_hidden_server_tools_rejected_before_traffic(self):
         async with google_harness() as (client, runtime, calls, _):
@@ -288,13 +274,13 @@ class GoogleUsageTests(unittest.TestCase):
         translator.consume({"usageMetadata": COUNTS})
         self.assertEqual(translator.finish()["usage"]["completion_tokens"], 30)
 
-    def test_registry_transport_and_project_are_trusted_and_protocol_bound(self):
+    def test_registry_rejects_removed_google_subscription_transport(self):
         config = {"authentication": {"sources": [{"headers": {"authorization": {"env": "GOOGLE_TOKEN", "prefix": "Bearer "}}}]},
-                  "upstream_default": "https://google.invalid/v1internal", "upstream_env": "GOOGLE_UPSTREAM",
-                  "routes": ["chat/completions", "models"], "auth": "gateway_secret", "billed": False,
-                  "passthrough": [], "usage_parser": "openai", "transport": "google-code-assist", "project": "project-id"}
-        self.assertEqual(validate_access_routes({"google-test": config})["google-test"]["transport"], "google-code-assist")
-        for change in ({"transport": "arbitrary"}, {"usage_parser": "anthropic"}, {"routes": ["responses"]},
-                       {"transport": "passthrough"}, {"project": "../secret"}):
-            with self.assertRaises(ValueError):
+                  "upstream_default": "https://google.invalid/v1beta", "upstream_env": "GOOGLE_UPSTREAM",
+                  "routes": ["chat/completions", "models"], "auth": "gateway_secret", "billed": True,
+                  "passthrough": [], "usage_parser": "openai", "transport": "google-generate-content"}
+        self.assertEqual(validate_access_routes({"google-test": config})["google-test"]["transport"], "google-generate-content")
+        for change in ({"transport": "google-code-assist"}, {"transport": "arbitrary"},
+                       {"usage_parser": "anthropic"}, {"routes": ["responses"]}, {"project": "project-id"}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_access_routes({"google-test": {**config, **change}})

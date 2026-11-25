@@ -604,7 +604,7 @@ class Gateway:
             async with request_deadline(deadline):
                 upstream = await self.client.send(upstream_request, stream=True)
             if google_transport and upstream.is_success:
-                upstream = GoogleResponse(upstream, cfg, payload, request_id)
+                upstream = GoogleResponse(upstream, payload, request_id)
                 # Meter the latest native receipt, independently of downstream
                 # translation or a disconnect after the final usage event.
                 extract = lambda _body, _type: (upstream.translator.usage

@@ -88,7 +88,7 @@ def validate_access_routes(entries):
     for name, config in entries.items():
         _require(_matches(r"[a-z][a-z0-9-]{0,47}", name))
         _require(isinstance(config, dict) and required <= set(config)
-                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project", "project_header", "authentication_method"})
+                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project_header", "authentication_method"})
         if "authentication_method" in config:
             _require(_matches(r"[a-z][a-z0-9-]{0,47}", config["authentication_method"]))
         url = config["upstream_default"]
@@ -104,13 +104,10 @@ def validate_access_routes(entries):
         _require(config["auth"] == "gateway_secret" and type(config["billed"]) is bool)
         _require(config["usage_parser"] in ("openai", "anthropic"))
         transport = config.get("transport", "passthrough")
-        _require(transport in ("passthrough", "google-generate-content", "google-code-assist"))
+        _require(transport in ("passthrough", "google-generate-content"))
         if transport != "passthrough":
             _require(set(operations) <= {"chat/completions", "models"}
                      and "chat/completions" in operations and config["usage_parser"] == "openai")
-        if "project" in config:
-            _require(transport == "google-code-assist"
-                     and _matches(r"[A-Za-z0-9._:-]{1,128}", config["project"]))
         variable = config["upstream_env"]
         _require(_matches(r"[A-Z][A-Z0-9_]*", variable) and variable not in variables)
         variables.add(variable)
@@ -130,7 +127,7 @@ def validate_access_routes(entries):
             _require(transport == "google-generate-content"
                      and _matches(r"[a-z][a-z0-9-]*", header)
                      and header in config["authentication"]["sources"][0]["headers"]
-                     and header not in headers and "project" not in config)
+                     and header not in headers)
         if "models" in config:
             _require(isinstance(config["models"], dict))
             for model, mapping in config["models"].items():
