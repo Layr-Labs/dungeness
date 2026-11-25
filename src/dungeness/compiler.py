@@ -991,7 +991,10 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
         upstream_model(config, model["request_model"])
         if model["request_model"] not in pricing.get("request_models", []):
             raise ValueError("Request model does not match its trusted pricing identity.")
-        operation = {"openai-chat": "chat/completions", "openai-responses": "responses",
+        # Existing production clients call the Chat Completions interface
+        # "openai-completions". Keep that public label as an alias.
+        operation = {"openai-chat": "chat/completions", "openai-completions": "chat/completions",
+                     "openai-responses": "responses",
                      "anthropic-messages": "messages"}.get(model["api"])
         if operation not in config["routes"]:
             raise ValueError("Model protocol is not supported by the selected endpoint.")

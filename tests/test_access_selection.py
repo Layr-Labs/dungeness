@@ -87,6 +87,14 @@ class AccessSelectionTests(unittest.TestCase):
                 model = {**MODEL, **patch}
                 compiler.command_models({"model": model, "model_access": {"models": [model], "routes": SELECTION}})
 
+    def test_existing_production_chat_completions_label_is_preserved(self):
+        model = {"provider": "openai", "request_model": "gpt-5.6-sol",
+                 "upstream_id": "openai/gpt-5.6-sol", "api": "openai-completions",
+                 "name_format": "request"}
+        resolved, = compiler.command_models({"model": model})
+        self.assertEqual(resolved["api"], "openai-completions")
+        self.assertEqual(resolved["base_url"], "http://gateway:8080/model/openai/v1")
+
     def test_unused_routes_and_invalid_startup_fail_closed(self):
         with self.assertRaises(ValueError):
             compiler.command_models({"model": MODEL, "model_access": {
