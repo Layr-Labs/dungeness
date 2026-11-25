@@ -1,0 +1,108 @@
+"""Caller choices cannot replace trusted endpoints, mappings or accounting."""
+import copy
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+
+import yaml
+
+from test_command_harness import compiler
+from access_selection import export_policy, policy_digest, resolve_routes, selection_evidence
+from dungeness.credential_access import credential_requirements, prepare_credentials
+from model_access import DEFAULT_MODEL_ACCESS
+
+ROOT = Path(__file__).resolve().parents[1]
+SELECTION = {"anthropic": {"endpoint": "https://api.anthropic.com/v1",
+                          "authentication": "claude-subscription"}}
+MODEL = {"provider": "anthropic", "request_model": "claude-opus-5",
+         "upstream_id": "anthropic/claude-opus-5", "api": "anthropic-messages", "name_format": "request"}
+
+
+class AccessSelectionTests(unittest.TestCase):
+    def test_selection_changes_only_authentication_and_billing_not_shared_defaults(self):
+        original = copy.deepcopy(DEFAULT_MODEL_ACCESS)
+        resolved = resolve_routes(original, SELECTION)
+        self.assertEqual(original, DEFAULT_MODEL_ACCESS)
+        self.assertEqual(resolved["anthropic"]["authentication"], original["claude-subscription"]["authentication"])
+        for key in original["anthropic"]:
+            if key not in ("authentication", "billed"):
+                self.assertEqual(resolved["anthropic"][key], original["anthropic"][key])
+        self.assertEqual(resolve_routes(original, {}), original)
+        self.assertEqual(selection_evidence(original, SELECTION)["policy_sha256"], policy_digest(original))
+
+    def test_url_and_configuration_escape_hatches_are_rejected_without_echoing_values(self):
+        for patch in (
+            {"endpoint": "https://api.anthropic.com.evil.invalid/v1"},
+            {"endpoint": "https://api.anthropic.com/v1/messages/../files"},
+            {"endpoint": "https://api.anthropic.com/v1?api_key=private"},
+            {"endpoint": "https://private@api.anthropic.com/v1"},
+            {"endpoint": "http://api.anthropic.com/v1"},
+            {"authentication": "openai"},
+            {"authentication": {"headers": {"authorization": "private"}}},
+            {"headers": {"x-upstream-url": "https://private.invalid"}},
+            {"usage_parser": "private"}, {"models": {}}, {"prices": {}},
+            {"credential": "private"}, {"transport": "passthrough"},
+        ):
+            with self.subTest(patch=patch):
+                with self.assertRaises(ValueError) as caught:
+                    resolve_routes(DEFAULT_MODEL_ACCESS, {"anthropic": {**SELECTION["anthropic"], **patch}})
+                self.assertNotIn("private", str(caught.exception))
+
+    def test_selected_credentials_only_and_compose_evidence(self):
+        policy = {"routes": SELECTION, "models": [MODEL]}
+        models = compiler.command_models({"model_access": policy, "model": MODEL})
+        compose = yaml.safe_load(compiler.build_compose(
+            "selection", {}, {"model": {"requests": 4, "total_tokens": 10000}},
+            command_policy={**policy, "models": models}))
+        gateway = compose["services"]["gateway"]
+        self.assertEqual(json.loads(gateway["environment"]["DUNGENESS_ACCESS_SELECTION"]), SELECTION)
+        self.assertEqual(compose["x-dungeness-model-access"], selection_evidence(DEFAULT_MODEL_ACCESS, SELECTION))
+        requirements = credential_requirements(["anthropic"], SELECTION)
+        self.assertNotIn("ANTHROPIC_API_KEY", requirements["environment"])
+        supplied = {"TESTBED_CLAUDE_ACCESS_TOKEN": "private-token",
+                    "TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+                    "TESTBED_ANTHROPIC_API_KEY": "unselected-secret"}
+        with prepare_credentials(requirements, supplied) as (paths, _):
+            private = Path(paths["DUNGENESS_CREDENTIALS_FILE"])
+            self.assertNotIn("unselected-secret", private.read_text())
+            code = ("from model_access import MODEL_ACCESS; from gateway_auth import authentication_headers;"
+                    "h=authentication_headers(MODEL_ACCESS['anthropic']['authentication']);"
+                    "assert h['authorization']=='Bearer private-token'; assert 'x-api-key' not in h")
+            result = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True,
+                env={"PATH": os.defpath, "PYTHONPATH": str(ROOT / "services/gateway"), **paths,
+                     "DUNGENESS_ACCESS_SELECTION": json.dumps(SELECTION)})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("private-token", json.dumps(compose))
+            self.assertNotIn("CLAUDE_ACCESS_TOKEN", json.dumps(compose["services"]["main"]))
+        self.assertFalse(private.exists())
+
+    def test_wrong_model_price_or_protocol_cannot_compile(self):
+        for patch in ({"request_model": "unapproved-model"},
+                      {"upstream_id": "anthropic/claude-sonnet-5-5"},
+                      {"api": "openai-chat"}):
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                model = {**MODEL, **patch}
+                compiler.command_models({"model": model, "model_access": {"models": [model], "routes": SELECTION}})
+
+    def test_unused_routes_and_invalid_startup_fail_closed(self):
+        with self.assertRaises(ValueError):
+            compiler.command_models({"model": MODEL, "model_access": {
+                "models": [MODEL], "routes": {"google": {"endpoint": "https://generativelanguage.googleapis.com/v1beta",
+                                                       "authentication": "google"}}}})
+        for selection in ("null", "[]", "bad", '{"anthropic":{"endpoint":"https://evil.invalid","authentication":"anthropic"}}'):
+            result = subprocess.run([sys.executable, "-B", "-c", "import model_access"], capture_output=True,
+                env={"PATH": os.defpath, "PYTHONPATH": str(ROOT / "services/gateway"),
+                     "DUNGENESS_ACCESS_SELECTION": selection})
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_public_policy_comes_from_registry_and_prices(self):
+        prices = yaml.safe_load((ROOT / "services/gateway/pricing.yaml").read_text())
+        policy = export_policy(DEFAULT_MODEL_ACCESS, prices)
+        self.assertEqual(policy["routes"]["anthropic"]["authentication"], ["anthropic", "claude-subscription"])
+        self.assertEqual(policy["routes"]["google"]["authentication"], ["google"])
+        self.assertIn("gemini-4-carbon", policy["routes"]["google"]["models"])
+        self.assertNotIn("authentication", policy["routes"]["google"]["models"])
+        self.assertNotIn("sources", json.dumps(policy))

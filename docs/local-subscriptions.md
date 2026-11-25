@@ -21,6 +21,10 @@ it. ChatGPT's recipe has no expiry field: the caller supplies valid access and
 upstream authentication errors stop model access. No route silently refreshes,
 chooses another account or falls back to an API key.
 
+A run can explicitly choose a compatible authentication recipe at the same
+approved endpoint. See [per-run access selection](integrating-model-access.md#choosing-an-endpoint-and-authentication-for-a-run).
+This does not add a Google subscription login or a new gateway endpoint.
+
 Google subscription access and Kimi Code are not registered in this revision.
 Adding either requires a reviewed integration and separate account validation.
 

@@ -148,6 +148,55 @@ conflicting environment overrides. A harness cannot choose the upstream endpoint
 
 ## Adding an access route
 
+### Choosing an endpoint and authentication for a run
+
+Run `./dungeness providers --details` to see approved endpoints and the
+authentication recipe IDs available at each endpoint. The usual choice is the
+route's default; no extra configuration is required.
+
+To select another supported recipe, add `routes` alongside `models` in the run
+specification. For example, use a Claude subscription at the Anthropic endpoint:
+
+```yaml
+model_access:
+  routes:
+    anthropic:
+      endpoint: https://api.anthropic.com/v1
+      authentication: claude-subscription
+  models:
+    - provider: anthropic
+      upstream_id: anthropic/claude-opus-5
+      request_model: claude-opus-5
+      api: anthropic-messages
+      name_format: request
+```
+
+The trusted launcher calls
+`credential_requirements(["anthropic"], selections)` with that `routes` mapping,
+then stages the returned inputs with `prepare_credentials`. This example needs
+`TESTBED_CLAUDE_ACCESS_TOKEN` and its actual
+`TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT`, rather than an Anthropic API key.
+Never put credentials in the run specification or harness.
+
+Each selected endpoint must exactly match its registered base. The authentication
+recipe must belong to that same endpoint and compatible transport/path template.
+The requested model must match the trusted model/pricing catalog. Users cannot
+override paths, headers, model aliases, prices or usage parsers. An explicit
+invalid choice fails; it never falls back to another account or route.
+
+The compiler stages only selected credentials and records the selection and
+registry digest. The gateway independently validates the selection at startup.
+There is one choice per route per run; existing configurations remain unchanged.
+Subscription entitlement still depends on the supplied account.
+
+For attested integrations, `python tools/export-access-policy.py` exports the
+derived endpoint/method/model policy and registry/pricing digests. The application
+must freeze that policy in its measured runtime, approve it at the verifier and
+bind the selected endpoint, method, model and policy digest into run inputs.
+Enabling local configuration alone does not qualify an attested release.
+
+### Adding an endpoint or protocol
+
 Add an entry to `access_routes` in `model-access.json`, then add its model rates
 to `pricing.yaml`. For example, this complete entry reuses Chat Completions:
 

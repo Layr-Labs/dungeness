@@ -42,7 +42,8 @@ ADAPTERS_ROOT = REPOSITORY_ROOT / "adapters"
 RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
 sys.path.insert(0, str(GATEWAY_ROOT))
-from model_access import MODEL_ACCESS, credential_requirements, gateway_base_url
+from model_access import MODEL_ACCESS, DEFAULT_MODEL_ACCESS, credential_requirements, gateway_base_url, upstream_model
+from access_selection import resolve_routes, selection_evidence
 PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
@@ -977,19 +978,31 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
     models = agent.get("model_access", {}).get("models", [agent_model(agent)])
     if not isinstance(models, list) or not 1 <= len(models) <= 16:
         raise ValueError("model_access.models requires 1..16 model profiles")
+    selections = agent.get("model_access", {}).get("routes", {})
+    registry = resolve_routes(MODEL_ACCESS, selections)
     seen = set()
     result = []
     for model in models:
         profile = {"model": model}
         model = agent_model(profile)
         provider = agent_provider(profile)
-        resolve_model_pricing(profile)
+        pricing = resolve_model_pricing(profile)
+        config = registry[provider]
+        upstream_model(config, model["request_model"])
+        if model["request_model"] not in pricing.get("request_models", []):
+            raise ValueError("Request model does not match its trusted pricing identity.")
+        operation = {"openai-chat": "chat/completions", "openai-responses": "responses",
+                     "anthropic-messages": "messages"}.get(model["api"])
+        if operation not in config["routes"]:
+            raise ValueError("Model protocol is not supported by the selected endpoint.")
         identity = (provider, model["request_model"])
         if identity in seen:
             raise ValueError("duplicate allowed model")
         seen.add(identity)
         result.append({**model, "name": model["request_model"],
                        "base_url": gateway_base_url(provider, model["api"])})
+    if set(selections) - {model["provider"] for model in result}:
+        raise ValueError("Model access selection names an unused route.")
     return result
 
 
@@ -1438,7 +1451,10 @@ def build_compose(
     if provider == "openai-chatgpt" and command_policy is None:
         raise ValueError("ChatGPT access requires command model_access; native subscription agents are retired.")
     providers = {model["provider"] for model in command_policy["models"]} if command_policy else {provider}
-    access_inputs = credential_requirements(providers)
+    selections = command_policy.get("routes", {}) if command_policy else {}
+    if set(selections) - providers:
+        raise ValueError("Model access selection names an unused route.")
+    access_inputs = credential_requirements(providers, selections)
     provider_secret_env = {
         key: "${" + source + ":?provider access required}"
         for key, source in access_inputs["environment"].items()
@@ -1557,6 +1573,9 @@ def build_compose(
     if command_policy is not None:
         models = command_policy["models"]
         gateway_environment = document["services"]["gateway"]["environment"]
+        if selections:
+            gateway_environment["DUNGENESS_ACCESS_SELECTION"] = json.dumps(selections, sort_keys=True)
+            document["x-dungeness-model-access"] = selection_evidence(DEFAULT_MODEL_ACCESS, selections)
         # No ambient provider can be used, even if a key was accidentally present.
         gateway_environment["DUNGENESS_REQUIRE_MODEL_ALLOWLIST"] = "1"
         gateway_environment["DUNGENESS_ALLOWED_MODELS"] = json.dumps(
@@ -2037,7 +2056,7 @@ def build_task(
     command_execution(agent)
     policy = (run_spec_manifest or {}).get("model_access")
     if not isinstance(policy, dict) or set(policy) - {
-        "models", "max_parallel_requests", "request_reservation_usd", "bounded_requests", "max_output_tokens",
+        "models", "routes", "max_parallel_requests", "request_reservation_usd", "bounded_requests", "max_output_tokens",
     }:
         raise ValueError("command harnesses require run-spec model_access")
     if not isinstance(policy.get("models"), list) or not policy["models"]:

@@ -16,6 +16,9 @@ def model_providers(root: Path, *, details: bool = False) -> dict:
     document = {"schema_version": 1, "runtime": "dungeness",
                 "providers": sorted(gateway["MODEL_ACCESS"])}
     if details:
+        from access_selection import public_policy, policy_digest
+        registry = gateway["DEFAULT_MODEL_ACCESS"]
+        document["access_policy"] = {**public_policy(registry), "sha256": policy_digest(registry)}
         document["access_routes"] = [
             {
                 "id": name,

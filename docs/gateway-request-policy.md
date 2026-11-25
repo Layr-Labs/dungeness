@@ -34,6 +34,13 @@ has provider credentials and external network access in command-harness runs.
 The gateway source, container environment, pricing catalog and operator credentials
 must remain outside the submitted agent's control.
 
+The trusted launcher may accept an untrusted per-run endpoint/authentication
+selection through `model_access.routes`. It is validated against the immutable
+registry in both compilation and gateway startup. Only registered compatible
+recipes are selectable; request validation, model mappings, prices and usage
+parsers remain trusted. `DUNGENESS_ACCESS_SELECTION` carries these validated
+choices to the gateway, never secrets or a replacement registry.
+
 ## Arbitrary harnesses, explicit access
 
 `dungeness-command-v1` accepts arbitrary installed programs, SDK loops, subprocesses

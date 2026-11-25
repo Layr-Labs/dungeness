@@ -7,7 +7,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import math
 import json
-from model_access import upstream_model, validate_upstream_settings
+from model_access import upstream_model, validate_upstream_settings, ACCESS_SELECTION, DEFAULT_MODEL_ACCESS
+from access_selection import selection_evidence
 import os
 from pathlib import Path
 import time
@@ -184,6 +185,11 @@ class Gateway:
         if os.environ.get("DUNGENESS_REQUIRE_MODEL_ALLOWLIST") == "1" and not pairs:
             raise ValueError("Hosted command gateway requires an explicit model allowlist")
         self.allowed_models = {tuple(pair) for pair in pairs} if pairs else None
+        if ACCESS_SELECTION:
+            if not pairs or set(ACCESS_SELECTION) - {provider for provider, _ in pairs}:
+                raise ValueError("Selected model access requires a matching model allowlist.")
+            log_event("model.access", **selection_evidence(DEFAULT_MODEL_ACCESS, ACCESS_SELECTION),
+                      models=sorted(pairs))
         # OpenRouter can force account-default plugins even when a request
         # disables them. This assertion belongs to the trusted operator, never
         # a run spec or agent request. Leave the route closed until configured.
