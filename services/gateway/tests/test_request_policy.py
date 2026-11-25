@@ -23,6 +23,8 @@ MODELS = {
     "claude-subscription": "example-model",
     "openrouter": "openai/gpt-5.6-sol",
     "openai-chatgpt": "gpt-6-astra",
+    "google": "gemini-4-carbon",
+    "google-vertex": "gemini-4-carbon",
     "example-api": "example-model",
     "example-session": "example-model",
 }
@@ -60,6 +62,10 @@ async def harness(*, declared=True, web=False):
         "EXAMPLE_API_KEY": "unused-example-key",
         "EXAMPLE_SESSION_TOKEN": "unused-session",
         "EXAMPLE_SESSION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+        "GEMINI_API_KEY": "unused-google-key",
+        "VERTEX_ACCESS_TOKEN": "unused-google-token",
+        "VERTEX_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
+        "VERTEX_PROJECT_ID": "synthetic-project",
     }), patch.object(gateway_pricing, "MODEL_PRICING", [*[e for e in gateway_pricing.MODEL_PRICING if e["provider"] not in {"example-api", "example-session", "claude-subscription"}], *[
         {"provider": p, "upstream_id": "example/example-model", "request_models": [MODELS[p]],
          "input_per_mtok": 2, "output_per_mtok": 6, "cached_read_per_mtok": .5,
@@ -76,6 +82,11 @@ async def harness(*, declared=True, web=False):
 
         def upstream(request):
             calls.append(("http", json.loads(request.content), request))
+            if request.url.host in ("generativelanguage.googleapis.com", "aiplatform.googleapis.com"):
+                return httpx.Response(200, json={
+                    "candidates": [{"content": {"role": "model", "parts": [{"text": "done"}]},
+                                    "finishReason": "STOP"}],
+                    "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3}})
             return httpx.Response(200, json=response)
 
         runtime = Gateway()

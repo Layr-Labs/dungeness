@@ -26,8 +26,12 @@ Adding either requires a reviewed integration and separate account validation.
 
 ## Google integration status
 
-Checked on 2026-11-24:
+Checked on 2026-11-25:
 
+- `google` (Gemini API key) and `google-vertex` (Cloud OAuth) are registered with
+  Carbon, Neon, Argon and Hydrogen reference prices. See
+  [installed routes and inputs](integrating-model-access.md#installed-google-routes).
+  They use API billing, not Ultra subscription quota.
 - The gateway includes [Google protocol translation](integrating-model-access.md#google-protocol-translation)
   and native token accounting. Synthetic HTTP tests cover Gemini and Code Assist
   envelopes, signed multi-turn local calls, streaming, cache/thinking costs,
@@ -35,7 +39,15 @@ Checked on 2026-11-24:
 - One direct official Antigravity CLI subscription call to Carbon Low passed,
   with API-key/ADC inputs and tools disabled. The CLI reported 2,066 input and
   6 output tokens. This checks account access, not a Dungeness harness run.
-- Live subscription endpoint/authentication, exact model prices and a complete
+- The registered Vertex Carbon route passed a native command-harness smoke:
+  two live model calls, a local tool writing `42`, signed multi-turn history,
+  streamed completion and provider token receipts ($0.000646 normalized cost).
+  An earlier HTTP probe also verified request-limit rejection. These small tests
+  do not qualify a full research run, Docker isolation or an attested VM release.
+  Live Gemini API-key credentials and other registered Google models have not
+  been tested here; their request, authentication and accounting tests use
+  synthetic responses.
+- Live subscription endpoint/authentication and a complete subscription
   harness run remain to be qualified. Google's documented OpenAI-compatible
   **API-key endpoint** is not a subscription endpoint. Token renewal is deferred.
 
@@ -43,7 +55,7 @@ The saved [subscription probes](https://github.com/Layr-Labs/dungeness/tree/feat
 also found an unreported reviewer call when testing the full Antigravity CLI
 with a synthetic tool workflow. Do not treat that CLI's final usage as proven
 complete metering, or turn missing usage into zero cost. The new gateway
-translation sends direct model requests without that CLI. No default Google
+translation sends direct model requests without that CLI. No Google subscription
 route, manager option or VM release is enabled by this change.
 
 ### Comparison with nanocode

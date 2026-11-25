@@ -34,7 +34,7 @@ from gateway_models import (
 )
 from gateway_provider_cost import openrouter_charge
 from gateway_stream import CompletionBarrier
-from gateway_google import GoogleResponse, upstream_request as google_upstream_request
+from gateway_google import GoogleResponse, request_body as google_request_body, upstream_request as google_upstream_request
 from gateway_reservations import validate_generation
 from gateway_errors import GatewayPolicyError, recovery
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
@@ -221,12 +221,15 @@ class Gateway:
         if config.get("transport", "passthrough") != "passthrough":
             # Validate translation before admission or credential reads. Unknown
             # controls must not disappear when converting between protocols.
-            google_upstream_request(config, payload, mapped_model, request.state.request_id)
+            google_request_body(payload)
         # All credential types are checked before admitting a model request.
         try:
             private_values = set()
             request.state.provider_headers = provider_auth_headers(provider, private_values=private_values)
             request.state.provider_private_values = private_values
+            if config.get("transport", "passthrough") != "passthrough":
+                google_upstream_request(config, payload, mapped_model, request.state.request_id,
+                                        request.state.provider_headers)
         except ValueError as error:
             raise GatewayPolicyError("provider_credentials_unavailable",
                 "Provider authentication credentials are unavailable or expired; contact the run operator.") from error
@@ -565,7 +568,7 @@ class Gateway:
             google_transport = cfg.get("transport", "passthrough") != "passthrough"
             if google_transport:
                 target_url, target_query, translated = google_upstream_request(
-                    cfg, payload, upstream_model(cfg, model), request_id)
+                    cfg, payload, upstream_model(cfg, model), request_id, auth_headers)
                 body = json.dumps(translated, separators=(",", ":")).encode()
             upstream_request = self.client.build_request(
                 request.method,

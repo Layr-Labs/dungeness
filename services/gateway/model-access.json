@@ -1,6 +1,55 @@
 {
   "schema_version": 1,
   "access_routes": {
+    "google": {
+      "transport": "google-generate-content",
+      "upstream_default": "https://generativelanguage.googleapis.com/v1beta",
+      "upstream_env": "GOOGLE_UPSTREAM_BASE_URL",
+      "routes": ["chat/completions", "models"],
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": [],
+      "usage_parser": "openai",
+      "authentication": {
+        "sources": [{
+          "headers": {
+            "x-goog-api-key": {"env": "GEMINI_API_KEY"}
+          }
+        }]
+      },
+      "models": {
+        "gemini-4-carbon": {"upstream": "gemini-4-carbon", "catalog": "google/gemini-4-carbon"},
+        "gemini-4-neon": {"upstream": "gemini-4-neon", "catalog": "google/gemini-4-neon"},
+        "gemini-4-argon": {"upstream": "gemini-4-argon", "catalog": "google/gemini-4-argon"},
+        "gemini-4-hydrogen": {"upstream": "gemini-4-hydrogen", "catalog": "google/gemini-4-hydrogen"}
+      }
+    },
+    "google-vertex": {
+      "transport": "google-generate-content",
+      "upstream_default": "https://aiplatform.googleapis.com/v1",
+      "upstream_env": "VERTEX_UPSTREAM_BASE_URL",
+      "project_header": "x-goog-user-project",
+      "routes": ["chat/completions", "models"],
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": [],
+      "usage_parser": "openai",
+      "authentication": {
+        "sources": [{
+          "expires_at": {"env": "VERTEX_ACCESS_TOKEN_EXPIRES_AT"},
+          "headers": {
+            "authorization": {"env": "VERTEX_ACCESS_TOKEN", "prefix": "Bearer "},
+            "x-goog-user-project": {"env": "VERTEX_PROJECT_ID"}
+          }
+        }]
+      },
+      "models": {
+        "gemini-4-carbon": {"upstream": "gemini-4-carbon", "catalog": "google/gemini-4-carbon"},
+        "gemini-4-neon": {"upstream": "gemini-4-neon", "catalog": "google/gemini-4-neon"},
+        "gemini-4-argon": {"upstream": "gemini-4-argon", "catalog": "google/gemini-4-argon"},
+        "gemini-4-hydrogen": {"upstream": "gemini-4-hydrogen", "catalog": "google/gemini-4-hydrogen"}
+      }
+    },
     "openai": {
       "authentication": {
         "sources": [

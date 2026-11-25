@@ -61,6 +61,7 @@ class AccessConfigurationTests(unittest.TestCase):
             ("models", []),
             ("model_header", "host"),
             ("model_header", "openai-beta"),
+            ("project_header", "authorization"),
         ]
         for key, value in changes:
             with self.subTest(key=key, value=value):

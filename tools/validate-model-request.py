@@ -35,8 +35,9 @@ try:
     checked, tokens, usd = validate_generation(args.provider, args.operation, payload, matches[0], maximum=args.max_output_tokens)
     config = MODEL_ACCESS[args.provider]
     if config.get('transport', 'passthrough') != 'passthrough':
-        from gateway_google import upstream_request
-        upstream_request(config, checked, upstream_model(config, checked['model']), 'offline-check')
+        from gateway_google import request_body
+        upstream_model(config, checked['model'])
+        request_body(checked)
     print(json.dumps({'valid': True, 'reservation_tokens': tokens, 'reservation_usd': usd,
                       'limitations': 'No authentication, live balance, routing or upstream compatibility check.'}))
 except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
