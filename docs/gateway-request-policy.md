@@ -2,7 +2,7 @@
 
 ## Offline checks and output limits
 
-OpenRSI enables bounded request reservations with a default maximum of **65,536
+When `model_access.bounded_requests` is enabled, its default maximum is **65,536
 output tokens per request**, separately from the run's spending limit. Oversized
 explicit limits are rejected before generation, not silently truncated. Claude
 Code harnesses should set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000`. This is a gateway
@@ -11,13 +11,14 @@ policy, not the provider model's maximum output capacity.
 Use the same field and reservation validator as the gateway without making calls:
 
 ```sh
-python tools/validate-model-request.py --provider claude-subscription \
-  --operation messages --request request.json \
-  --pricing docs/examples/local-subscription-pricing-20261030.json
+uv run --locked --group gateway python tools/validate-model-request.py \
+  --provider claude-subscription --operation messages --request request.json
 ```
 
-The JSON request must include the selected model. This checks body fields and
-output limits and reports the conservative reservation. It does not validate
+The JSON request must include the selected model. The tool defaults to the
+bundled YAML pricing schedule; use `--pricing PATH` for the exact JSON or YAML
+schedule installed by your caller. It checks the registered route/operation,
+body fields and output limits and reports the conservative reservation. It does not validate
 credentials, live balance, provider eligibility, transport headers or actual
 upstream behavior. A strict mock can import `validate_generation` from
 `services/gateway/gateway_reservations.py`. Rejected live requests emit a safe
@@ -25,8 +26,8 @@ upstream behavior. A strict mock can import `validate_generation` from
 
 The gateway accepts a reviewed subset of provider APIs. Every inference route
 validates requests **before provider traffic or budget
-reservation**. This applies to command harnesses, legacy named agents, and runs
-without `model_access`. It does not depend on the harness obeying its own settings.
+reservation**. This applies to compiled command runs and standalone gateway configurations,
+including compatibility modes without a model allowlist. It does not depend on the harness obeying its own settings.
 
 The submitted container has no direct internet route. Only the trusted gateway
 has provider credentials and external network access in command-harness runs.
@@ -61,7 +62,9 @@ The authoritative schemas are in
 [`gateway_request_policy.py`](../services/gateway/gateway_request_policy.py).
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
 Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
-The gateway does not translate requests or responses into another protocol.
+Existing routes retain their native formats. A trusted Google
+[transport selection](integrating-model-access.md#google-protocol-translation)
+can translate Chat Completions to Gemini and back.
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
   Unknown protocol beta headers and query controls are also rejected.
@@ -88,6 +91,46 @@ The gateway does not translate requests or responses into another protocol.
 - Arbitrary request headers are not forwarded. OpenAI organization/project selection and
   opaque Codex routing/turn-state override headers are not forwarded either.
 
+## Thinking controls
+
+The harness sets thinking on each request; the gateway preserves these reviewed
+fields. The selected upstream model determines which levels it supports.
+
+| API | Request option |
+| --- | --- |
+| OpenAI Responses, including ChatGPT | `reasoning: {"effort": "high"}` |
+| Anthropic Messages, including Claude subscription | `thinking: {"type": "enabled", "budget_tokens": 1024}`, or model-supported adaptive thinking with `output_config.effort` |
+| Chat Completions | `reasoning_effort: "high"` |
+| Google's Chat Completions extension | `extra_body.google.thinking_config` |
+
+For the Google extension, the **wire JSON** is:
+
+```json
+{
+  "extra_body": {
+    "google": {
+      "thinking_config": {
+        "thinking_level": "high",
+        "include_thoughts": true
+      }
+    }
+  }
+}
+```
+
+Use one of `reasoning_effort`, `thinking_level` or `thinking_budget`.
+`include_thoughts` is optional. Thinking levels are `minimal`, `low`, `medium`,
+`high` and `xhigh`; a budget is an integer, with `-1` for dynamic thinking and
+`0` to disable it where the model permits. Other fields inside `extra_body`
+remain rejected, including hosted tools and remote cached content.
+
+The Python OpenAI SDK merges its `extra_body` argument into the wire request:
+pass `extra_body={"extra_body": {"google": {"thinking_config": ...}}}` to that
+SDK. See [Google's compatibility examples](https://aistudio.google.com/docs/openai#thinking).
+This reviewed wire format works with configured route names; it does not
+register a Google endpoint or make a subscription token compatible with the
+Gemini API-key service.
+
 ## Conversation history compatibility
 
 History is validated for the configured provider and API operation, separately
@@ -98,6 +141,20 @@ nonempty string of at most 128 characters, rather than one of a fixed list of
 versions. The gateway preserves accepted history, including signatures,
 encrypted content, item order and tool associations, without removing fields.
 Requests are limited to 8 MiB and 64 levels of JSON nesting.
+
+History schema 3 accepts Google's
+`extra_content.google.thought_signature` on assistant Chat Completions messages
+and their function calls. Preserve the complete returned message, including
+signatures arriving in late streaming deltas, when sending local tool results.
+Only the nonempty opaque signature string is accepted in that extension.
+Bounded admission treats it as opaque state rather than estimating tokens from
+its encoded length. See [Google's signature format](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures).
+The Google adapter also returns `extra_content.google.parts` on assistant
+messages. This contains reviewed native text/thought and function-call parts,
+preserving multiple signatures without flattening them. Keep those parts in
+order, including when collecting streaming deltas; the translator checks them
+against the visible text and tool calls on replay. Native server-tool and media
+parts are rejected.
 
 Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
 `conversation_history_rejected`. Diagnostics version 1 adds a structural `path`
@@ -113,11 +170,11 @@ event and sanitized local/owner diagnostics, not public result descriptions.
 Keep the run records and report the request ID and structural diagnostic. Do not
 remove reasoning or signatures to work around a rejection, or automatically
 restart a paid run. Operators can group reports by route, schema version, rule
-and known item/block type before releasing compatibility fixes together. This
-adds diagnostics only; capability restrictions and accepted history are unchanged.
+and known item/block type before releasing compatibility fixes together.
 
-
-Streaming is relayed unchanged. Clients must retain complete items delivered by
+Streaming preserves accepted protocol history, with credential-echo filtering
+and accounting completion barriers. Some protocols request usage metadata; this
+is not a byte-for-byte transparent proxy. Clients must retain complete items delivered by
 `response.output_item.done`, even when the final response has an empty `output`,
 and must not treat unfinished items from an interrupted stream as complete.
 Normal output streams immediately; response-completion events and their trailing
@@ -161,8 +218,7 @@ cannot attest to a provider's private server implementation.
 Run:
 
 ```sh
-PYTHONPATH=services/gateway python -m unittest discover -s services/gateway/tests
-python -m unittest discover -s tests
+make check-core
 ```
 
 The boundary tests use mock providers. They exercise all registered inference
@@ -231,8 +287,8 @@ the gateway returns HTTP 400 with `retryable: false` and `x-should-retry: false`
 Shorten the context or lower the explicit output limit before trying again;
 repeating the same request will not help. A reservation that could fit after
 active calls settle still returns HTTP 429 with `retryable: true`.
-Use ordinary generation routes. OpenRSI local and remote runs enable this same
-policy; standalone Dungeness runs can select it in the run spec.
+Use ordinary generation routes. The trusted caller selects this policy in the
+run spec; inspect the compiled run rather than assuming a deployment's defaults.
 
 A provider-enforced, expiring per-run key is an additional financial boundary;
 gateway estimates do not protect a key stolen from the gateway or host.

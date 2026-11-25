@@ -16,13 +16,10 @@ See [command harnesses](command-harness.md). This is the only execution
 interface. Solvers may package any coding agent, including Codex or Claude Code,
 inside their submitted image; Dungeness does not install or configure it.
 
-The source is public and can be used for local development and controlled agent
-runs. OpenRSI solvers use `openrsi-space` to test locally and submit public
-harness source with a separate private local-run evidence bundle. Hosted runs
-use platform-funded OpenRouter access; do not send personal model credentials.
-Local runs do not create official scores or receipts. See the
-[funded workflow](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/platform-funded-inference.md)
-for model matching, required local spending and current allowances.
+This guide is for a standalone operator using a source checkout. OpenRSI users
+should follow their platform's setup and submission instructions: the platform
+installs trusted problem inputs, selects its runtime pin and controls publication.
+Local Dungeness runs do not create official scores or attestation receipts.
 
 ## Quick start for operators
 
@@ -38,11 +35,22 @@ The assigned task declares its agent and verifier resource requirements.
 ./dungeness init --namespace users/alice
 ```
 
-Choose your own namespace. Configure the selected provider's dedicated key in
-`.env` (for example, `TESTBED_OPENAI_API_KEY`). For a command harness using
-ChatGPT access, the caller supplies a private `DUNGENESS_CODEX_AUTH_FILE` to the
-gateway. Dungeness does not perform login or refresh; see
-[gateway authentication](gateway-authentication.md).
+Choose your own namespace. `setup` checks required tools and creates `.env`
+from the example if needed; it does not install Docker or log in to a provider.
+Inspect the routes and required inputs supported by this checkout:
+
+```sh
+./dungeness capabilities
+./dungeness providers --details
+```
+
+Configure only the selected route's inputs in the private `.env`, for example
+`TESTBED_OPENAI_API_KEY`. ChatGPT uses `DUNGENESS_CODEX_AUTH_FILE`, pointing to a
+private login document; Claude account access uses a token and its actual expiry.
+The caller obtains and refreshes those credentials before the run. The launcher
+stages only required fields for the gateway and removes its copies after teardown.
+See [authentication](gateway-authentication.md) and [account access](local-subscriptions.md).
+Never commit credentials or put them in the harness image.
 
 **Model calls consume your API credits or subscription allowance.** A normalized
 USD cap is an experimental comparison budget, not a guaranteed cash-billing
@@ -107,11 +115,9 @@ the optional transcript tools and cleanup commands still work on retained local 
 | `runs/` | Generated local output; not committed |
 
 The [runtime exporter](runtime-distribution.md) creates a reproducible source
-bundle without personal experiments, knowledge bases or run output. Personal knowledge bases, run recipes, experiments and reports are archived
-separately. New user-authored inputs and run outputs belong in local or service storage.
-This repository starts from a reviewed source snapshot with fresh history.
-Historical runs and reports are retained separately in the private research
-archive.
+bundle without personal experiments or run output. New user-authored inputs
+and run outputs belong in local or service storage. See [migration notes](migration.md)
+for retired interfaces and upgrading existing pins.
 
 Each top-level directory has a short README describing its ownership and entry points.
 
@@ -143,16 +149,16 @@ toward the request limit. HTTP 422 responses, ambiguous errors, and successful
 responses without usage remain accounting failures and block subsequent model
 calls. No provider-name exception infers free usage from a plain-text error.
 
-`services/gateway/providers.json` is an empty trusted registry by default.
-Operators can supply profiles for compatible upstreams before compiling a run
-and building its gateway image. Profiles define the fixed HTTPS endpoint,
+[`services/gateway/model-access.json`](../services/gateway/model-access.json) defines
+all routes. Operators can add reviewed entries for compatible upstreams before compiling a
+run and building its gateway image. Profiles define the fixed HTTPS endpoint,
 protocol routes, credential injection and reference model mappings; the gateway
 implements the shared protocol and accounting. Credentials stay outside source
 and reach only the gateway. The submitted harness receives a placeholder.
 
 Profiles and pricing are trusted operator inputs, never accepted from the
-harness or its run request. OpenRSI installs its service-owned registry and
-frozen pricing snapshot in the disposable runtime during preparation. Standalone
-operators must provide both. Tests use synthetic providers under `.invalid`
+harness or its run request. The checkout includes reference pricing in
+`services/gateway/pricing.yaml`. An enclosing platform may install its own pinned
+schedule; the exact schedule and registry used for the run must be retained. Tests use synthetic providers under `.invalid`
 domains to check routing, authentication, expiry and usage accounting without
 provider accounts or live inference.

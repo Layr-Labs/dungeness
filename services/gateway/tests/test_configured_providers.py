@@ -143,16 +143,9 @@ class ConfiguredProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderRegistryTests(unittest.TestCase):
-    def test_installed_subscription_profiles_are_inference_only(self):
+    def test_default_extension_registry_is_empty(self):
         from provider_profiles import load_profiles
-        profiles = load_profiles()
-        self.assertEqual(set(profiles), {'grok-subscription', 'minimax-subscription'})
-        for profile in profiles.values():
-            self.assertEqual(profile['routes'], ['chat/completions'])
-            self.assertEqual(profile['headers'], {})
-            self.assertIsNone(profile['model_header'])
-            self.assertFalse(profile['billed'])
-            self.assertTrue(profile['models'])
+        self.assertEqual(load_profiles(), {})
 
     def test_fresh_gateway_loads_only_the_installed_operator_registry(self):
         from configured_fixture import FIXTURES
@@ -177,3 +170,111 @@ assert MODEL_PROVIDERS["example-api"]["authentication"]["sources"][0]["headers"]
                                     env={**os.environ, "PYTHONPATH": str(root)},
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_canonical_file_alone_registers_and_serves_new_route(self):
+        """No provider-specific handler, module patch or legacy profile is needed."""
+        source = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for path in source.iterdir():
+                if path.is_file() and path.suffix in {".py", ".json", ".yaml"} and path.name != "providers.json":
+                    shutil.copy2(path, root / path.name)
+            config = {
+                "upstream_default": "https://example.invalid/v2",
+                "upstream_env": "EXAMPLE_UPSTREAM_BASE_URL",
+                "gateway_route": "example-http",
+                "routes": ["chat/completions"],
+                "auth": "gateway_secret", "billed": False, "passthrough": [],
+                "usage_parser": "openai",
+                "authentication": {"sources": [{
+                    "headers": {"x-api-key": {"env": "EXAMPLE_TOKEN"}},
+                    "expires_at": {"env": "EXAMPLE_TOKEN_EXPIRES_AT"}}]},
+                "models": {"public-name": {"upstream": "upstream-name", "catalog": "example/model"}},
+                "model_header": "x-selected-model",
+            }
+            # A complete registry need not contain the five historical route IDs.
+            (root / "model-access.json").write_text(json.dumps({
+                "schema_version": 1, "access_routes": {"example-api": config}}))
+            script = """
+import asyncio, json, os
+from pathlib import Path
+import httpx
+from model_access import MODEL_ACCESS, credential_requirements, gateway_base_url
+from provider_profiles import PROFILES
+assert not PROFILES
+assert set(MODEL_ACCESS) == {"example-api"}
+assert credential_requirements(["example-api"])["environment"] == {
+    "EXAMPLE_TOKEN": "TESTBED_EXAMPLE_TOKEN",
+    "EXAMPLE_TOKEN_EXPIRES_AT": "TESTBED_EXAMPLE_TOKEN_EXPIRES_AT"}
+assert gateway_base_url("example-api", "openai-chat") == "http://gateway:8080/model/example-http/v1"
+import gateway, gateway_pricing
+gateway_pricing.MODEL_PRICING[:] = [{
+    "provider": "example-api", "upstream_id": "example/model", "request_models": ["public-name"],
+    "input_per_mtok": 2, "cached_read_per_mtok": .5, "output_per_mtok": 6}]
+calls = []
+def upstream(request):
+    calls.append(request)
+    assert str(request.url) == "https://example.invalid/v2/chat/completions"
+    assert request.headers["x-api-key"] == "synthetic-token"
+    assert request.headers["x-selected-model"] == "upstream-name"
+    body = json.loads(request.content)
+    assert body["model"] == "upstream-name"
+    assert body["stream_options"]["include_usage"]
+    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=
+        'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}\\n\\ndata: [DONE]\\n\\n')
+async def run():
+    await gateway.gateway.client.aclose()
+    gateway.gateway.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url="http://gateway") as client:
+            body = {"model": "public-name", "messages": [{"role": "user", "content": "test"}], "stream": True}
+            route = "/model/example-http/v1/chat/completions"
+            response = await client.post(route, json=body, headers={"x-api-key": "spoofed", "x-selected-model": "spoofed"})
+            assert response.status_code == 200, response.text
+            for path in ("/model/missing/v1/chat/completions", "/model/example-api/v1/chat/completions"):
+                assert (await client.post(path, json=body)).status_code == 404
+            assert (await client.post(route, json={**body, "model": "unlisted"})).status_code == 400
+            os.environ["EXAMPLE_TOKEN_EXPIRES_AT"] = "2000-01-01T00:00:00Z"
+            assert (await client.post(route, json=body)).status_code == 400
+        assert len(calls) == 1
+        assert gateway.instrumentation_route(route) == "/model/example-http/v1/{operation}"
+        events = (Path(os.environ["TESTBED_USAGE_DIR"]) / "events.jsonl").read_text()
+        assert "synthetic-token" not in events
+        receipt = next(e["data"] for e in map(json.loads, events.splitlines()) if e["kind"] == "model.accounting")
+        assert abs(receipt["normalized_usd"] - .00026) < 1e-10
+        assert receipt["billed_usd"] is None
+    finally:
+        await gateway.gateway.client.aclose()
+asyncio.run(run())
+"""
+            result = subprocess.run([sys.executable, "-B", "-c", script], cwd=root,
+                env={**os.environ, "PYTHONPATH": str(root),
+                     "TESTBED_USAGE_DIR": str(root / "usage"),
+                     "MAX_MODEL_TOKENS": "1000000",
+                     "DUNGENESS_ALLOWED_MODELS": '[["example-api","public-name"]]',
+                     "EXAMPLE_TOKEN": "synthetic-token",
+                     "EXAMPLE_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z"},
+                capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_legacy_registry_cannot_override_or_shadow_canonical_routes(self):
+        from configured_fixture import FIXTURES
+        source = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for path in source.iterdir():
+                if path.is_file() and path.suffix in {".py", ".json", ".yaml"}:
+                    shutil.copy2(path, root / path.name)
+            # Duplicate ID, HTTP alias and endpoint-variable collisions all fail.
+            for name in ("openai", "chatgpt", "example-api"):
+                with self.subTest(name=name):
+                    document = json.loads((source / "model-access.json").read_text())
+                    if name == "example-api":
+                        document["access_routes"]["openai"]["upstream_env"] = "EXAMPLE_API_UPSTREAM_BASE_URL"
+                    (root / "model-access.json").write_text(json.dumps(document))
+                    (root / "providers.json").write_text(json.dumps({
+                        "schema_version": 1, "providers": {name: FIXTURES["example-api"]}}))
+                    result = subprocess.run([sys.executable, "-B", "-c", "import model_access"], cwd=root,
+                        env={**os.environ, "PYTHONPATH": str(root)},
+                        capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0)

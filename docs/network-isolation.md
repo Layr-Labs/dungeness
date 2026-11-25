@@ -51,8 +51,10 @@ To reproduce only the old host-access gap with a synthetic listener:
 uv run --locked --group gateway python script/check-run-isolation.py --baseline
 ```
 
-The full OpenRSI mock integration additionally exercises the actual Harbor
-adapter, candidate evaluation, independent verification and Yukon receipt retrieval.
+For a platform upgrade, also exercise its actual Harbor adapter and evaluation
+path. Older OpenRSI mock scripts may need migration to fixed registry endpoints;
+see [upgrade guidance](migration.md#fixed-upstream-destinations). Test hosted
+verification and receipt retrieval separately where that platform uses them.
 
 ## Scope
 
@@ -61,4 +63,4 @@ Containers share a host kernel; the trusted gateway and scoring services remain
 part of the trusted computing base. A compromised gateway still has its provider
 credential and egress interface. API/runtime Docker privilege separation and
 host-wide resource exhaustion controls need separate review before increasing
-execution concurrency. This patch does not change the number of live workers.
+execution concurrency. Network isolation does not determine worker count.

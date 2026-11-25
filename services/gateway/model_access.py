@@ -1,4 +1,4 @@
-"""Trusted model connections shared by the compiler and gateway.
+"""Trusted model access routes shared by the compiler and gateway.
 
 The public selector is still called ``provider``. Definitions contain no secret
 values and are never supplied by a harness. Runtime parsers are named here and
@@ -13,98 +13,12 @@ from gateway_auth import profile_authentication
 from provider_profiles import PROFILES
 
 
-OPENAI_ROUTES = {"responses", "chat/completions", "embeddings", "models"}
-ANTHROPIC_ROUTES = {"messages", "messages/count_tokens"}
-OPENROUTER_ROUTES = {"responses", "chat/completions", "completions", "messages", "models"}
-CHATGPT_ROUTES = {"responses", "responses/compact"}
-
-MODEL_ACCESS = {
-    "openai": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENAI_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENAI_ROUTES,
-        "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.openai.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": ("openai-beta", "idempotency-key"),
-        "usage_parser": "openai",
-    },
-    "anthropic": {
-        "authentication": {"sources": [{"headers": {
-            "x-api-key": {"env": "ANTHROPIC_API_KEY"},
-            "anthropic-version": {"env": "ANTHROPIC_VERSION", "default": "2023-06-01"},
-        }}]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "usage_parser": "anthropic",
-    },
-    "claude-subscription": {
-        "authentication": {"sources": [{
-            "expires_at": {"env": "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
-            "headers": {
-                "authorization": {"env": "CLAUDE_ACCESS_TOKEN", "prefix": "Bearer "},
-                "anthropic-version": {"literal": "2023-06-01"},
-            },
-        }]},
-        "routes": ANTHROPIC_ROUTES,
-        "upstream_env": "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL",
-        "upstream_default": "https://api.anthropic.com/v1",
-        "auth": "gateway_secret",
-        "billed": False,
-        "passthrough": ("anthropic-beta", "anthropic-version"),
-        "usage_parser": "anthropic",
-    },
-    "openrouter": {
-        "authentication": {"sources": [{"headers": {
-            "authorization": {"env": "OPENROUTER_API_KEY", "prefix": "Bearer "},
-        }}]},
-        "routes": OPENROUTER_ROUTES,
-        "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
-        "upstream_default": "https://openrouter.ai/api/v1",
-        "auth": "gateway_secret",
-        "billed": True,
-        # OpenRouter serves both OpenAI and Anthropic operations.
-        "passthrough": ("http-referer", "x-title", "openai-beta",
-                        "anthropic-beta", "anthropic-version"),
-        "usage_parser": "openai",
-    },
-    "openai-chatgpt": {
-        "authentication": {"sources": [{
-            "file_env": "DUNGENESS_CHATGPT_AUTH_FILE",
-            "host_env": "DUNGENESS_CODEX_AUTH_FILE",
-            "mount_path": "/run/dungeness/auth.json",
-            "headers": {
-                "authorization": {"path": ["tokens", "access_token"], "prefix": "Bearer "},
-                "chatgpt-account-id": {"path": ["tokens", "account_id"]},
-            },
-        }]},
-        "gateway_route": "chatgpt",
-        "routes": CHATGPT_ROUTES,
-        "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
-        "upstream_default": "https://chatgpt.com/backend-api/codex",
-        "auth": "gateway_secret",
-        "billed": False,
-        # Trusted account headers override any client-supplied metadata.
-        "passthrough": (
-            "chatgpt-account-id", "originator", "version", "session_id",
-            "session-id", "thread-id", "conversation_id", "x-openai-subagent",
-            "x-client-request-id", "x-codex-turn-metadata", "x-codex-installation-id",
-            "x-oai-attestation", "x-responsesapi-include-timing", "traceparent",
-            "user-agent", "openai-beta",
-        ),
-        "usage_parser": "openai",
-    },
-}
+# Configuration is data; retain the historical exports for existing callers.
+from access_config import ACCESS_ROUTES, validate_access_routes
 
 
 def configured_provider(name, profile):
-    """Normalize the existing providers.json format into a connection definition."""
+    """Normalize the existing providers.json format into an access-route definition."""
     return {
         "authentication": profile_authentication(profile),
         "routes": set(profile["routes"]),
@@ -119,7 +33,19 @@ def configured_provider(name, profile):
     }
 
 
-MODEL_ACCESS.update({name: configured_provider(name, profile) for name, profile in PROFILES.items()})
+MODEL_ACCESS = validate_access_routes({
+    name: {**config, "routes": sorted(config["routes"]), "passthrough": list(config["passthrough"])}
+    for name, config in {
+        **ACCESS_ROUTES,
+        **{name: configured_provider(name, profile) for name, profile in PROFILES.items()},
+    }.items()
+})
+
+# Historical import aliases; HTTP registration uses the full registry.
+OPENAI_ROUTES = MODEL_ACCESS.get("openai", {}).get("routes", set())
+ANTHROPIC_ROUTES = MODEL_ACCESS.get("anthropic", {}).get("routes", set())
+OPENROUTER_ROUTES = MODEL_ACCESS.get("openrouter", {}).get("routes", set())
+CHATGPT_ROUTES = MODEL_ACCESS.get("openai-chatgpt", {}).get("routes", set())
 
 
 def credential_names(config):
@@ -135,6 +61,32 @@ def credential_names(config):
 def credential_files(config):
     """Existing private-file inputs; no credential is opened during compilation."""
     return [source for source in config["authentication"]["sources"] if "file_env" in source]
+
+
+def credential_requirements(access_routes):
+    """Describe selected private inputs without reading credentials or logging in.
+
+    Each current route uses one explicit authentication source. Alternative
+    sources/account selection need a deliberate contract instead of requiring
+    every possible credential or silently choosing a fallback.
+    """
+    result = {"schema_version": 1, "environment": {}, "files": {}}
+    for name in sorted(set(access_routes)):
+        if name not in MODEL_ACCESS:
+            raise ValueError("Unknown model access route.")
+        config = MODEL_ACCESS[name]
+        if len(config["authentication"]["sources"]) != 1:
+            raise ValueError("Access route requires explicit authentication source selection.")
+        for key in sorted(credential_names(config)):
+            result["environment"][key] = "TESTBED_" + key
+        for source in credential_files(config):
+            specs = [*source["headers"].values(), source.get("expires_at", {})]
+            result["files"][source["host_env"]] = {
+                "gateway_env": source["file_env"],
+                "mount_path": source["mount_path"],
+                "paths": [spec["path"] for spec in specs if "path" in spec],
+            }
+    return result
 
 
 def gateway_base_url(provider, api):

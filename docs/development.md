@@ -30,9 +30,9 @@ This is currently a source-checkout runtime. The project manifest does not
 provide a wheel or console entrypoint: installed assets and workspace paths
 must be separated before claiming that packaging contract.
 
-## Boundaries during cleanup
+## Component ownership
 
-The first execution extraction lives in `src/dungeness/execution/harbor.py`.
+Harbor integration lives in `src/dungeness/execution/harbor.py`.
 It owns Harbor job/task rendering, the pinned launch command, control-plane
 environment preparation, trusted-adapter validation and result interpretation.
 It accepts validated inputs and explicit paths; importing it does not load the
@@ -40,7 +40,7 @@ compiler, gateway or Harbor SDK. The SDK-dependent `CommandAgent` remains at
 `adapters/harbor/command_agent.py` to preserve the job's trusted import path.
 The compiler and CLI retain compatibility imports for existing callers.
 
-Run orchestration now lives in `execution/runner.py`: rendering, launch, outcome
+Run orchestration lives in `execution/runner.py`: rendering, launch, outcome
 handling, record finalization and render retention/disposal. It takes explicit
 paths, a renderer command and retention settings; it does not resolve CLI flags
 or load run specs. Record persistence is supplied through two typed callbacks,
@@ -75,13 +75,20 @@ Candidate files and trusted edits remain separate;
 submitted harnesses cannot choose the manifest or load preparation code.
 See [trusted scaffolds](scaffolds.md).
 
-The current extraction order is:
+`credential_access.py` owns the trusted launcher's explicit credential preparation
+API. `execution/credentials.py` adapts compiled Compose metadata and env-file
+precedence to that API. Neither performs login, refresh or account discovery.
+The shared `model_access.py` interface loads access routes and authentication
+recipes from `services/gateway/model-access.json`; the gateway applies them to inference requests.
+See [integration](integrating-model-access.md) before adding an access route.
 
-1. Establish reproducible checks and a [public runtime contract](runtime-contract.md).
-2. Retire only features whose removal has been explicitly agreed.
-3. Separate configuration/records, compilation, execution and gateway ownership.
-4. Move problem-specific preparation out of the generic compiler.
-5. Separate installed assets from mutable run workspaces and finish packaging.
+## Making changes
+
+1. Identify the owner of the behavior using the component boundaries above.
+2. Add a focused regression for a changed execution or security contract.
+3. Update the canonical guide and [migration notes](migration.md) if callers must adapt.
+4. Run the applicable offline, container and consumer checks.
+5. Treat consumer runtime pins and deployments as separate, qualified updates.
 
 Keep CLI commands, record collection paths, schemas and execution behavior
 stable during module extraction. Configuration and record modules must not start
@@ -99,7 +106,7 @@ candidate verification need their own focused validation.
 
 Compiler and record tests use a disposable runtime populated from synthetic
 records under `tests/fixtures/runtime/`. Challenge grader tests live with the
-OpenRSI problem assets. No Dungeness check requires a OpenRSI checkout.
+OpenRSI problem assets. No Dungeness check requires an OpenRSI checkout.
 
 Resume provenance hashes the copied candidate in the rendered workspace.
 Single files retain SHA-256 of raw bytes. Directory hashes use SHA-256 of
@@ -112,3 +119,16 @@ paths, timestamps, or ambiguous concatenations of names and file contents.
 For network-policy changes, also run `make check-run-isolation` with Docker
 access. It exercises two simultaneous runs with synthetic credentials; see
 [per-run isolation](network-isolation.md). This is separate from the offline suite.
+
+## Integration checks
+
+`python3 script/check-gateway-isolation.py` requires Docker and exercises the gateway with
+synthetic credentials and mock inference. `make check-run-isolation` tests two
+simultaneous runs. Neither uses paid accounts. Test-only upstreams belong in a
+synthetic trusted registry, never in a production endpoint override.
+
+Before updating a platform's pin, run its real compiler contract tests against
+a clean candidate commit and exercise its execution adapter with a synthetic
+provider. See [runtime compatibility](runtime-contract.md#verification). Record
+what was tested: offline compatibility, Docker execution and deployed service
+qualification are distinct results.

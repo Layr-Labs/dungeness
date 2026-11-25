@@ -25,6 +25,9 @@ FILES = {
     "docs/README.md", "script/README.md", "tools/README.md",
     "docs/gateway-authentication.md", "docs/gateway-request-policy.md",
     "docs/problem-service.md", "docs/runtime-contract.md", "docs/development.md", "docs/scaffolds.md",
+    "docs/model-access.md", "docs/integrating-model-access.md", "docs/migration.md",
+    "docs/network-isolation.md", "docs/model-failures.md", "docs/local-subscriptions.md",
+    "tools/validate-model-request.py",
 }
 TRANSCRIPT_TOOLS = {
     "tools/transcripts/render_gateway_transcript.py",

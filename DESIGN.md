@@ -1,8 +1,8 @@
 # Dungeness Record and Execution Design
 
 This document defines Dungeness's record model, naming conventions, execution
-lifecycle, and persistence rules. See [README.md](README.md) for the
-copy-paste quick start and command reference.
+lifecycle, and persistence rules. See the [operator guide](docs/quick-start.md)
+and [CLI reference](docs/cli-reference.md) for setup and commands.
 
 Examples below use synthetic records. Operators install their own trusted
 challenge records and verifier assets before running them.
@@ -331,9 +331,8 @@ run spec; the same harness can run with different compatible models.
 Model pricing, provider credentials, upstream endpoints, and adapter
 implementations are trusted gateway policy under `system/dungeness`, not
 editable agent metadata. The gateway prices the actual provider/model requested
-and rejects combinations absent from its catalog. An agent may optionally
-select an adapter only through a qualified
-`adapter:system/dungeness/<id>` reference.
+and rejects combinations absent from its catalog. The host adapter is fixed to
+the trusted command implementation; a harness cannot select host Python code.
 
 Repository-maintained agents use `projects/dungeness`. A customized agent can
 use `users/<name>` while keeping the same local ID without collision.
@@ -359,7 +358,7 @@ initialization:
   mode: checkpoint
 
 web_search:
-  mode: optional
+  mode: disabled
 
 labels:
   purpose: baseline
@@ -379,9 +378,10 @@ work cycles or a finalization strategy.
 removed after teardown. Set it to `true` only when those images are needed for
 debugging.
 
-`web_search.mode` controls access (`disabled` or `optional`), subject to trusted
-budgets and web policy. Disabled access zeros search and fetch allowances. The
-resolved access mode is captured in provenance. Research prompts, evaluation
+External search and fetch are disabled. Legacy `web_search.mode: optional`
+remains parseable but resolves to disabled with zero allowances. The resolved
+mode is captured in provenance. Checkpoint `web_cutoff` remains provenance and
+compatibility data; it does not enable external web access. Research prompts, evaluation
 cadence and subagent topology belong to the harness. The runtime does not load
 strategy profiles or install a `research-worker` command.
 
@@ -390,8 +390,8 @@ are detected before execution. The run spec may provide labels, budgets,
 initialization, and runtime defaults. Explicit CLI flags override those values
 for one attempt.
 
-A run spec is not an experiment. It specifies one run. README contains the
-starter YAML; `dungeness init` configures the default namespace for resulting
+A run spec is not an experiment. It specifies one run. The example above shows
+its record shape; `dungeness init` configures the default namespace for resulting
 runs and does not generate or modify run-spec files.
 
 ### Run
@@ -635,7 +635,7 @@ Environment-file contents and real provider credentials are never recorded.
 `usage/events.jsonl` is the append-only canonical stream ordered by a per-run
 sequence number. Every record includes its source, kind, observed and recorded
 timestamps, and event-specific data. The trusted gateway writes model inputs,
-provider-visible reasoning, model outputs, tool calls, web activity, evaluator
+provider-visible reasoning, model outputs, tool calls, evaluator
 scores and operational events into this stream. Evaluator events also carry the cumulative normalized
 USD snapshot needed to plot score against cost without joining separate logs.
 `usage/summary.json` is an atomically refreshed derived cache, not another raw
@@ -645,8 +645,9 @@ Trusted sidecars send events to an authenticated, internal-only gateway
 collector. Its random token is stored in the shared usage volume, which is not
 mounted into the agent container. Provider authorization headers are never part
 of event payloads. OpenAI reasoning summaries are recorded when returned, but
-raw hidden chain-of-thought is unavailable; adapters for models that expose
-`reasoning_content` record that field before protocol conversion.
+raw hidden chain-of-thought is unavailable. Accepted provider-visible history
+is retained in its supported protocol; the gateway does not translate between
+protocols. Older records can also contain retired web and research-state events.
 
 If the collector is unavailable after a sidecar action has completed, that
 trusted sidecar appends the same schema under a file lock with `sequence: null`
@@ -677,8 +678,10 @@ approved candidate paths reach:
 - the final clean, no-network verifier.
 
 The agent cannot modify trusted evaluator sources, gateway records, or verifier
-implementation. Provider credentials remain gateway-only. All model and web
-calls pass through the trusted gateway.
+implementation. Provider credentials remain gateway-only. Model calls pass
+through the trusted gateway; external web access is disabled. These container
+boundaries trust the host and Docker administrator. Host attestation or sealed
+result publication belongs to an enclosing platform, not this record schema.
 
 Verifier bundles live under top-level `verifiers/` because they are trusted
 execution implementations, not children of a problem or checkpoint:
@@ -696,56 +699,14 @@ The evaluator lock pins the source revision and lists the trusted files copied
 into the clean verifier. Third-party notices travel with copied third-party
 files.
 
-## Search and Publication Direction
+## Unimplemented catalog direction
 
-Canonical files remain the source of truth. A future SQLite or other search
-index should be derived and rebuildable.
-
-Research agents must access prior artifacts only through a trusted catalog
-route on the gateway. They must not receive a direct mount of `runs/`, a search
-index, or an artifact store. The gateway applies the resolved run policy to
-both search and retrieval and records every operation.
-
-The run spec will explicitly select the agent's artifact view. It should
-support at least:
-
-```yaml
-artifact_access:
-  mode: query       # none, query, snapshot, or all
-  include:
-    - namespace: public/**
-    - namespace: users/alice
-      labels:
-        status: published
-  exclude:
-    - labels:
-        system.hidden: "true"
-  published_before: "2026-05-28T23:59:59.999Z"
-```
-
-This schema is illustrative and not implemented yet. At run start, Dungeness
-will resolve the declaration into an immutable access snapshot and store its
-identity in the run record.
-
-> **Artifact access is part of experimental design.** Dungeness must enforce
-> the view selected by the run-spec author, but it must not assume that access
-> to another research agent's artifacts is inherently cheating. A study may
-> intentionally test isolated discovery, collaboration, continuation, or full
-> access to prior work. Reproducibility comes from recording the chosen policy,
-> not from imposing one universal policy.
-
-Future search should support:
-
-- namespace, type, label, and timestamp filters;
-- relations from artifacts to producing runs and source checkpoints;
-- exact publication or knowledge cutoffs;
-- a resolved, immutable agent-visible search view per run;
-- gateway-mediated search and retrieval audit records; and
-- cross-namespace references without duplicating payloads.
-
-Record metadata should describe facts. The run or future experiment design
-should decide which facts and artifacts an agent may access. Namespace alone
-must not be treated as visibility or authorization.
+Canonical files remain the source of truth. There is no implemented artifact
+search API, `artifact_access` run-spec contract, publication service or SQLite
+catalog in this runtime. A future index could be derived from canonical records;
+that requires a separate access-policy and provenance design. Do not build a
+consumer against the former illustrative schema. Historical design discussion
+remains in Git history.
 
 ## Repository Layout
 

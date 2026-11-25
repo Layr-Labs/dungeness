@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "access_routes": {
+    "openai": {
+      "authentication": {
+        "sources": [
+          {
+            "headers": {
+              "authorization": {
+                "env": "OPENAI_API_KEY",
+                "prefix": "Bearer "
+              }
+            }
+          }
+        ]
+      },
+      "routes": [
+        "chat/completions",
+        "embeddings",
+        "models",
+        "responses"
+      ],
+      "upstream_env": "OPENAI_UPSTREAM_BASE_URL",
+      "upstream_default": "https://api.openai.com/v1",
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": [
+        "openai-beta",
+        "idempotency-key"
+      ],
+      "usage_parser": "openai"
+    },
+    "anthropic": {
+      "authentication": {
+        "sources": [
+          {
+            "headers": {
+              "x-api-key": {
+                "env": "ANTHROPIC_API_KEY"
+              },
+              "anthropic-version": {
+                "env": "ANTHROPIC_VERSION",
+                "default": "2023-06-01"
+              }
+            }
+          }
+        ]
+      },
+      "routes": [
+        "messages",
+        "messages/count_tokens"
+      ],
+      "upstream_env": "ANTHROPIC_UPSTREAM_BASE_URL",
+      "upstream_default": "https://api.anthropic.com/v1",
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": [
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "usage_parser": "anthropic"
+    },
+    "claude-subscription": {
+      "authentication": {
+        "sources": [
+          {
+            "expires_at": {
+              "env": "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"
+            },
+            "headers": {
+              "authorization": {
+                "env": "CLAUDE_ACCESS_TOKEN",
+                "prefix": "Bearer "
+              },
+              "anthropic-version": {
+                "literal": "2023-06-01"
+              }
+            }
+          }
+        ]
+      },
+      "routes": [
+        "messages",
+        "messages/count_tokens"
+      ],
+      "upstream_env": "CLAUDE_SUBSCRIPTION_UPSTREAM_BASE_URL",
+      "upstream_default": "https://api.anthropic.com/v1",
+      "auth": "gateway_secret",
+      "billed": false,
+      "passthrough": [
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "usage_parser": "anthropic"
+    },
+    "openrouter": {
+      "authentication": {
+        "sources": [
+          {
+            "headers": {
+              "authorization": {
+                "env": "OPENROUTER_API_KEY",
+                "prefix": "Bearer "
+              }
+            }
+          }
+        ]
+      },
+      "routes": [
+        "chat/completions",
+        "completions",
+        "messages",
+        "models",
+        "responses"
+      ],
+      "upstream_env": "OPENROUTER_UPSTREAM_BASE_URL",
+      "upstream_default": "https://openrouter.ai/api/v1",
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": [
+        "http-referer",
+        "x-title",
+        "openai-beta",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "usage_parser": "openai"
+    },
+    "openai-chatgpt": {
+      "authentication": {
+        "sources": [
+          {
+            "file_env": "DUNGENESS_CHATGPT_AUTH_FILE",
+            "host_env": "DUNGENESS_CODEX_AUTH_FILE",
+            "mount_path": "/run/dungeness/auth.json",
+            "headers": {
+              "authorization": {
+                "path": [
+                  "tokens",
+                  "access_token"
+                ],
+                "prefix": "Bearer "
+              },
+              "chatgpt-account-id": {
+                "path": [
+                  "tokens",
+                  "account_id"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "gateway_route": "chatgpt",
+      "routes": [
+        "responses",
+        "responses/compact"
+      ],
+      "upstream_env": "CHATGPT_UPSTREAM_BASE_URL",
+      "upstream_default": "https://chatgpt.com/backend-api/codex",
+      "auth": "gateway_secret",
+      "billed": false,
+      "passthrough": [
+        "chatgpt-account-id",
+        "originator",
+        "version",
+        "session_id",
+        "session-id",
+        "thread-id",
+        "conversation_id",
+        "x-openai-subagent",
+        "x-client-request-id",
+        "x-codex-turn-metadata",
+        "x-codex-installation-id",
+        "x-oai-attestation",
+        "x-responsesapi-include-timing",
+        "traceparent",
+        "user-agent",
+        "openai-beta"
+      ],
+      "usage_parser": "openai"
+    }
+  }
+}

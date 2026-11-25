@@ -16,13 +16,15 @@ additive changes do not require an envelope version change.
 | `command-harness-v1` | A `dungeness-command-v1` agent executes its entrypoint in the sandbox; submitted code cannot select host Python imports. |
 | `run-model-access-v1` | The run spec selects the permitted model set and gateway request reservation/concurrency policy. |
 | `priced-model-requests-v1` | Requests are validated against declared models and trusted price configuration. |
+| `bounded-model-admission-v1` | Trusted runs may enable conservative per-request output/token/USD reservations; requests cannot override this policy. |
 | `cache-duration-accounting-v1` | Native Messages usage distinguishes five-minute and one-hour cache writes; missing duration evidence blocks settlement. |
 | `command-exit-status-v1` | The command adapter uses Harbor's `return_code`; unsuccessful harness exits cannot silently become success. |
 | `rejected-request-accounting-v1` | Recognized pre-generation rejection responses settle with zero tokens and release credit reservations; ambiguous failures are not treated as free success. |
 | `assigned-problem-service-v1` | A pinned read-only task service and declared attachments/resources are accessible through the gateway; attachment integrity and path constraints are checked during compilation. |
 | `optional-model-token-limit-v1` | An explicit null model-token cap disables that ceiling while preserving USD and execution limits and token accounting. |
 | `declarative-scaffolds-v2` | Trusted schema-v2 scaffolds declare candidate files, support files and checked text edits without problem-specific compiler code or executable host hooks. |
-| `model-provider-registry-v1` | `dungeness providers` reports provider IDs from the gateway's actual registry, including trusted runtime extensions, without credentials or model calls. |
+| `model-provider-registry-v1` | `dungeness providers` reports access-route IDs from the gateway's actual registry, including trusted runtime extensions, without credentials or model calls. The command and capability names remain unchanged. |
+| `model-credential-inputs-v1` | `dungeness providers --details` describes credential inputs from the registry; `dungeness.credential_access` describes and stages explicit inputs privately. Newly compiled runs include managed file-credential snapshots and cleanup. |
 
 This declaration is a compatibility interface, not a security attestation.
 Consumers must still select a trusted runtime revision and verify that the
@@ -31,13 +33,26 @@ The capability file is committed and included in runtime exports. Existing
 run-spec, command-agent, gateway and record schemas remain unchanged.
 
 `./dungeness providers` returns `{"schema_version": 1, "runtime": "dungeness",
-"providers": [...]}`. Consumers use it to check provider availability for their
+"providers": [...]}`. The historical `providers` field contains access-route IDs;
+see [model-access terms](model-access.md). Consumers use it to check route availability for their
 selected runtime instead of maintaining a second allowlist. It describes
 implemented routes, not credential validity, model prices or operator-dependent
 features such as OpenRouter inference-only routing. Configure extensions only
 in the trusted runtime; harnesses must not supply or replace that registry.
 
+With `--details`, the same envelope adds `access_routes`: a list of objects with
+`id`, `upstream`, `operations` and `credential_inputs`. Input descriptions have
+`schema_version: 1`, `environment` (gateway field to host input name), and `files`
+(host input name to `gateway_env`, `mount_path` and selected JSON `paths`).
+No source-file paths, credentials or current account state are discovered.
+See the [integration guide](integrating-model-access.md) for the Python interface,
+mounting, lifetime and failure behavior. The compiler's
+`x-dungeness-credential-files` metadata is additive; existing
+`x-dungeness-credential-env` selectors and gateway paths are preserved.
+
 ## OpenRSI migration
+
+See [migration notes](migration.md) for upgrade steps and retired interfaces.
 
 The former `ecdsa-readable-verifier-results-v1` capability was retired when the
 verifier moved to OpenRSI. Its readability guarantee is tested with that package.

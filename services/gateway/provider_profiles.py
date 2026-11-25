@@ -1,19 +1,24 @@
-"""Trusted profiles for providers using the existing OpenAI wire protocol.
+"""Compatibility reader for the former providers.json extension format.
 
-This module and providers.json also ship in Dungeness's gateway build context.
-Profiles are operator configuration, never accepted from a harness/run request.
+New routes belong in model-access.json. Older operator files are optional, but
+malformed files and conflicts still fail closed. Never supplied by a harness.
 """
 import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-BUILTINS = frozenset({'openai', 'openai-chatgpt', 'anthropic', 'claude-subscription', 'openrouter'})
+from access_config import ACCESS_ROUTES
+
+BUILTINS = frozenset(ACCESS_ROUTES)
 PROFILE_PATH = Path(__file__).with_name('providers.json')
 
 
 def load_profiles(path=PROFILE_PATH):
-    document = json.loads(Path(path).read_text())
+    try:
+        document = json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        return {}
     if (not isinstance(document, dict) or set(document) != {'schema_version', 'providers'}
             or type(document['schema_version']) is not int or document['schema_version'] != 1):
         raise ValueError('Invalid trusted provider registry.')

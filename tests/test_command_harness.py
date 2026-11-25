@@ -26,7 +26,6 @@ def load(name, path):
 
 compiler = load("command_compiler", "src/dungeness/compiler.py")
 from model_access import MODEL_ACCESS, configured_provider
-from provider_profiles import PROFILES
 CONFIGURED_FIXTURES = json.loads((ROOT / "tests/fixtures/provider-registry.json").read_text())["providers"]
 usage = load("command_usage", "services/gateway/gateway_usage.py")
 models = load("command_models", "services/gateway/gateway_models.py")
@@ -427,10 +426,9 @@ class ConfiguredProviderCompilerTests(unittest.TestCase):
         self.enterContext(patch.dict(MODEL_ACCESS, {
             name: configured_provider(name, profile) for name, profile in CONFIGURED_FIXTURES.items()}))
 
-    def test_installed_subscription_credentials_are_gateway_only(self):
-        for name in ('grok-subscription', 'minimax-subscription'):
-            profile = PROFILES[name]
-            model = {'provider': name, 'request_model': next(iter(profile['models'])),
+    def test_configured_credentials_are_gateway_only(self):
+        for name, profile in CONFIGURED_FIXTURES.items():
+            model = {'provider': name, 'request_model': next(iter(profile['models']), 'example-model'),
                      'base_url': f'http://gateway:8080/model/{name}/v1'}
             compose = yaml.safe_load(compiler.build_compose(
                 'local-plan', {'historical_cutoff': {}},

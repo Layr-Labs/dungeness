@@ -17,20 +17,18 @@ BUDGET = {"model": {"requests": 10, "total_tokens": 10000}}
 
 
 class ModelAccessContractTests(unittest.TestCase):
-    def test_existing_connections_keep_their_private_inputs_and_harness_urls(self):
+    def test_existing_access_routes_keep_their_private_inputs_and_harness_urls(self):
         expected = {
             "openai": {"OPENAI_API_KEY"},
             "anthropic": {"ANTHROPIC_API_KEY"},
             "claude-subscription": {"CLAUDE_ACCESS_TOKEN", "CLAUDE_ACCESS_TOKEN_EXPIRES_AT"},
             "openrouter": {"OPENROUTER_API_KEY"},
             "openai-chatgpt": set(),
-            "grok-subscription": {"GROK_SUBSCRIPTION_TOKEN", "GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT"},
-            "minimax-subscription": {"MINIMAX_CODING_PLAN_KEY"},
         }
         for provider, keys in expected.items():
             with self.subTest(provider=provider):
                 compose = yaml.safe_load(compiler.build_compose(
-                    "connection-contract", {}, BUDGET, provider=provider,
+                    "access-route-contract", {}, BUDGET, provider=provider,
                     command_policy={"models": [{**MODEL, "provider": provider,
                         "base_url": "http://gateway:8080/model/example/v1"}]}))
                 gateway = compose["services"]["gateway"]
@@ -89,7 +87,7 @@ class ModelAccessContractTests(unittest.TestCase):
         models = [{**MODEL, "provider": provider, "base_url": "http://gateway:8080/model/example/v1"}
                   for provider in ("openai-chatgpt", "openai", "anthropic")]
         compose = yaml.safe_load(compiler.build_compose(
-            "multi-connection", {}, BUDGET, command_policy={"models": models}))
+            "multi-access-route", {}, BUDGET, command_policy={"models": models}))
         gateway = compose["services"]["gateway"]
         self.assertEqual(gateway["x-dungeness-credential-env"], {
             "OPENAI_API_KEY": "TESTBED_OPENAI_API_KEY", "ANTHROPIC_API_KEY": "TESTBED_ANTHROPIC_API_KEY"})

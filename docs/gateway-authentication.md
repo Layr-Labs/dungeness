@@ -2,49 +2,52 @@
 
 The harness sends inference in a supported wire protocol using its assigned
 gateway URL and a placeholder credential. The gateway authenticates the upstream
-connection using operator-owned configuration. Authentication does not translate
+request using operator-owned configuration. Authentication does not translate
 the request or choose research settings.
 
 ## LLM access routes
 
-The gateway ships built-in and configured access routes. A route identifies an upstream endpoint
-and authentication recipe, not a model or a blanket permission to use an account.
+The gateway ships built-in and configured access routes. Each describes a service,
+protocol, authentication recipe and trusted routing rules. See
+[model-access terms](model-access.md) for the distinction between a provider,
+service, route, account and credential.
 
-| Route | Access mechanism |
-| --- | --- |
-| `openai` | OpenAI API key |
-| `openai-chatgpt` | Temporary ChatGPT account access token and account ID |
-| `anthropic` | Anthropic API key |
-| `claude-subscription` | Claude access token plus an explicit future expiry |
-| `openrouter` | OpenRouter API key; models from multiple vendors |
-| `grok-subscription` | Local Grok access token plus its actual expiry |
-| `minimax-subscription` | Local MiniMax Coding/Token Plan key |
+The `provider` field holds the historical route ID, not just the vendor name.
+Existing IDs and public interfaces remain unchanged.
+
+| Access route | Existing `provider` ID | Required access material |
+| --- | --- | --- |
+| OpenAI API — API key | `openai` | OpenAI API key |
+| ChatGPT Codex — account access | `openai-chatgpt` | Temporary ChatGPT access token and account ID |
+| Anthropic API — API key | `anthropic` | Anthropic API key |
+| Claude — account access | `claude-subscription` | Claude access token plus an explicit future expiry |
+| OpenRouter API — API key | `openrouter` | OpenRouter API key; models from multiple vendors |
+
+These names describe access mechanisms. Account entitlement and upstream billing
+still determine which models and balances are available.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
-Kimi Code remains excluded because its subscription guidelines prohibit
-non-interactive automation. A Grok model accessed through OpenRouter uses the OpenRouter API
-route and credential, not a Grok subscription credential.
-
-The checked-in `services/gateway/providers.json` supplies the Grok and MiniMax
-routes using the existing Chat Completions protocol. Both use reference credits,
-not cash billing. See [local subscription access](local-subscriptions.md).
-Operators can add compatible routes through that trusted registry; harnesses
+Operators add compatible routes to the trusted
+[model-access.json registry](../services/gateway/model-access.json); harnesses
 cannot register arbitrary upstream destinations. Each hosted command run is
 restricted to its declared provider/model allowlist. The configuration field
 remains named `provider` for compatibility.
 
-`services/gateway/model_access.py` is the shared connection registry. It combines
-built-in definitions with the existing `providers.json` profiles. The compiler
-reads each connection's credential requirements from its authentication recipe;
+[`services/gateway/model-access.json`](../services/gateway/model-access.json) holds
+all maintained route definitions. `model_access.py` loads that validated data;
+an optional legacy `providers.json` is translated into the same registry. Conflicting
+IDs, HTTP aliases or endpoint-variable names are rejected. The compiler
+reads each route's credential requirements from its authentication recipe;
 the gateway uses the same definition for the destination, operations, model
 mapping, and usage parser. The registry contains names and recipes, never secret
 values. Public provider IDs, gateway URLs, and credential input names are unchanged.
 
 Destinations are fixed by that registry. Legacy `*_UPSTREAM_BASE_URL` settings
 (including `CHATGPT_UPSTREAM_BASE_URL`) are accepted only when they match the
-registered URL, with an optional trailing slash. A different or empty value in
-the gateway environment prevents startup before credential use or provider
-traffic. Compiled runs pass the selected connections' settings through for this
+registered URL, with an optional trailing slash. A different value prevents gateway startup before credential use or provider
+traffic. Compiled Compose settings use the registered default when unset or
+empty; an explicitly empty setting passed directly to a standalone gateway is
+rejected. Compiled runs pass only the selected routes' settings through for
 validation; requests always use the registry URL. Before upgrading a deployment,
 check its endpoint settings and remove obsolete overrides. A supported alternate
 destination requires a reviewed registry change, not a run parameter or proxy URL.
@@ -56,18 +59,29 @@ select a replacement model API endpoint.
 
 ## Authentication recipes
 
+The [integration guide](integrating-model-access.md) explains the shared
+`credential_requirements` / `prepare_credentials` interface and the separate
+instructions for solver harnesses. `dungeness providers --details` describes
+required inputs without reading credentials.
+
 `services/gateway/gateway_auth.py` resolves authentication recipes. Recipes
 specify headers whose values come from a credential name, a field in a
 credential JSON file, or a fixed value. An optional expiry source is checked
-before request admission. The resolver has no provider-name branches and does
+before request admission when the recipe declares one. ChatGPT's current recipe
+has no expiry field: the caller must provide valid access, and upstream rejection
+stops the run's model access. The resolver has no provider-name branches and does
 not use billing status to choose an authentication mechanism.
 
-Built-in recipes live beside the provider destinations in `model_access.py`.
+Recipes live beside the endpoints in `model-access.json`; they contain input
+names and field paths, never credentials.
 They preserve the existing operator input names. The launcher reads those
 inputs from the run's env file (taking precedence over host values) and stages
 only the required credentials in a private JSON file. Generated containers never
 receive API keys or account metadata as environment-variable values.
-ChatGPT's recipe reads its access token and account ID from the staged file.
+For newly compiled runs, the same resolver stages ChatGPT's access token and
+account ID in a separate private file. It copies only recipe-selected fields;
+refresh tokens and unrelated login metadata are omitted. The original login
+file stays unchanged.
 A missing, malformed, or incomplete credential file fails closed. Caller-supplied
 bearer tokens are never used to authenticate upstream requests.
 
@@ -79,28 +93,29 @@ credential maps. Standalone integrations using broadly readable files must set
 configured file never falls back to another identity. Compiled runs already stage
 private files.
 
-For compatible providers in `providers.json`, bearer substitution remains the
-default. These optional fields configure different authentication headers:
+Authentication recipes can supply additional account metadata:
 
 ```json
 {
-  "credential_env": "EXAMPLE_API_KEY",
-  "credential_header": "x-api-key",
-  "credential_prefix": "",
-  "credential_headers": {
-    "account-id": "EXAMPLE_API_KEY_ACCOUNT"
+  "authentication": {
+    "sources": [{
+      "headers": {
+        "x-api-key": {"env": "EXAMPLE_API_KEY"},
+        "account-id": {"env": "EXAMPLE_API_KEY_ACCOUNT"}
+      }
+    }]
   }
 }
 ```
 
-This is a fragment of a complete trusted provider profile. Additional credential
-names must be namespaced under `credential_env` and must not collide with
-other credentials or transport headers. Operators supply the corresponding
+This is a fragment of a complete trusted route. Use distinct credential names
+for different accounts/routes. Operators supply the corresponding
 `TESTBED_EXAMPLE_API_KEY_ACCOUNT` variable; the launcher stages its value only
 for the gateway, for a run that permits this provider. These fields are not a new
 solver-controlled credential-grant format.
 
-Session-token profiles require their existing `*_EXPIRES_AT` value. Credential
+Session recipes declare an `expires_at` selector alongside `headers`. Legacy
+session-token profiles keep their existing `*_EXPIRES_AT` value. Credential
 expiry does not trigger an API-key fallback or an automatic login/refresh.
 OpenRSI's local login readers remain responsible for extracting temporary
 access from provider login files.
@@ -125,7 +140,7 @@ Exa search and fetch are disabled. Both `/web/search` and `/web/fetch` return
 HTTP 410 with `external_web_disabled`, regardless of supplied keys or budgets.
 Generated runs set search/fetch budgets to zero and never forward `EXA_API_KEY`.
 There is no outbound Exa implementation in the gateway. Assigned problem
-descriptions and knowledge-base resources remain available.
+descriptions and assigned resources remain available.
 
 ## Credential non-disclosure and container boundary
 
@@ -173,7 +188,9 @@ Staged files are removed after container teardown on completion, failure,
 Ctrl-C and SIGTERM cancellation. SIGKILL or host failure cannot run cleanup;
 operators should clear abandoned private staging directories after confirming
 their runs have stopped. The caller's original credential inputs are not deleted.
-ChatGPT keeps its existing private read-only access-file mount. This does not
+ChatGPT keeps its existing input name and read-only gateway mount; newly compiled
+runs mount the resolver's private snapshot. Earlier renders without file-input
+metadata retain their original mount behavior until recompiled. This does not
 protect credentials from the trusted gateway process, host root or Docker-daemon
 administrators, who can read mounted files.
 
@@ -192,27 +209,11 @@ access:
 python3 script/check-gateway-isolation.py  # add --sudo if Docker requires it
 ```
 
-It verifies synthetic inference on all four built-in access routes, absence of
+It verifies synthetic inference on four built-in access routes, absence of
 credentials from Docker's environment, usage records, credential redaction,
 read-only root and credential mounts, private accounting permissions,
 temporary-file spooling, dropped capabilities and
 `no-new-privileges`. CI runs this check on pushes and pull requests.
-
-### Live integration evidence (2026-10-24)
-
-Local run `local-8dd9cb86b0344bfb` exercised stock Codex with GPT-6 Astra/high
-through the hardened gateway. Docker inspection confirmed the read-only root,
-read-only credential mount, writable usage volume and temporary directory,
-zero effective capabilities, and `NoNewPrivs=1`. Six model requests completed
-with settled accounting. Further model admission returned 429 after exhaustion;
-the harness exited and the separate final verifier accepted its retained circuit
-(local score 22,711,406,592). All run containers were removed on completion.
-
-The configured one-credit admission cap resulted in 1.721452 normalized credits
-of settled usage, including in-flight overshoot. This check validates gateway
-compatibility and isolation, not a strict one-dollar spending guarantee. A scan
-of 119 retained output files found no literal credential values. This is local
-test evidence, not an official remote result or proof of a production rollout.
 
 ## Claude session route
 
@@ -223,12 +224,13 @@ private gateway credential file; neither value is exposed in the harness contain
 or Docker environment metadata. Expiry is checked before request admission.
 No refresh/account endpoints or API-key fallback are available.
 
-The gateway passes the request body unchanged and does not insert an official
-client identity. The harness is responsible for its client and protocol headers.
+The gateway preserves accepted conversation history and does not insert an
+official client identity. Request policy and bounded admission may add a default
+output allowance; response filtering removes literal credential echoes. The harness is responsible for its client and protocol headers.
 Reported cache/input/output usage is normalized with the run's pinned reference
 prices; subscription billing is not reported as a cash API charge. Supply a pricing
 entry for this access route explicitly; historical pricing files are unchanged.
 
-Synthetic streaming, expiry, no-fallback and container-credential-boundary tests
-cover the route. A live Claude credential validation and hosted AMI rollout are
-still required before claiming production support.
+Synthetic streaming, expiry and no-fallback tests cover the route. A consumer
+must separately qualify its packaged runtime and account access; these tests do
+not establish that a deployed service uses this revision.

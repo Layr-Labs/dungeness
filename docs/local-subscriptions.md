@@ -1,51 +1,110 @@
-# Local subscription access
+# Account and subscription access
 
-These routes are for runs on the subscriber's own machine. They do not enable
-remote credential submission or establish eligibility for platform funding.
-The harness uses the assigned gateway URL and `testbed`; the real credential
-is mounted only into the trusted gateway. Refresh credentials are not staged.
+A route selects how the gateway authenticates; an account determines entitlement
+and upstream quota. A route appearing in `dungeness providers` does not establish
+that your account can use every model, or that a hosted platform accepts that
+route. Login and refresh belong to the trusted caller, outside the harness.
 
-| Provider | Model | Private local input |
+## Required inputs
+
+Use `./dungeness providers --details` for the installed runtime's exact recipes.
+These are the account routes bundled in this revision:
+
+| Route (`provider`) | Private caller input | Protocol |
 | --- | --- | --- |
-| `grok-subscription` | `grok-4.7` | `TESTBED_GROK_SUBSCRIPTION_TOKEN` and `TESTBED_GROK_SUBSCRIPTION_TOKEN_EXPIRES_AT` |
-| `minimax-subscription` | `MiniMax-M3.1-Flash`, `MiniMax-M3` | `TESTBED_MINIMAX_CODING_PLAN_KEY` |
+| `openai-chatgpt` | `DUNGENESS_CODEX_AUTH_FILE`: private JSON with `tokens.access_token` and `tokens.account_id` | Responses and compaction |
+| `claude-subscription` | `TESTBED_CLAUDE_ACCESS_TOKEN` and `TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT` | Messages and token counting |
 
-Use your authorized Grok login or MiniMax plan key. A MiniMax API billing key
-must not be labeled a subscription key: the upstream determines which balance
-is consumed. Neither route reports a fabricated cash charge or remaining plan
-allowance. Expired Grok access fails closed without refresh or API-key fallback.
+Use the actual expiry supplied by the login flow; do not invent a future expiry
+to make a token pass validation. Expiry is checked only where the recipe declares
+it. ChatGPT's recipe has no expiry field: the caller supplies valid access and
+upstream authentication errors stop model access. No route silently refreshes,
+chooses another account or falls back to an API key.
 
-Both routes accept only text Chat Completions and function tools. Hosted search,
-account APIs and arbitrary upstream URLs remain unavailable. No Grok CLI identity
-headers are added. A harness must pair its client's request format with this
-route, including helper calls and tool results. Gemini CLI's subscription route
-is not enabled: its native protocol and explicit third-party OAuth restriction
-need a separate integration decision.
+Google subscription access and Kimi Code are not registered in this revision.
+Adding either requires a reviewed integration and separate account validation.
 
-## Reference pricing
+## Google integration status
 
-The frozen [2026-10-30 local schedule](examples/local-subscription-pricing-20261030.json)
-records the public OpenRouter reference prices and original catalog fields.
-Current OpenRSI clients bundle equivalent reference entries; `--pricing` is not
-required for advertised models. This file is also available for direct Dungeness
-experiments. Claude Code setup is documented in the
-[OpenRSI recipe](https://github.com/Layr-Labs/openrsi-space/blob/main/docs/claude-subscription.md).
-It does not change the historical default schedule or query live prices during
-a run. Grok's higher rate above 200,000 input tokens is retained; hosted search
-is disabled. A 500,000-token context window is a client configuration, not a
-500,000-token run budget. Configure it in the harness and use the separate
-normalized-credit cap for total usage.
+Checked on 2026-11-24:
 
-## Provider references
+- The gateway includes [Google protocol translation](integrating-model-access.md#google-protocol-translation)
+  and native token accounting. Synthetic HTTP tests cover Gemini and Code Assist
+  envelopes, signed multi-turn local calls, streaming, cache/thinking costs,
+  unavailable usage, interrupted responses and rejection of hosted tools.
+- One direct official Antigravity CLI subscription call to Carbon Low passed,
+  with API-key/ADC inputs and tools disabled. The CLI reported 2,066 input and
+  6 output tokens. This checks account access, not a Dungeness harness run.
+- Live subscription endpoint/authentication, exact model prices and a complete
+  harness run remain to be qualified. Google's documented OpenAI-compatible
+  **API-key endpoint** is not a subscription endpoint. Token renewal is deferred.
 
-Checked 2026-10-30:
+The saved [subscription probes](https://github.com/Layr-Labs/dungeness/tree/feat/native-antigravity-carbon/tools/antigravity-probe)
+also found an unreported reviewer call when testing the full Antigravity CLI
+with a synthetic tool workflow. Do not treat that CLI's final usage as proven
+complete metering, or turn missing usage into zero cost. The new gateway
+translation sends direct model requests without that CLI. No default Google
+route, manager option or VM release is enabled by this change.
 
-- [Grok headless CLI](https://docs.x.ai/build/overview).
-- [MiniMax OpenAI-compatible API](https://platform.minimax.io/docs/api-reference/text-openai-api).
-- [MiniMax CLI and plan access](https://github.com/MiniMax-AI/minimax-code).
-- [Gemini CLI access restrictions](https://geminicli.com/docs/resources/tos-privacy/).
-- [Kimi subscription restrictions](https://www.kimi.com/en/help/kimi-code/community-guidelines).
+### Comparison with nanocode
 
-Synthetic tests exercise the installed profiles, streaming accounting, expiry,
-budget rejection and secret exclusion. A provider needs separate live validation;
-passing these tests alone does not establish account entitlement.
+Reviewed the supplied
+[revision `ef8a705`](https://github.com/nanocodexyz/nanocode/blob/ef8a70531bbda8f0295a5184c3d887bc9fd8e167/crates/backends/antigravity/README.md).
+It implements Gemini wire requests, streaming, thought-signature history and
+cache/answer/thinking counters. Its client retains the latest cumulative usage
+snapshot rather than summing each chunk, which matches our accounting approach.
+It also implements its own Antigravity-style harness tools and prompts.
+
+That revision explicitly does **not** support Antigravity/Google AI subscription
+sign-in; it supports API keys, Vertex AI credentials and a configured gateway.
+We reuse our existing credential resolver and budget ledger, require complete
+usage for continued inference, reject provider-hosted tools, and do not import
+nanocode's automatic authentication discovery or inference retries. No nanocode
+code or dependency is bundled.
+
+## Google access-token lifetime
+
+Checked against Google's documentation on 2026-11-24. Google documents a
+[one-hour OAuth access-token lifetime](https://developers.google.com/google-ads/api/docs/oauth/credential-management#reuse_user_credentials_across_your_api_requests).
+Its [OAuth token response](https://developers.google.com/identity/protocols/oauth2/web-server#exchange-authorization-code)
+provides the actual remaining lifetime in `expires_in`; use that value rather
+than assuming a fixed duration. This is OAuth guidance, not a confirmed
+Antigravity-specific lifetime or a test of the user's account.
+
+A fresh token does not establish two hours of uninterrupted access. Without
+in-run refresh, check that remaining validity covers startup, the run and a
+safety margin. Longer runs need renewal on the trusted side. The refresh token
+is separate authorization material and must not enter the harness. This revision
+does not implement Google login or live credential renewal.
+
+## Credential boundary
+
+The caller prepares the selected account's input. Newly compiled runs privately
+stage the required token fields; ChatGPT refresh tokens and unrelated login
+metadata are omitted. The original login file is unchanged. The staged files
+are mounted read-only into the gateway and removed after container teardown.
+See [authentication and file permissions](gateway-authentication.md).
+
+The harness receives its assigned gateway URL and a placeholder credential. It
+must not read login files or pass real credentials to the gateway. Its client
+must implement the route's supported protocol and
+[request recovery](command-harness.md#required-request-error-handling).
+Provider-hosted tools, account APIs and arbitrary upstream destinations are not
+available. These controls trust the host, Docker administrator and gateway.
+
+For a manager or another trusted launcher, use the
+[credential integration API](integrating-model-access.md). It performs no login,
+network access or account discovery. Remote credential handling and any platform
+approval rules are separate from this local runtime contract.
+
+## Reference accounting
+
+The bundled [pricing schedule](../services/gateway/pricing.yaml) defines supported
+route/model combinations and their normalized comparison rates. A caller may
+install another reviewed, pinned schedule. The actual schedule used must be
+recorded with the run. A normalized dollar budget is not a subscription cash bill
+or a guarantee about the provider's remaining allowance.
+
+Synthetic tests cover protocol compatibility, expiry, no fallback, accounting
+and credential exclusion. Live account validation and qualification of the
+packaged runtime remain separate checks; synthetic success alone proves neither.

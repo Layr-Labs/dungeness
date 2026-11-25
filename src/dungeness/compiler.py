@@ -42,7 +42,7 @@ ADAPTERS_ROOT = REPOSITORY_ROOT / "adapters"
 RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
 sys.path.insert(0, str(GATEWAY_ROOT))
-from model_access import MODEL_ACCESS, credential_names, credential_files, gateway_base_url
+from model_access import MODEL_ACCESS, credential_requirements, gateway_base_url
 PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
@@ -1438,11 +1438,13 @@ def build_compose(
     if provider == "openai-chatgpt" and command_policy is None:
         raise ValueError("ChatGPT access requires command model_access; native subscription agents are retired.")
     providers = {model["provider"] for model in command_policy["models"]} if command_policy else {provider}
-    provider_secret_env = {}
+    access_inputs = credential_requirements(providers)
+    provider_secret_env = {
+        key: "${" + source + ":?provider access required}"
+        for key, source in access_inputs["environment"].items()
+    }
     for name in sorted(providers):
         access = MODEL_ACCESS[name]
-        for key in sorted(credential_names(access)):
-            provider_secret_env[key] = "${TESTBED_" + key + ":?provider access required}"
         # Legacy variables are passed only for validation, never URL selection.
         variable = access["upstream_env"]
         provider_secret_env[variable] = "${" + variable + ":-" + access["upstream_default"] + "}"
@@ -1619,19 +1621,17 @@ def build_compose(
     # Keep credential *names* in the trusted render, never their values in
     # Docker Config.Env. The launcher resolves these into a private bind file.
     gateway = document["services"]["gateway"]
-    private_names = set()
-    for name in sorted(providers):
-        access = MODEL_ACCESS[name]
-        private_names.update(credential_names(access))
-        for source in credential_files(access):
-            gateway["environment"][source["file_env"]] = source["mount_path"]
-            gateway["volumes"].append(
-                "${" + source["host_env"] + ":?provider access required}:" + source["mount_path"] + ":ro")
+    private_names = set(access_inputs["environment"])
+    for source, spec in access_inputs["files"].items():
+        gateway["environment"][spec["gateway_env"]] = spec["mount_path"]
+        gateway["volumes"].append(
+            "${" + source + ":?provider access required}:" + spec["mount_path"] + ":ro")
     credential_sources = {}
     for name in sorted(private_names & gateway["environment"].keys()):
         expression = gateway["environment"].pop(name)
         credential_sources[name] = expression[2:].split(":", 1)[0]
     gateway["x-dungeness-credential-env"] = credential_sources
+    gateway["x-dungeness-credential-files"] = access_inputs["files"]
     gateway["environment"]["DUNGENESS_CREDENTIALS_FILE"] = "/run/dungeness/credentials.json"
     gateway["volumes"].append({
         "type": "bind", "source": "${DUNGENESS_CREDENTIALS_FILE:?Launch with dungeness run}",
