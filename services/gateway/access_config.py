@@ -88,7 +88,7 @@ def validate_access_routes(entries):
     for name, config in entries.items():
         _require(_matches(r"[a-z][a-z0-9-]{0,47}", name))
         _require(isinstance(config, dict) and required <= set(config)
-                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project"})
+                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project", "project_header"})
         url = config["upstream_default"]
         _require(_text(url) and bool(url) and " " not in url and "\\" not in url)
         parsed = urlsplit(url)
@@ -121,6 +121,14 @@ def validate_access_routes(entries):
             _matches(r"[a-z][a-z0-9_-]*", header) and header not in TRANSPORT_HEADERS
             for header in headers))
         _authentication(config["authentication"])
+        if "project_header" in config:
+            # Vertex's project is caller-owned account configuration. Only a
+            # trusted authentication header may supply this single path segment.
+            header = config["project_header"]
+            _require(transport == "google-generate-content"
+                     and _matches(r"[a-z][a-z0-9-]*", header)
+                     and header in config["authentication"]["sources"][0]["headers"]
+                     and header not in headers and "project" not in config)
         if "models" in config:
             _require(isinstance(config["models"], dict))
             for model, mapping in config["models"].items():

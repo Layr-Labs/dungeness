@@ -22,9 +22,13 @@ Existing IDs and public interfaces remain unchanged.
 | Anthropic API — API key | `anthropic` | Anthropic API key |
 | Claude — account access | `claude-subscription` | Claude access token plus an explicit future expiry |
 | OpenRouter API — API key | `openrouter` | OpenRouter API key; models from multiple vendors |
+| Gemini API — API key | `google` | Gemini API key |
+| Vertex AI — Cloud OAuth | `google-vertex` | Cloud access token, actual expiry and project ID |
 
 These names describe access mechanisms. Account entitlement and upstream billing
 still determine which models and balances are available.
+See [Google route setup](integrating-model-access.md#installed-google-routes)
+for the private input names and supported models.
 
 ChatGPT subscription access remains supported through `openai-chatgpt`.
 Operators add compatible routes to the trusted

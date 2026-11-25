@@ -261,12 +261,17 @@ def request_body(payload):
     return body
 
 
-def upstream_request(config, payload, model, request_id):
+def upstream_request(config, payload, model, request_id, headers=None):
     require(isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", model),
             "Use a direct Google model ID")
     body = request_body(payload)
     method = "streamGenerateContent" if payload.get("stream") else "generateContent"
     base = config["upstream_default"].rstrip("/")
+    if "project_header" in config:
+        project = (headers or {}).get(config["project_header"])
+        require(isinstance(project, str) and re.fullmatch(r"(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]{1,20})", project),
+                "Vertex project ID is missing or invalid")
+        base += f"/projects/{project}/locations/global/publishers/google"
     if config["transport"] == "google-code-assist":
         body = {"model": model, "request": body, "user_prompt_id": request_id,
                 **({"project": config["project"]} if "project" in config else {})}

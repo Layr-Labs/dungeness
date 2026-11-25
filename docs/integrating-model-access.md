@@ -208,6 +208,52 @@ assigned Chat Completions URL. The trusted route selects:
 | `google-generate-content` | An authorized Gemini-compatible base, such as `https://generativelanguage.googleapis.com/v1beta` | Appends `/models/{model}:generateContent` or `:streamGenerateContent?alt=sse` |
 | `google-code-assist` | An authorized Code Assist base, such as `https://cloudcode-pa.googleapis.com/v1internal` | Wraps the request with `model` and optional trusted `project`; appends `:generateContent` or `:streamGenerateContent?alt=sse` |
 
+#### Installed Google routes
+
+`dungeness providers --details` lists both routes and their required inputs:
+
+| `provider` | Service | Private launcher inputs |
+| --- | --- | --- |
+| `google` | Gemini API, `generativelanguage.googleapis.com` | `TESTBED_GEMINI_API_KEY` |
+| `google-vertex` | Vertex AI, `aiplatform.googleapis.com`, global location | `TESTBED_VERTEX_ACCESS_TOKEN`, `TESTBED_VERTEX_ACCESS_TOKEN_EXPIRES_AT`, `TESTBED_VERTEX_PROJECT_ID` |
+
+Both routes include `gemini-4-carbon`, `gemini-4-neon`, `gemini-4-argon` and
+`gemini-4-hydrogen`, with pinned OpenRouter reference rates. For example:
+
+```yaml
+model_access:
+  models:
+    - provider: google-vertex
+      upstream_id: google/gemini-4-carbon
+      request_model: gemini-4-carbon
+      api: openai-chat
+      name_format: request
+```
+
+The compiler supplies the harness URL:
+`http://gateway:8080/model/google-vertex/v1`. Use `google` for API-key access.
+The harness uses a placeholder credential; real account inputs stay in private
+gateway staging. The routes do not fall back to each other.
+
+For Vertex, sign in on the host using `gcloud auth application-default login`.
+The trusted launcher obtains a Cloud-scoped access token from that login and
+supplies its actual expiry as an ISO 8601 timestamp. Select the Cloud project
+explicitly; it needs billing, the Vertex API enabled, and permission to call the
+model. No API is enabled or billing changed by Dungeness. Refresh tokens stay
+on the host. Renewal during a run is not implemented; use a fresh token and a
+run duration that fits its remaining validity.
+
+The registry's `project_header` reads the project only from the gateway's
+trusted authentication recipe. A validated project ID or number is inserted
+into `/projects/{project}/locations/global/publishers/google` beneath the fixed
+Vertex base URL. Neither a harness header nor a supplied URL can choose the
+destination. Other regions require a separately reviewed route.
+
+These are API-billed routes, not Google AI Ultra browser or Antigravity
+subscription allowances. Account/model availability is determined by Google.
+For setup details, see [Vertex authentication](https://cloud.google.com/vertex-ai/generative-ai/docs/start/gcp-auth)
+and [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key).
+
 These are wire formats, not account entitlements. The Gemini API-key service
 does not accept a subscription merely because both use Google models. Code
 Assist follows [Google's client envelope](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/converter.ts);
@@ -241,7 +287,7 @@ For a caller with **already verified** Code Assist access, a route entry can be:
 Add `project` only when required by the verified account. Supply the token and
 its real expiry through the existing private credential resolver. The adapter
 does not discover accounts, refresh tokens, enable credits or fall back to a
-paid API. Nothing above is installed as a default Google route.
+paid API. The `google-subscription` example is not an installed route.
 
 The translated response uses the existing OpenAI-compatible usage schema
 (`usage_parser: "openai"`); accounting reads the native Google receipt directly.
@@ -250,7 +296,7 @@ tokens remain a subset of prompt tokens. Repeated streaming counters are not
 added together. Missing, inconsistent or incomplete usage blocks further model
 admissions. Select exact model IDs and pinned OpenRouter **reference prices**
 in `pricing.yaml`; this never routes subscription calls through OpenRouter.
-The earlier Google price snapshot is research input, not an installed schedule.
+The installed API routes use the rates recorded in `pricing.yaml`.
 
 Keep the entire returned assistant message. In addition to ordinary tool calls,
 the adapter returns `extra_content.google.parts` to preserve each native part
