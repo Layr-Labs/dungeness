@@ -12,11 +12,11 @@ import re
 import sys
 import tempfile
 
-def credential_requirements(access_routes):
+def credential_requirements(access_routes, selections=None):
     """Read the trusted registry lazily, without loading it into adapter imports."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services/gateway"))
     from model_access import credential_requirements as describe
-    return describe(access_routes)
+    return describe(access_routes, selections)
 
 
 def _name(value):

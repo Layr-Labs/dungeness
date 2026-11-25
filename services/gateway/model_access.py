@@ -5,6 +5,8 @@ values and are never supplied by a harness. Runtime parsers are named here and
 resolved by the gateway; reading this registry needs no server dependencies.
 """
 from pathlib import Path
+import json
+import os
 import re
 import sys
 
@@ -33,13 +35,20 @@ def configured_provider(name, profile):
     }
 
 
-MODEL_ACCESS = validate_access_routes({
+DEFAULT_MODEL_ACCESS = validate_access_routes({
     name: {**config, "routes": sorted(config["routes"]), "passthrough": list(config["passthrough"])}
     for name, config in {
         **ACCESS_ROUTES,
         **{name: configured_provider(name, profile) for name, profile in PROFILES.items()},
     }.items()
 })
+
+from access_selection import resolve_routes
+
+# Set once by the trusted launcher before importing the gateway. Requests cannot
+# change it. Invalid explicit input never falls back to the default registry.
+ACCESS_SELECTION = json.loads(os.environ.get("DUNGENESS_ACCESS_SELECTION", "{}"))
+MODEL_ACCESS = resolve_routes(DEFAULT_MODEL_ACCESS, ACCESS_SELECTION)
 
 # Historical import aliases; HTTP registration uses the full registry.
 OPENAI_ROUTES = MODEL_ACCESS.get("openai", {}).get("routes", set())
@@ -63,18 +72,19 @@ def credential_files(config):
     return [source for source in config["authentication"]["sources"] if "file_env" in source]
 
 
-def credential_requirements(access_routes):
+def credential_requirements(access_routes, selections=None):
     """Describe selected private inputs without reading credentials or logging in.
 
     Each current route uses one explicit authentication source. Alternative
     sources/account selection need a deliberate contract instead of requiring
     every possible credential or silently choosing a fallback.
     """
+    registry = MODEL_ACCESS if selections is None else resolve_routes(MODEL_ACCESS, selections)
     result = {"schema_version": 1, "environment": {}, "files": {}}
     for name in sorted(set(access_routes)):
-        if name not in MODEL_ACCESS:
+        if name not in registry:
             raise ValueError("Unknown model access route.")
-        config = MODEL_ACCESS[name]
+        config = registry[name]
         if len(config["authentication"]["sources"]) != 1:
             raise ValueError("Access route requires explicit authentication source selection.")
         for key in sorted(credential_names(config)):

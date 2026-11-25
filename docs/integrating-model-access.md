@@ -148,6 +148,57 @@ conflicting environment overrides. A harness cannot choose the upstream endpoint
 
 ## Adding an access route
 
+### Choosing an endpoint and authentication for a run
+
+Run `./dungeness providers --details` to see approved endpoints, authentication
+methods and models. Existing `provider` + model configurations still work.
+Alternatively, specify the endpoint and method directly in each model profile:
+
+```yaml
+model_access:
+  models:
+    - endpoint: https://api.anthropic.com/v1
+      authentication: bearer
+      upstream_id: anthropic/claude-opus-5
+      request_model: claude-opus-5
+      api: anthropic-messages
+      name_format: request
+```
+
+The compiler resolves this pair to `claude-subscription`. At the same endpoint,
+`api-key` resolves to `anthropic`. No separate route name is required; if supplied,
+it must agree. The resolved route supplies its existing protocol, credential
+requirements, model mappings and prices without modification.
+
+The trusted launcher uses the resolved provider with `credential_requirements`,
+then stages the returned inputs with `prepare_credentials`. This example requires
+`TESTBED_CLAUDE_ACCESS_TOKEN` and its actual
+`TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT`. Never put credentials in the run
+specification or harness.
+
+Endpoint and method must identify exactly one registered route. URLs match
+exactly, including scheme and base path. Unknown or ambiguous choices fail;
+they never fall back to another account. Models must match the trusted pricing
+catalog. Callers cannot override headers, paths, prices or usage parsers.
+
+`authentication_method` is the reusable public label (`bearer` or `api-key`).
+The route's `authentication` recipe describes the actual token source and any
+additional headers. To support another approved endpoint using bearer tokens,
+add its route data with `authentication_method: bearer`; the same credential
+renderer handles it. A new wire protocol can still require adapter code.
+
+Only selected credentials are staged. The selection and registry digest are
+recorded, and the gateway independently validates them at startup. Subscription
+entitlement still depends on the supplied account.
+
+For attested integrations, `python tools/export-access-policy.py` exports the
+derived endpoint/method/model policy and registry/pricing digests. The application
+must freeze that policy in its measured runtime, approve it at the verifier and
+bind the selected endpoint, method, model and policy digest into run inputs.
+Enabling local configuration alone does not qualify an attested release.
+
+### Adding an endpoint or protocol
+
 Add an entry to `access_routes` in `model-access.json`, then add its model rates
 to `pricing.yaml`. For example, this complete entry reuses Chat Completions:
 
@@ -206,7 +257,6 @@ assigned Chat Completions URL. The trusted route selects:
 | `transport` | Fixed upstream base | Behavior |
 | --- | --- | --- |
 | `google-generate-content` | An authorized Gemini-compatible base, such as `https://generativelanguage.googleapis.com/v1beta` | Appends `/models/{model}:generateContent` or `:streamGenerateContent?alt=sse` |
-| `google-code-assist` | An authorized Code Assist base, such as `https://cloudcode-pa.googleapis.com/v1internal` | Wraps the request with `model` and optional trusted `project`; appends `:generateContent` or `:streamGenerateContent?alt=sse` |
 
 #### Installed Google routes
 
@@ -254,40 +304,7 @@ subscription allowances. Account/model availability is determined by Google.
 For setup details, see [Vertex authentication](https://cloud.google.com/vertex-ai/generative-ai/docs/start/gcp-auth)
 and [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key).
 
-These are wire formats, not account entitlements. The Gemini API-key service
-does not accept a subscription merely because both use Google models. Code
-Assist follows [Google's client envelope](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/converter.ts);
-compatibility with an Antigravity login must be tested separately.
-
-For a caller with **already verified** Code Assist access, a route entry can be:
-
-```json
-{
-  "google-subscription": {
-    "transport": "google-code-assist",
-    "upstream_default": "https://cloudcode-pa.googleapis.com/v1internal",
-    "upstream_env": "GOOGLE_SUBSCRIPTION_UPSTREAM_BASE_URL",
-    "routes": ["chat/completions", "models"],
-    "auth": "gateway_secret",
-    "billed": false,
-    "passthrough": [],
-    "usage_parser": "openai",
-    "authentication": {
-      "sources": [{
-        "headers": {
-          "authorization": {"env": "GOOGLE_ACCESS_TOKEN", "prefix": "Bearer "}
-        },
-        "expires_at": {"env": "GOOGLE_ACCESS_TOKEN_EXPIRES_AT"}
-      }]
-    }
-  }
-}
-```
-
-Add `project` only when required by the verified account. Supply the token and
-its real expiry through the existing private credential resolver. The adapter
-does not discover accounts, refresh tokens, enable credits or fall back to a
-paid API. The `google-subscription` example is not an installed route.
+Google subscription access is not supported. Use the API credentials listed above.
 
 The translated response uses the existing OpenAI-compatible usage schema
 (`usage_parser: "openai"`); accounting reads the native Google receipt directly.
@@ -295,8 +312,8 @@ The translated response uses the existing OpenAI-compatible usage schema
 tokens remain a subset of prompt tokens. Repeated streaming counters are not
 added together. Missing, inconsistent or incomplete usage blocks further model
 admissions. Select exact model IDs and pinned OpenRouter **reference prices**
-in `pricing.yaml`; this never routes subscription calls through OpenRouter.
-The installed API routes use the rates recorded in `pricing.yaml`.
+in `pricing.yaml`. OpenRouter supplies reference rates; requests go directly
+to the selected Google API endpoint.
 
 Keep the entire returned assistant message. In addition to ordinary tool calls,
 the adapter returns `extra_content.google.parts` to preserve each native part

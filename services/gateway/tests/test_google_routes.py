@@ -12,6 +12,8 @@ import test_gateway
 import gateway
 from gateway_runtime import Gateway
 from test_gateway import canonical_events
+from access_selection import resolve_endpoint
+from model_access import DEFAULT_MODEL_ACCESS
 
 MODEL = "gemini-4-carbon"
 PAYLOAD = {"model": MODEL, "messages": [{"role": "user", "content": "Return 42"}],
@@ -61,7 +63,11 @@ async def registered_route(provider, values=None, redirect=False):
 
 class RegisteredGoogleRoutesTests(unittest.IsolatedAsyncioTestCase):
     async def test_routes_use_private_credentials_fixed_destinations_and_bundled_prices(self):
-        for provider in ("google", "google-vertex"):
+        for selection in (
+            {"endpoint": "https://generativelanguage.googleapis.com/v1beta", "authentication": "api-key"},
+            {"endpoint": "https://aiplatform.googleapis.com/v1", "authentication": "bearer"},
+        ):
+            provider = resolve_endpoint(DEFAULT_MODEL_ACCESS, selection)
             with self.subTest(provider=provider):
                 async with registered_route(provider) as (client, runtime, calls):
                     listing = await client.get(f"/model/{provider}/v1/models")

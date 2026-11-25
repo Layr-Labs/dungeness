@@ -2,6 +2,7 @@
   "schema_version": 1,
   "access_routes": {
     "google": {
+      "authentication_method": "api-key",
       "transport": "google-generate-content",
       "upstream_default": "https://generativelanguage.googleapis.com/v1beta",
       "upstream_env": "GOOGLE_UPSTREAM_BASE_URL",
@@ -25,6 +26,7 @@
       }
     },
     "google-vertex": {
+      "authentication_method": "bearer",
       "transport": "google-generate-content",
       "upstream_default": "https://aiplatform.googleapis.com/v1",
       "upstream_env": "VERTEX_UPSTREAM_BASE_URL",
@@ -51,6 +53,7 @@
       }
     },
     "openai": {
+      "authentication_method": "bearer",
       "authentication": {
         "sources": [
           {
@@ -80,6 +83,7 @@
       "usage_parser": "openai"
     },
     "anthropic": {
+      "authentication_method": "api-key",
       "authentication": {
         "sources": [
           {
@@ -110,6 +114,7 @@
       "usage_parser": "anthropic"
     },
     "claude-subscription": {
+      "authentication_method": "bearer",
       "authentication": {
         "sources": [
           {
@@ -143,6 +148,7 @@
       "usage_parser": "anthropic"
     },
     "openrouter": {
+      "authentication_method": "bearer",
       "authentication": {
         "sources": [
           {
@@ -176,6 +182,7 @@
       "usage_parser": "openai"
     },
     "openai-chatgpt": {
+      "authentication_method": "bearer",
       "authentication": {
         "sources": [
           {
