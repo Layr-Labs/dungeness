@@ -37,7 +37,7 @@ def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd
         raise ValueError('Send explicit local history for bounded inference')
     def opaque(value):
         if isinstance(value, dict):
-            if (value.get('encrypted_content') or value.get('thought_signature')
+            if (value.get('encrypted_content') or value.get('thought_signature') or value.get('thoughtSignature')
                     or value.get('type') in ('redacted_thinking', 'reasoning.encrypted', 'compaction')):
                 return True
             return any(opaque(item) for item in value.values())

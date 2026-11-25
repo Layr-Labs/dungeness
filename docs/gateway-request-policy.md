@@ -62,7 +62,9 @@ The authoritative schemas are in
 [`gateway_request_policy.py`](../services/gateway/gateway_request_policy.py).
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
 Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
-The gateway does not translate requests or responses into another protocol.
+Existing routes retain their native formats. A trusted Google
+[transport selection](integrating-model-access.md#google-protocol-translation)
+can translate Chat Completions to Gemini and back.
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
   Unknown protocol beta headers and query controls are also rejected.
@@ -140,13 +142,19 @@ versions. The gateway preserves accepted history, including signatures,
 encrypted content, item order and tool associations, without removing fields.
 Requests are limited to 8 MiB and 64 levels of JSON nesting.
 
-History schema 2 also accepts Google's
+History schema 3 accepts Google's
 `extra_content.google.thought_signature` on assistant Chat Completions messages
 and their function calls. Preserve the complete returned message, including
 signatures arriving in late streaming deltas, when sending local tool results.
 Only the nonempty opaque signature string is accepted in that extension.
 Bounded admission treats it as opaque state rather than estimating tokens from
 its encoded length. See [Google's signature format](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures).
+The Google adapter also returns `extra_content.google.parts` on assistant
+messages. This contains reviewed native text/thought and function-call parts,
+preserving multiple signatures without flattening them. Keep those parts in
+order, including when collecting streaming deltas; the translator checks them
+against the visible text and tool calls on replay. Native server-tool and media
+parts are rejected.
 
 Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
 `conversation_history_rejected`. Diagnostics version 1 adds a structural `path`

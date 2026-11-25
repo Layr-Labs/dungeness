@@ -34,6 +34,7 @@ from gateway_models import (
 )
 from gateway_provider_cost import openrouter_charge
 from gateway_stream import CompletionBarrier
+from gateway_google import GoogleResponse, upstream_request as google_upstream_request
 from gateway_reservations import validate_generation
 from gateway_errors import GatewayPolicyError, recovery
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
@@ -215,7 +216,12 @@ class Gateway:
         # Access policy is independent of command/legacy harness identity,
         # pricing mode, web budgets, and whether a model allowlist was supplied.
         validate_model_request(provider, operation, payload)
-        upstream_model(MODEL_PROVIDERS[provider], payload["model"])
+        config = MODEL_PROVIDERS[provider]
+        mapped_model = upstream_model(config, payload["model"])
+        if config.get("transport", "passthrough") != "passthrough":
+            # Validate translation before admission or credential reads. Unknown
+            # controls must not disappear when converting between protocols.
+            google_upstream_request(config, payload, mapped_model, request.state.request_id)
         # All credential types are checked before admitting a model request.
         try:
             private_values = set()
@@ -552,12 +558,18 @@ class Gateway:
             profile_headers = {}
             if "models" in cfg:
                 routed_model = upstream_model(cfg, model)
-                if cfg['model_header']:
+                if cfg.get('model_header'):
                     profile_headers[cfg['model_header']] = routed_model
                 body = json.dumps({**payload, 'model': routed_model}, separators=(',', ':')).encode()
+            target_url, target_query = f"{upstream_base}/{normalized}", request.query_params
+            google_transport = cfg.get("transport", "passthrough") != "passthrough"
+            if google_transport:
+                target_url, target_query, translated = google_upstream_request(
+                    cfg, payload, upstream_model(cfg, model), request_id)
+                body = json.dumps(translated, separators=(",", ":")).encode()
             upstream_request = self.client.build_request(
                 request.method,
-                f"{upstream_base}/{normalized}",
+                target_url,
                 headers={
                     **profile_headers,
                     "content-type": "application/json",
@@ -576,12 +588,18 @@ class Gateway:
                     # Trusted credentials win over any allowed client metadata.
                     **auth_headers,
                 },
-                params=request.query_params,
+                params=target_query,
                 content=body,
             )
             request.state.upstream_request_sent = True
             async with request_deadline(deadline):
                 upstream = await self.client.send(upstream_request, stream=True)
+            if google_transport and upstream.is_success:
+                upstream = GoogleResponse(upstream, cfg, payload, request_id)
+                # Meter the latest native receipt, independently of downstream
+                # translation or a disconnect after the final usage event.
+                extract = lambda _body, _type: (upstream.translator.usage
+                                               if upstream.translator.finish_reason is not None else {})
             upstream_status = upstream.status_code
             if provider == "openrouter":
                 upstream_generation_id = upstream.headers.get("x-generation-id")

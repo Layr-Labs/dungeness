@@ -12,7 +12,7 @@ from gateway_history_diagnostics import HistoryShapeError, history_at, known_typ
 
 # Increment when the supported history contract changes. Kept in safe rejection
 # diagnostics; the exact gateway revision is recorded in the runtime manifest.
-HISTORY_SCHEMA_VERSION = 2
+HISTORY_SCHEMA_VERSION = 3
 MAX_MODEL_REQUEST_BYTES = 8 * 1024 * 1024
 
 
@@ -193,19 +193,28 @@ def google_thinking(payload: dict) -> None:
         raise ValueError("choose one of reasoning_effort, thinking_level or thinking_budget")
 
 
-def google_thought_signature(value: Any, role: str, operation: str) -> None:
+def google_thought_signature(value: Any, role: str, operation: str, *, allow_parts=False) -> None:
     """Opaque history only; never interpret or discard a returned signature."""
     if operation != "chat/completions" or role != "assistant":
         raise HistoryShapeError("signature_protocol_mismatch",
                                 "thought signatures require assistant Chat Completions history")
     extra = fields(value, {"google"}, "extra_content")
     with history_at("google"):
-        google = fields(extra.get("google"), {"thought_signature"}, "google")
-        signature = google.get("thought_signature")
-        if not isinstance(signature, str) or not signature:
+        google = fields(extra.get("google"), {"thought_signature", "parts"} if allow_parts else {"thought_signature"}, "google")
+        if not google:
             raise HistoryShapeError("invalid_thought_signature",
                                     "thought_signature must be a nonempty string",
                                     path=("thought_signature",))
+        if "thought_signature" in google:
+            signature = google["thought_signature"]
+            if not isinstance(signature, str) or not signature:
+                raise HistoryShapeError("invalid_thought_signature",
+                                        "thought_signature must be a nonempty string",
+                                        path=("thought_signature",))
+        if "parts" in google:
+            from gateway_google import validate_parts
+            with history_at("parts"):
+                validate_parts(google["parts"])
 
 
 def cache_control(value: Any) -> None:
@@ -349,7 +358,7 @@ def messages(value: Any, provider: str = "openai", operation: str = "messages") 
                 content_blocks(obj.get("content"))
             if "extra_content" in obj:
                 with history_at("extra_content"):
-                    google_thought_signature(obj["extra_content"], obj["role"], operation)
+                    google_thought_signature(obj["extra_content"], obj["role"], operation, allow_parts=True)
             if obj.get("reasoning_details") is not None:
                 if operation != "chat/completions":
                     raise HistoryShapeError("reasoning_protocol_mismatch", "reasoning_details requires Chat Completions", path=("reasoning_details",))

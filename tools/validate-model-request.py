@@ -10,7 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'services/gateway'))
 from gateway_reservations import validate_generation
-from model_access import MODEL_ACCESS
+from model_access import MODEL_ACCESS, upstream_model
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--provider', required=True)
@@ -32,7 +32,11 @@ try:
     matches = [e for e in schedule['entries'] if e['provider'] == args.provider and payload.get('model') in e['request_models']]
     if len(matches) != 1:
         raise ValueError('Pricing must contain exactly one entry for this provider/model')
-    _, tokens, usd = validate_generation(args.provider, args.operation, payload, matches[0], maximum=args.max_output_tokens)
+    checked, tokens, usd = validate_generation(args.provider, args.operation, payload, matches[0], maximum=args.max_output_tokens)
+    config = MODEL_ACCESS[args.provider]
+    if config.get('transport', 'passthrough') != 'passthrough':
+        from gateway_google import upstream_request
+        upstream_request(config, checked, upstream_model(config, checked['model']), 'offline-check')
     print(json.dumps({'valid': True, 'reservation_tokens': tokens, 'reservation_usd': usd,
                       'limitations': 'No authentication, live balance, routing or upstream compatibility check.'}))
 except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:

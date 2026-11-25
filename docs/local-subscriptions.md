@@ -28,23 +28,39 @@ Adding either requires a reviewed integration and separate account validation.
 
 Checked on 2026-11-24:
 
-- The gateway now accepts Google's Chat Completions thinking controls and opaque
-  thought signatures. Synthetic HTTP tests cover two-turn local function calls,
-  fragmented streaming, the existing compatible usage format and rejection of
-  hosted tools. See [thinking controls](gateway-request-policy.md#thinking-controls).
+- The gateway includes [Google protocol translation](integrating-model-access.md#google-protocol-translation)
+  and native token accounting. Synthetic HTTP tests cover Gemini and Code Assist
+  envelopes, signed multi-turn local calls, streaming, cache/thinking costs,
+  unavailable usage, interrupted responses and rejection of hosted tools.
 - One direct official Antigravity CLI subscription call to Carbon Low passed,
   with API-key/ADC inputs and tools disabled. The CLI reported 2,066 input and
   6 output tokens. This checks account access, not a Dungeness harness run.
-- A direct Google subscription adapter is still missing. Google's documented
-  OpenAI-compatible **API-key endpoint** is not a subscription endpoint.
-  Live usage metering, trusted token renewal for longer runs, and a complete
-  harness run still need implementation or qualification.
+- Live subscription endpoint/authentication, exact model prices and a complete
+  harness run remain to be qualified. Google's documented OpenAI-compatible
+  **API-key endpoint** is not a subscription endpoint. Token renewal is deferred.
 
 The saved [subscription probes](https://github.com/Layr-Labs/dungeness/tree/feat/native-antigravity-carbon/tools/antigravity-probe)
 also found an unreported reviewer call when testing the full Antigravity CLI
 with a synthetic tool workflow. Do not treat that CLI's final usage as proven
-complete metering, or turn missing usage into zero cost. No Google route,
-manager option or VM release is enabled by the thinking-policy change.
+complete metering, or turn missing usage into zero cost. The new gateway
+translation sends direct model requests without that CLI. No default Google
+route, manager option or VM release is enabled by this change.
+
+### Comparison with nanocode
+
+Reviewed the supplied
+[revision `ef8a705`](https://github.com/nanocodexyz/nanocode/blob/ef8a70531bbda8f0295a5184c3d887bc9fd8e167/crates/backends/antigravity/README.md).
+It implements Gemini wire requests, streaming, thought-signature history and
+cache/answer/thinking counters. Its client retains the latest cumulative usage
+snapshot rather than summing each chunk, which matches our accounting approach.
+It also implements its own Antigravity-style harness tools and prompts.
+
+That revision explicitly does **not** support Antigravity/Google AI subscription
+sign-in; it supports API keys, Vertex AI credentials and a configured gateway.
+We reuse our existing credential resolver and budget ledger, require complete
+usage for continued inference, reject provider-hosted tools, and do not import
+nanocode's automatic authentication discovery or inference retries. No nanocode
+code or dependency is bundled.
 
 ## Google access-token lifetime
 

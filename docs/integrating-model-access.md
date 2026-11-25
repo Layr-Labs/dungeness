@@ -196,4 +196,66 @@ usage and reference prices complete, with no silent paid-API fallback.
 Validate private staging, missing/expired credentials, field filtering and
 cleanup; then streaming, tool history, accounting, error recovery and an actual
 harness run. VM packaging and attested qualification follow separately.
-Neither this interface nor Google discovery adds a Google execution adapter.
+
+### Google protocol translation
+
+The gateway includes a text/function-call adapter in
+[`gateway_google.py`](../services/gateway/gateway_google.py). Harnesses use their
+assigned Chat Completions URL. The trusted route selects:
+
+| `transport` | Fixed upstream base | Behavior |
+| --- | --- | --- |
+| `google-generate-content` | An authorized Gemini-compatible base, such as `https://generativelanguage.googleapis.com/v1beta` | Appends `/models/{model}:generateContent` or `:streamGenerateContent?alt=sse` |
+| `google-code-assist` | An authorized Code Assist base, such as `https://cloudcode-pa.googleapis.com/v1internal` | Wraps the request with `model` and optional trusted `project`; appends `:generateContent` or `:streamGenerateContent?alt=sse` |
+
+These are wire formats, not account entitlements. The Gemini API-key service
+does not accept a subscription merely because both use Google models. Code
+Assist follows [Google's client envelope](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/converter.ts);
+compatibility with an Antigravity login must be tested separately.
+
+For a caller with **already verified** Code Assist access, a route entry can be:
+
+```json
+{
+  "google-subscription": {
+    "transport": "google-code-assist",
+    "upstream_default": "https://cloudcode-pa.googleapis.com/v1internal",
+    "upstream_env": "GOOGLE_SUBSCRIPTION_UPSTREAM_BASE_URL",
+    "routes": ["chat/completions", "models"],
+    "auth": "gateway_secret",
+    "billed": false,
+    "passthrough": [],
+    "usage_parser": "openai",
+    "authentication": {
+      "sources": [{
+        "headers": {
+          "authorization": {"env": "GOOGLE_ACCESS_TOKEN", "prefix": "Bearer "}
+        },
+        "expires_at": {"env": "GOOGLE_ACCESS_TOKEN_EXPIRES_AT"}
+      }]
+    }
+  }
+}
+```
+
+Add `project` only when required by the verified account. Supply the token and
+its real expiry through the existing private credential resolver. The adapter
+does not discover accounts, refresh tokens, enable credits or fall back to a
+paid API. Nothing above is installed as a default Google route.
+
+The translated response uses the existing OpenAI-compatible usage schema
+(`usage_parser: "openai"`); accounting reads the native Google receipt directly.
+`candidatesTokenCount + thoughtsTokenCount` becomes output tokens, while cached
+tokens remain a subset of prompt tokens. Repeated streaming counters are not
+added together. Missing, inconsistent or incomplete usage blocks further model
+admissions. Select exact model IDs and pinned OpenRouter **reference prices**
+in `pricing.yaml`; this never routes subscription calls through OpenRouter.
+The earlier Google price snapshot is research input, not an installed schedule.
+
+Keep the entire returned assistant message. In addition to ordinary tool calls,
+the adapter returns `extra_content.google.parts` to preserve each native part
+and signature; append these parts across streaming deltas in order. Altering
+visible content without updating its native history fails explicitly.
+Only text, thinking, local functions and structured JSON output are supported.
+Unmapped options and server-side tools fail before admission. The offline
+request checker also validates this translation.
