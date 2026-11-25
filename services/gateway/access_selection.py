@@ -1,7 +1,8 @@
-"""Validate public per-run choices against an immutable access-route registry.
+"""Resolve a caller's endpoint and authentication method to a trusted route.
 
-Only endpoint and authentication recipe identifiers are caller-selected. Secrets,
-URL paths, model aliases, parsers and prices are not configurable here.
+The selected route supplies its complete protocol, credential requirements,
+model mappings and pricing identity. No configuration is transplanted between
+routes, and no untrusted URL becomes an upstream.
 """
 from copy import deepcopy
 import hashlib
@@ -21,23 +22,50 @@ def public_policy(registry):
                 "endpoint": config["upstream_default"],
                 "transport": config.get("transport", "passthrough"),
                 "operations": sorted(config["routes"]),
-                "authentication": sorted(
-                    other for other, recipe in registry.items()
-                    if compatible(config, recipe)
-                ),
+                "authentication": [config.get("authentication_method", name)],
             }
             for name, config in sorted(registry.items())
         },
     }
 
 
-def compatible(config, recipe):
-    # Authentication may carry protocol headers or a project selector. Do not
-    # transplant it between unrelated hosts, transports or path templates.
-    return (config["upstream_default"] == recipe["upstream_default"]
-            and config.get("transport", "passthrough") == recipe.get("transport", "passthrough")
-            and config.get("project_header") == recipe.get("project_header")
-            and config.get("project") == recipe.get("project"))
+def resolve_endpoint(registry, selection):
+    """Exact matching includes scheme, host, port and base path; never guess."""
+    if (not isinstance(selection, dict) or set(selection) != {"endpoint", "authentication"}
+            or not all(isinstance(value, str) and value for value in selection.values())):
+        raise ValueError("Model access requires an approved endpoint and authentication method.")
+    matches = [
+        name for name, config in registry.items()
+        if config["upstream_default"] == selection["endpoint"]
+        and config.get("authentication_method", name) == selection["authentication"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("Endpoint and authentication must identify one approved route.")
+    return matches[0]
+
+
+def resolve_model(registry, model):
+    """Legacy provider selection stays unchanged; endpoint selection adds its ID."""
+    if not isinstance(model, dict):
+        raise ValueError("Model must be a mapping.")
+    if not ({"endpoint", "authentication"} & set(model)):
+        return dict(model)
+    selection = {key: model.get(key) for key in ("endpoint", "authentication")}
+    provider = resolve_endpoint(registry, selection)
+    if "provider" in model and model["provider"] != provider:
+        raise ValueError("Explicit provider conflicts with the selected endpoint and authentication.")
+    return {**model, "provider": provider}
+
+
+def model_selections(registry, models):
+    """Public evidence for normalized selections; not a second configuration."""
+    selections = {}
+    for model in models:
+        resolved = resolve_model(registry, model)
+        if "endpoint" in resolved:
+            selections[resolved["provider"]] = {
+                key: resolved[key] for key in ("endpoint", "authentication")}
+    return selections
 
 
 def policy_digest(registry):
@@ -50,23 +78,13 @@ def policy_digest(registry):
 
 
 def resolve_routes(registry, selections):
-    """Return a private copy; never mutate defaults shared with another run."""
+    """Validate canonical gateway selections without changing any route behavior."""
     if not isinstance(selections, dict) or len(selections) > 16:
         raise ValueError("Model access routes must be a mapping with at most 16 entries.")
     resolved = deepcopy(registry)
     for provider, selection in selections.items():
-        if (provider not in registry or not isinstance(selection, dict)
-                or set(selection) != {"endpoint", "authentication"}):
-            raise ValueError("Model access selection requires an approved route, endpoint and authentication.")
-        config = registry[provider]
-        recipe_id = selection["authentication"]
-        if (not isinstance(selection["endpoint"], str)
-                or selection["endpoint"] != config["upstream_default"]
-                or not isinstance(recipe_id, str) or recipe_id not in registry
-                or not compatible(config, registry[recipe_id])):
-            raise ValueError("Endpoint or authentication method is not allowed for this route.")
-        resolved[provider]["authentication"] = deepcopy(registry[recipe_id]["authentication"])
-        resolved[provider]["billed"] = registry[recipe_id]["billed"]
+        if resolve_endpoint(registry, selection) != provider:
+            raise ValueError("Gateway route differs from the approved endpoint selection.")
     return resolved
 
 

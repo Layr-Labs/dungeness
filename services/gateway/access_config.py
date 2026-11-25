@@ -88,7 +88,9 @@ def validate_access_routes(entries):
     for name, config in entries.items():
         _require(_matches(r"[a-z][a-z0-9-]{0,47}", name))
         _require(isinstance(config, dict) and required <= set(config)
-                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project", "project_header"})
+                 and not set(config) - required - {"gateway_route", "models", "model_header", "transport", "project", "project_header", "authentication_method"})
+        if "authentication_method" in config:
+            _require(_matches(r"[a-z][a-z0-9-]{0,47}", config["authentication_method"]))
         url = config["upstream_default"]
         _require(_text(url) and bool(url) and " " not in url and "\\" not in url)
         parsed = urlsplit(url)

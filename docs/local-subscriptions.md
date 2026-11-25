@@ -21,8 +21,9 @@ it. ChatGPT's recipe has no expiry field: the caller supplies valid access and
 upstream authentication errors stop model access. No route silently refreshes,
 chooses another account or falls back to an API key.
 
-A run can explicitly choose a compatible authentication recipe at the same
-approved endpoint. See [per-run access selection](integrating-model-access.md#choosing-an-endpoint-and-authentication-for-a-run).
+A run can select an approved endpoint, authentication method and model without
+specifying a route name. The pair resolves to the existing registered route and
+its credential requirements. See [per-run access selection](integrating-model-access.md#choosing-an-endpoint-and-authentication-for-a-run).
 This does not add a Google subscription login or a new gateway endpoint.
 
 Google subscription access and Kimi Code are not registered in this revision.
@@ -46,6 +47,8 @@ Checked on 2026-11-25:
 - The registered Vertex Carbon route passed a native command-harness smoke:
   two live model calls, a local tool writing `42`, signed multi-turn history,
   streamed completion and provider token receipts ($0.000646 normalized cost).
+  The same smoke passed with only endpoint + `bearer` + model specified:
+  the compiler resolved `google-vertex` and the gateway recorded that selection.
   An earlier HTTP probe also verified request-limit rejection. These small tests
   do not qualify a full research run, Docker isolation or an attested VM release.
   Live Gemini API-key credentials and other registered Google models have not

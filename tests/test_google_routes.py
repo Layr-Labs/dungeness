@@ -50,14 +50,22 @@ class GoogleRouteTests(unittest.TestCase):
                                 "upstream_id": mapping["catalog"], "api": "openai-chat",
                                 "name_format": "request"}
                     models = compiler.command_models({"model": selected})
+                    by_endpoint = {key: value for key, value in selected.items() if key != "provider"}
+                    by_endpoint.update(endpoint=MODEL_ACCESS[provider]["upstream_default"],
+                                       authentication=MODEL_ACCESS[provider]["authentication_method"])
+                    resolved = compiler.command_models({"model": by_endpoint})
+                    self.assertEqual(resolved[0]["provider"], provider)
                     compose = yaml.safe_load(compiler.build_compose(
                         "google-contract", {}, {"model": {"requests": 4, "total_tokens": 8192}},
-                        command_policy={"models": models}))
+                        command_policy={"models": resolved}))
                     gateway = compose["services"]["gateway"]
                     self.assertEqual(gateway["x-dungeness-credential-env"], requirements["environment"])
                     self.assertEqual(json.loads(gateway["environment"]["DUNGENESS_ALLOWED_MODELS"]),
                                      [[provider, model]])
                     self.assertEqual(models[0]["base_url"], f"http://gateway:8080/model/{provider}/v1")
+                    self.assertEqual(json.loads(gateway["environment"]["DUNGENESS_ACCESS_SELECTION"]),
+                                     {provider: {"endpoint": by_endpoint["endpoint"],
+                                                 "authentication": by_endpoint["authentication"]}})
 
     def test_vertex_project_and_token_stay_in_private_gateway_staging(self):
         supplied = {"TESTBED_VERTEX_ACCESS_TOKEN": "synthetic-token",

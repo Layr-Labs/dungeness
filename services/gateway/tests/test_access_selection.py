@@ -19,16 +19,16 @@ from test_gateway import canonical_events
 class SelectedAccessGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_subscription_recipe_under_existing_endpoint_preserves_metering_and_rejections(self):
         config = resolve_routes(DEFAULT_MODEL_ACCESS, {
-            "anthropic": {"endpoint": "https://api.anthropic.com/v1",
-                          "authentication": "claude-subscription"}})["anthropic"]
+            "claude-subscription": {"endpoint": "https://api.anthropic.com/v1",
+                                   "authentication": "bearer"}})["claude-subscription"]
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
             "TESTBED_USAGE_DIR": tmp, "TESTBED_RUN_ID": "selected-access",
-            "DUNGENESS_ALLOWED_MODELS": '[["anthropic","claude-opus-5"]]',
+            "DUNGENESS_ALLOWED_MODELS": '[["claude-subscription","claude-opus-5"]]',
             "MAX_MODEL_REQUESTS": "4", "MAX_MODEL_TOKENS": "10000", "MAX_MODEL_USD": "1",
             "MAX_SEARCHES": "0", "MAX_FETCHES": "0",
             "DUNGENESS_CREDENTIALS_FILE": str(Path(tmp) / "credentials.json"),
         }, clear=True), patch.dict(gateway_models.MODEL_PROVIDERS, {
-            "anthropic": gateway_models.gateway_provider_config(config)}):
+            "claude-subscription": gateway_models.gateway_provider_config(config)}):
             private = Path(tmp) / "credentials.json"
             values = {"CLAUDE_ACCESS_TOKEN": "selected-secret",
                       "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z"}
@@ -53,16 +53,16 @@ class SelectedAccessGatewayTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(gateway, "gateway", runtime):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app),
                                                  base_url="http://gateway") as client:
-                        response = await client.post("/model/anthropic/v1/messages", json=payload,
+                        response = await client.post("/model/claude-subscription/v1/messages", json=payload,
                                                      headers={"authorization": "Bearer placeholder"})
                         self.assertEqual(response.status_code, 200, response.text)
                         for body in ({**payload, "model": "unapproved"},
                                      {**payload, "tools": [{"type": "web_search_20250305", "name": "web_search"}]}):
                             self.assertGreaterEqual((await client.post(
-                                "/model/anthropic/v1/messages", json=body)).status_code, 400)
+                                "/model/claude-subscription/v1/messages", json=body)).status_code, 400)
                         private.write_text(json.dumps({**values, "CLAUDE_ACCESS_TOKEN_EXPIRES_AT": "2000-01-01T00:00:00Z"}))
                         self.assertGreaterEqual((await client.post(
-                            "/model/anthropic/v1/messages", json=payload)).status_code, 400)
+                            "/model/claude-subscription/v1/messages", json=payload)).status_code, 400)
                 self.assertEqual(len(calls), 1)
                 receipt, = canonical_events(runtime.ledger.directory, "model.accounting")
                 self.assertEqual(receipt["accounting_basis"], "provider_usage")

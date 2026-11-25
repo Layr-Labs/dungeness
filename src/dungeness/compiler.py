@@ -43,7 +43,7 @@ RUNS_ROOT = REPOSITORY_ROOT / "runs"
 GATEWAY_ROOT = REPOSITORY_ROOT / "services/gateway"
 sys.path.insert(0, str(GATEWAY_ROOT))
 from model_access import MODEL_ACCESS, DEFAULT_MODEL_ACCESS, credential_requirements, gateway_base_url, upstream_model
-from access_selection import resolve_routes, selection_evidence
+from access_selection import resolve_model, model_selections, selection_evidence
 PRICING_POLICY_PATH = GATEWAY_ROOT / "pricing.yaml"
 AGENTS_ROOT = REPOSITORY_ROOT / "agents"
 WEB_CLIENT_PATH = REPOSITORY_ROOT / "agents/common/web_client.py"
@@ -975,19 +975,20 @@ def command_execution(agent: dict[str, Any]) -> dict[str, Any]:
 
 def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
     """The compiler populates model_access from trusted run configuration."""
-    models = agent.get("model_access", {}).get("models", [agent_model(agent)])
+    models = agent.get("model_access", {}).get("models", [agent.get("model")])
     if not isinstance(models, list) or not 1 <= len(models) <= 16:
         raise ValueError("model_access.models requires 1..16 model profiles")
-    selections = agent.get("model_access", {}).get("routes", {})
-    registry = resolve_routes(MODEL_ACCESS, selections)
+    if "routes" in agent.get("model_access", {}):
+        raise ValueError("Select endpoint and authentication in each model profile, not model_access.routes.")
     seen = set()
     result = []
     for model in models:
+        model = resolve_model(MODEL_ACCESS, model)
         profile = {"model": model}
         model = agent_model(profile)
         provider = agent_provider(profile)
         pricing = resolve_model_pricing(profile)
-        config = registry[provider]
+        config = MODEL_ACCESS[provider]
         upstream_model(config, model["request_model"])
         if model["request_model"] not in pricing.get("request_models", []):
             raise ValueError("Request model does not match its trusted pricing identity.")
@@ -1004,8 +1005,6 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
         seen.add(identity)
         result.append({**model, "name": model["request_model"],
                        "base_url": gateway_base_url(provider, model["api"])})
-    if set(selections) - {model["provider"] for model in result}:
-        raise ValueError("Model access selection names an unused route.")
     return result
 
 
@@ -1454,9 +1453,7 @@ def build_compose(
     if provider == "openai-chatgpt" and command_policy is None:
         raise ValueError("ChatGPT access requires command model_access; native subscription agents are retired.")
     providers = {model["provider"] for model in command_policy["models"]} if command_policy else {provider}
-    selections = command_policy.get("routes", {}) if command_policy else {}
-    if set(selections) - providers:
-        raise ValueError("Model access selection names an unused route.")
+    selections = model_selections(MODEL_ACCESS, command_policy["models"]) if command_policy else {}
     access_inputs = credential_requirements(providers, selections)
     provider_secret_env = {
         key: "${" + source + ":?provider access required}"
@@ -2059,11 +2056,12 @@ def build_task(
     command_execution(agent)
     policy = (run_spec_manifest or {}).get("model_access")
     if not isinstance(policy, dict) or set(policy) - {
-        "models", "routes", "max_parallel_requests", "request_reservation_usd", "bounded_requests", "max_output_tokens",
+        "models", "max_parallel_requests", "request_reservation_usd", "bounded_requests", "max_output_tokens",
     }:
         raise ValueError("command harnesses require run-spec model_access")
     if not isinstance(policy.get("models"), list) or not policy["models"]:
         raise ValueError("model_access.models must not be empty")
+    policy = {**policy, "models": [resolve_model(MODEL_ACCESS, model) for model in policy["models"]]}
     agent = {**agent, "model": policy["models"][0], "model_access": policy}
     parallel = policy.get("max_parallel_requests", 4)
     reservation = policy.get("request_reservation_usd", min(max_usd or 1, 1))

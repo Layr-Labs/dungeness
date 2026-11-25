@@ -150,44 +150,46 @@ conflicting environment overrides. A harness cannot choose the upstream endpoint
 
 ### Choosing an endpoint and authentication for a run
 
-Run `./dungeness providers --details` to see approved endpoints and the
-authentication recipe IDs available at each endpoint. The usual choice is the
-route's default; no extra configuration is required.
-
-To select another supported recipe, add `routes` alongside `models` in the run
-specification. For example, use a Claude subscription at the Anthropic endpoint:
+Run `./dungeness providers --details` to see approved endpoints, authentication
+methods and models. Existing `provider` + model configurations still work.
+Alternatively, specify the endpoint and method directly in each model profile:
 
 ```yaml
 model_access:
-  routes:
-    anthropic:
-      endpoint: https://api.anthropic.com/v1
-      authentication: claude-subscription
   models:
-    - provider: anthropic
+    - endpoint: https://api.anthropic.com/v1
+      authentication: bearer
       upstream_id: anthropic/claude-opus-5
       request_model: claude-opus-5
       api: anthropic-messages
       name_format: request
 ```
 
-The trusted launcher calls
-`credential_requirements(["anthropic"], selections)` with that `routes` mapping,
-then stages the returned inputs with `prepare_credentials`. This example needs
+The compiler resolves this pair to `claude-subscription`. At the same endpoint,
+`api-key` resolves to `anthropic`. No separate route name is required; if supplied,
+it must agree. The resolved route supplies its existing protocol, credential
+requirements, model mappings and prices without modification.
+
+The trusted launcher uses the resolved provider with `credential_requirements`,
+then stages the returned inputs with `prepare_credentials`. This example requires
 `TESTBED_CLAUDE_ACCESS_TOKEN` and its actual
-`TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT`, rather than an Anthropic API key.
-Never put credentials in the run specification or harness.
+`TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT`. Never put credentials in the run
+specification or harness.
 
-Each selected endpoint must exactly match its registered base. The authentication
-recipe must belong to that same endpoint and compatible transport/path template.
-The requested model must match the trusted model/pricing catalog. Users cannot
-override paths, headers, model aliases, prices or usage parsers. An explicit
-invalid choice fails; it never falls back to another account or route.
+Endpoint and method must identify exactly one registered route. URLs match
+exactly, including scheme and base path. Unknown or ambiguous choices fail;
+they never fall back to another account. Models must match the trusted pricing
+catalog. Callers cannot override headers, paths, prices or usage parsers.
 
-The compiler stages only selected credentials and records the selection and
-registry digest. The gateway independently validates the selection at startup.
-There is one choice per route per run; existing configurations remain unchanged.
-Subscription entitlement still depends on the supplied account.
+`authentication_method` is the reusable public label (`bearer` or `api-key`).
+The route's `authentication` recipe describes the actual token source and any
+additional headers. To support another approved endpoint using bearer tokens,
+add its route data with `authentication_method: bearer`; the same credential
+renderer handles it. A new wire protocol can still require adapter code.
+
+Only selected credentials are staged. The selection and registry digest are
+recorded, and the gateway independently validates them at startup. Subscription
+entitlement still depends on the supplied account.
 
 For attested integrations, `python tools/export-access-policy.py` exports the
 derived endpoint/method/model policy and registry/pricing digests. The application
@@ -313,6 +315,7 @@ For a caller with **already verified** Code Assist access, a route entry can be:
 ```json
 {
   "google-subscription": {
+    "authentication_method": "bearer",
     "transport": "google-code-assist",
     "upstream_default": "https://cloudcode-pa.googleapis.com/v1internal",
     "upstream_env": "GOOGLE_SUBSCRIPTION_UPSTREAM_BASE_URL",

@@ -9,6 +9,7 @@ import httpx
 from test_history_roundtrip import Fragments
 from test_request_policy import harness, request_body, route
 from access_config import validate_access_routes
+from access_selection import resolve_endpoint, resolve_routes
 from gateway_google import normalize_usage, ResponseTranslator
 from gateway_models import MODEL_PROVIDERS
 from gateway_request_policy import validate_model_request
@@ -31,11 +32,14 @@ RESULT = {"candidates": [{"index": 0, "content": {"role": "model", "parts": PART
 @asynccontextmanager
 async def google_harness(transport="google-generate-content"):
     async with harness() as (client, runtime, calls):
-        config = {**MODEL_PROVIDERS[PROVIDER], "transport": transport,
+        config = {**MODEL_PROVIDERS[PROVIDER], "transport": transport, "authentication_method": "bearer",
                   "upstream_default": "https://google.invalid/v1internal" if transport == "google-code-assist"
                   else "https://google.invalid/v1beta"}
         if transport == "google-code-assist":
             config["project"] = "synthetic-project"
+        selection = {"endpoint": config["upstream_default"], "authentication": "bearer"}
+        provider = resolve_endpoint({PROVIDER: config}, selection)
+        config = resolve_routes({PROVIDER: config}, {provider: selection})[provider]
         with patch.dict(MODEL_PROVIDERS, {PROVIDER: config}):
             yield client, runtime, calls, config
 
@@ -118,6 +122,7 @@ class GoogleTransportTests(unittest.IsolatedAsyncioTestCase):
                                         else config["upstream_default"] + "/models/example-model:" + method)
                             self.assertEqual(str(req.url), expected + ("?alt=sse" if streaming else ""))
                             self.assertNotIn("spoofed", dict(req.headers).values())
+                            self.assertEqual(req.headers["authorization"], "Bearer unused-session")
                             self.assertNotIn("unused-session", req.content.decode())
                             body = json.loads(req.content)
                             if transport == "google-code-assist":

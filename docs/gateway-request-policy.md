@@ -35,9 +35,9 @@ The gateway source, container environment, pricing catalog and operator credenti
 must remain outside the submitted agent's control.
 
 The trusted launcher may accept an untrusted per-run endpoint/authentication
-selection through `model_access.routes`. It is validated against the immutable
-registry in both compilation and gateway startup. Only registered compatible
-recipes are selectable; request validation, model mappings, prices and usage
+selection in each `model_access.models` profile. It must resolve uniquely to an
+approved route in both compilation and gateway startup. Only registered
+endpoint/method pairs are selectable; request validation, model mappings, prices and usage
 parsers remain trusted. `DUNGENESS_ACCESS_SELECTION` carries these validated
 choices to the gateway, never secrets or a replacement registry.
 

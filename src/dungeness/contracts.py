@@ -23,6 +23,7 @@ def model_providers(root: Path, *, details: bool = False) -> dict:
             {
                 "id": name,
                 "upstream": config["upstream_default"],
+                "authentication": config.get("authentication_method", name),
                 "operations": sorted(config["routes"]),
                 "credential_inputs": gateway["credential_requirements"]([name]),
             }
