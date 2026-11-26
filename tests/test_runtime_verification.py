@@ -101,6 +101,8 @@ class RuntimeVerificationTests(unittest.TestCase):
         self.evidence["docker_bind_owner"] = f"{os.geteuid()}:{os.getegid()}"
         timeout = subprocess.TimeoutExpired(["fixture"], 1)
         docker_commands = []
+        verifier_image = "task__harborid__verifier__trial-main:latest"
+        image_removed = False
 
         def run(argv, _cwd, env, _output, _stderr):
             self.assertEqual(argv[:4], ["uv", "run", "--isolated", "--locked"])
@@ -113,9 +115,22 @@ class RuntimeVerificationTests(unittest.TestCase):
             raise timeout
 
         def docker(argv, **_kwargs):
+            nonlocal image_removed
+            argv = list(argv)
             docker_commands.append(argv)
             if argv[:2] == ["docker", "compose"]:
                 return subprocess.CompletedProcess(argv, int("__verifier__" in argv[3]), "", "fixture error")
+            if argv[:3] == ["docker", "image", "rm"]:
+                self.assertEqual(argv[3:], ["--no-prune", verifier_image])
+                image_removed = True
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            if "--format" in argv:
+                self.assertIn(argv[5], {
+                    "reference=task__harborid__env-main:latest",
+                    f"reference={verifier_image}",
+                })
+                stdout = f"sha256:fixture {verifier_image}" if argv[5] == f"reference={verifier_image}" and not image_removed else ""
+                return subprocess.CompletedProcess(argv, 0, stdout, "")
             self.assertIn(argv[-1], {
                 "label=com.docker.compose.project=task__harborid__env",
                 "label=com.docker.compose.project=task__harborid__verifier__trial",
@@ -131,10 +146,12 @@ class RuntimeVerificationTests(unittest.TestCase):
         self.assertIs(caught.exception, timeout)
         self.assertEqual([argv[3] for argv in docker_commands if argv[:2] == ["docker", "compose"]],
                          ["task__harborid__env", "task__harborid__verifier__trial"])
-        staging, teardown = self.evidence["cleanup_errors"]
+        self.assertTrue(image_removed)
+        staging, leaked_image, teardown = self.evidence["cleanup_errors"]
         self.assertIn("dungeness-credentials-fixture", staging)
         self.assertRegex(staging, r"dungeness-runtime-verify-[a-f0-9]+-fixture")
         self.assertNotIn("unrelated", staging)
+        self.assertIn(verifier_image, leaked_image)
         self.assertIn("Could not tear down scored run project task__harborid__verifier__trial", teardown)
 
     def test_docker_host_takes_precedence_over_context(self):

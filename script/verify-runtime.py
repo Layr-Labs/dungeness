@@ -376,11 +376,22 @@ def project_resources(project, root, env):
     label = f"label=com.docker.compose.project={project}"
     resources = {}
     for kind, args in (("containers", ("container", "ls", "--all")),
-                       ("networks", ("network", "ls")),
-                       ("images", ("image", "ls", "--all"))):
+                       ("networks", ("network", "ls"))):
         ids = capture("docker", *args, "--quiet", "--no-trunc", "--filter", label, cwd=root, env=env)
         if ids:
             resources[kind] = sorted(set(ids.splitlines()))
+    # The classic builder can omit the project label from the fixture's Compose images.
+    images = capture("docker", "image", "ls", "--no-trunc",
+                     "--filter", f"reference={project}-main:latest",
+                     "--filter", f"reference={project}-gateway:latest",
+                     "--format", "{{.ID}} {{.Repository}}:{{.Tag}}", cwd=root, env=env)
+    tags = [line.split() for line in images.splitlines()]
+    tagged_ids = {image for image, _ in tags}
+    labeled = capture("docker", "image", "ls", "--all", "--quiet", "--no-trunc",
+                      "--filter", label, cwd=root, env=env)
+    owned = {tag for _, tag in tags} | (set(labeled.splitlines()) - tagged_ids)
+    if owned:
+        resources["images"] = sorted(owned)
     return resources
 
 

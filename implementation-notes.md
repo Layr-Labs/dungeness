@@ -13,3 +13,4 @@
 - The scored leg checks resources before recovery so a successful teardown cannot hide a product leak. Killing Harbor during verification reproduced a surviving verifier container. The loop tears down both projects by their recorded names and checks their exact Compose labels.
 - The run record stores the fixture score in its Harbor execution statistics. The loop checks those statistics against Harbor's job result and compares the record's usage with the gateway summary.
 - The full modes fail when the scored fixture uses a gateway user override. A standalone scored run reports the override and can still pass.
+- The classic Docker builder left an unlabelled verifier image after Harbor was killed. The loop checks the fixture's exact Compose image tags as well as its project labels, and removes tags without deleting shared image references.
