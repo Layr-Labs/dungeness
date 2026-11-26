@@ -49,8 +49,8 @@ def main():
     image = args.image or tag
     names = [tag + '-mock', tag + '-gateway', tag + '-uid-probe']
 
-    def run(*cmd, **kwargs):
-        return subprocess.run([*docker, *cmd], check=True, text=True, timeout=90, **kwargs)
+    def run(*cmd, timeout=90, **kwargs):
+        return subprocess.run([*docker, *cmd], check=True, text=True, timeout=timeout, **kwargs)
 
     # Exact compiler flags are also checked in test_command_harness.py.
     hardening = ['--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
@@ -131,7 +131,7 @@ ThreadingHTTPServer(('0.0.0.0',8081),Handler).serve_forever()
             if args.image:
                 run('image', 'inspect', image, stdout=subprocess.DEVNULL)
             else:
-                run('build', '-q', '-t', image, str(ROOT / 'services/gateway'))
+                run('build', '-q', '-t', image, str(ROOT / 'services/gateway'), timeout=None)
             run('network', 'create', '--internal', tag, stdout=subprocess.DEVNULL)
             run('run', '--pull=never', '-d', '--name', names[0], '--network', tag, '--network-alias', 'mock', '--network-alias', 'problem',
                 *hardening, '--mount', f'type=bind,src={mock},dst=/mock.py,readonly',

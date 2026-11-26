@@ -60,6 +60,34 @@ def main():
     prefix = 'run-isolation-' + uuid.uuid4().hex[:10]
     image = args.image or prefix + ':test'
     projects = []
+    listeners = []
+    cleanup_errors = []
+    temporary = None
+    building_image = False
+
+    def clean(action, *arguments):
+        try:
+            action(*arguments)
+        except (OSError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            cleanup_errors.append(error)
+            print(f'Run isolation cleanup failed: {error}', file=sys.stderr)
+
+    def listen(server):
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        try:
+            thread.start()
+        except (OSError, RuntimeError):
+            clean(server.server_close)
+            raise
+        listeners.append((server, thread))
+        return server
+
+    def remove_image():
+        result = subprocess.run(['docker', 'image', 'rm', '--no-prune', image],
+                                capture_output=True, text=True, timeout=30)
+        if 'No such image' not in result.stderr:
+            result.check_returncode()
+
     def docker(*cmd, **kwargs):
         try:
             return subprocess.run(['docker', *cmd], check=True, text=True, capture_output=True,
@@ -73,26 +101,23 @@ def main():
         def log_message(self, *_):pass
         def do_GET(self):
             self.send_response(200);self.end_headers();self.wfile.write(b'host-canary')
-    server = ThreadingHTTPServer(('0.0.0.0', 0), Canary)
-    thread = threading.Thread(target=server.serve_forever, daemon=True);thread.start()
-    ipv6_server = None
-    ipv6_thread = None
-    if args.ipv6:
-        class IPv6Canary(ThreadingHTTPServer):
-            address_family = socket.AF_INET6
-            def server_bind(self):
-                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-                super().server_bind()
-        ipv6_server = IPv6Canary(('::', server.server_port), Canary)
-        ipv6_thread = threading.Thread(target=ipv6_server.serve_forever, daemon=True)
-        ipv6_thread.start()
-    temporary = tempfile.TemporaryDirectory(prefix=prefix)
+    class IPv6Canary(ThreadingHTTPServer):
+        address_family = socket.AF_INET6
+        def server_bind(self):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            super().server_bind()
+
     try:
+        server = listen(ThreadingHTTPServer(('0.0.0.0', 0), Canary))
+        if args.ipv6:
+            listen(IPv6Canary(('::', server.server_port), Canary))
+        temporary = tempfile.TemporaryDirectory(prefix=prefix)
         tmp = temporary.name
         root = Path(tmp)
         if args.image:
             docker('image', 'inspect', image)
         else:
+            building_image = True
             docker('build', '-q', '-t', image, str(ROOT/'services/gateway'))
         runs = []
         for suffix in ('a', 'b'):
@@ -211,28 +236,20 @@ print(RUN+': own inference/papers/scorer work; host, other runs, private mounts 
             assert not main['HostConfig']['Privileged']
             assert set(main['NetworkSettings']['Networks'])=={run+'_agent_internal'}
             for service in containers.values():assert not service['HostConfig'].get('PortBindings')
-        print('PASS: two simultaneous generated run topologies; no paid inference')
     finally:
-        cleanup_failed = False
         for compose in reversed(projects):
-            try:
-                docker(*compose, 'down', '--timeout', '1', '--volumes', '--remove-orphans')
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-                print(f'Docker cleanup failed: {error}', file=sys.stderr)
-                cleanup_failed = True
-        if not args.image:
-            subprocess.run(['docker','image','rm','--no-prune',image],
-                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        if ipv6_server and ipv6_thread:
-            ipv6_server.shutdown()
-            ipv6_server.server_close()
-            ipv6_thread.join()
-        temporary.cleanup()
-        server.shutdown()
-        server.server_close()
-        thread.join()
-        if cleanup_failed and sys.exc_info()[0] is None:
-            raise RuntimeError('Run isolation cleanup failed.')
+            clean(docker, *compose, 'down', '--timeout', '1', '--volumes', '--remove-orphans')
+        if building_image:
+            clean(remove_image)
+        for listener, thread in reversed(listeners):
+            clean(listener.shutdown)
+            clean(listener.server_close)
+            clean(thread.join)
+        if temporary is not None:
+            clean(temporary.cleanup)
+        if cleanup_errors and sys.exc_info()[0] is None:
+            raise RuntimeError('Run isolation cleanup failed.') from cleanup_errors[0]
+    print('PASS: two simultaneous generated run topologies; no paid inference')
 
 
 if __name__=='__main__':main()

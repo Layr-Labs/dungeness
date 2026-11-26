@@ -10,10 +10,14 @@ from stock_adapter import AdapterFailure, Recovery
 
 def main():
     # The fixture compares a digest so the candidate image contains no credential.
-    for value in os.environ.values():
-        if hashlib.sha256(value.encode()).hexdigest() == "@CANARY_SHA256@":
-            raise AssertionError("VERIFY: synthetic credential reached the harness")
-    assert not Path("/run/dungeness/credentials.json").exists(), "Credential mount reached the harness"
+    size = int("@CANARY_BYTES@")
+    for raw in os.environb.values():
+        for offset in range(len(raw) - size + 1):
+            if hashlib.sha256(raw[offset:offset + size]).hexdigest() == "@CANARY_SHA256@":
+                raise AssertionError("VERIFY: synthetic credential reached the harness")
+    credential_directory = Path("/run/dungeness")
+    assert not (credential_directory.exists() or credential_directory.is_symlink()), \
+        "VERIFY: credential paths reached the harness"
 
     task = json.loads(Path(os.environ["DUNGENESS_TASK"]).read_text())
     model = task["models"][0]

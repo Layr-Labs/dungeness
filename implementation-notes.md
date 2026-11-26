@@ -7,3 +7,6 @@
 - The budget fixture settles a synthetic charge above the configured cap. The successful candidate remains available to the evaluator while the next inference attempt is rejected before dispatch.
 - Colima maps host bind ownership to root in its Linux guest. The scratch fixture uses the Docker-reported owner while preserving gateway capability drops and the separate harness network. The product renderer keeps its host UID behavior.
 - The Linux CI proof job requires an approved cache key and image ID. Keep the existing checks active until those inputs are provisioned.
+- The unpatched Colima scored run failed when Compose waited for the gateway container. The scored evidence and PASS line report the gateway user override when it is applied.
+- The scored fixture counts completed gateway HTTP events for model routes, including budget rejections. The usage summary retains the fixture's simulated charges.
+- Timeout cleanup uses the Harbor trial names recorded under the scored run to remove only those Compose projects and their locally tagged images.

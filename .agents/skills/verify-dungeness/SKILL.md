@@ -43,3 +43,8 @@ The loop removes its scratch copies and Docker resources after each run. Keep th
 - A fixture score and simulated charges establish local behavior. Live entitlements, provider billing, signed Mac execution, and official verifier receipts require separate runs.
 - The runner rewrites provider destinations in the scratch fixture. The score applies to that fixture route. Adjacent consumers and their deployed pins require their own loops.
 - A Docker engine that grants another UID access to private bind-mounted files fails the gateway isolation leg. Use a compatible local engine for a full pass.
+- The scored fixture uses the offline launcher. It does not run the default online launch through `uvx`.
+- The gateway image uses preloaded dependencies. The loop does not run the production image's `pip install`.
+- Only non-streaming Anthropic Messages requests run through the CLI and Harbor. The other routes run against an HTTP mock.
+- GitHub Actions shows the runtime verification job as skipped until `RUNTIME_VERIFY_CACHE_KEY` is set.
+- On macOS, `PROVE=1` stops before seeding faults while gateway isolation fails. Use `--leg faults` to diagnose the seeded assertions.
