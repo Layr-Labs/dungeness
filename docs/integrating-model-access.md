@@ -37,6 +37,38 @@ This is a short handoff to a coding agent:
 
 ## Selecting models
 
+Select an **access route + model** in each `model_access.models` entry. The
+`provider` field is the route ID; Dungeness derives the fixed upstream endpoint
+and authentication method from that route. Run `./dungeness providers --details`
+to inspect the installed routes, endpoints, models and required credential inputs.
+
+```yaml
+model_access:
+  models:
+    - provider: claude-subscription
+      upstream_id: anthropic/claude-opus-5
+      request_model: claude-opus-5
+      api: anthropic-messages
+      name_format: request
+```
+
+The route supplies credential requirements, model mappings and prices. The
+trusted launcher prepares the selected account's credentials separately; never
+put credentials in the run specification or harness.
+
+<a id="choosing-an-endpoint-and-authentication-for-a-run"></a>
+<details>
+<summary>Compatibility with existing endpoint-based configurations</summary>
+
+Existing model profiles with `endpoint` and `authentication` remain supported.
+The pair must resolve to exactly one registered route; an explicit `provider`
+must agree. URLs match exactly, including scheme and base path. Unknown or
+ambiguous choices fail without fallback. This form selects the same route and
+does not allow custom destinations, headers, prices or usage parsers. Use
+`provider` + model for new configurations.
+
+</details>
+
 Model names in this guide are examples; maintained configuration lives in code.
 The trusted [route configuration](../services/gateway/model-access.json) defines supported
 protocols and endpoints. The installed [pricing schedule](../services/gateway/pricing.yaml)
@@ -148,48 +180,12 @@ conflicting environment overrides. A harness cannot choose the upstream endpoint
 
 ## Adding an access route
 
-### Choosing an endpoint and authentication for a run
-
-Run `./dungeness providers --details` to see approved endpoints, authentication
-methods and models. Existing `provider` + model configurations still work.
-Alternatively, specify the endpoint and method directly in each model profile:
-
-```yaml
-model_access:
-  models:
-    - endpoint: https://api.anthropic.com/v1
-      authentication: bearer
-      upstream_id: anthropic/claude-opus-5
-      request_model: claude-opus-5
-      api: anthropic-messages
-      name_format: request
-```
-
-The compiler resolves this pair to `claude-subscription`. At the same endpoint,
-`api-key` resolves to `anthropic`. No separate route name is required; if supplied,
-it must agree. The resolved route supplies its existing protocol, credential
-requirements, model mappings and prices without modification.
-
-The trusted launcher uses the resolved provider with `credential_requirements`,
-then stages the returned inputs with `prepare_credentials`. This example requires
-`TESTBED_CLAUDE_ACCESS_TOKEN` and its actual
-`TESTBED_CLAUDE_ACCESS_TOKEN_EXPIRES_AT`. Never put credentials in the run
-specification or harness.
-
-Endpoint and method must identify exactly one registered route. URLs match
-exactly, including scheme and base path. Unknown or ambiguous choices fail;
-they never fall back to another account. Models must match the trusted pricing
-catalog. Callers cannot override headers, paths, prices or usage parsers.
-
-`authentication_method` is the reusable public label (`bearer` or `api-key`).
+Routes belong in the trusted registry, not the run specification.
+`authentication_method` is the route's public label (`bearer` or `api-key`).
 The route's `authentication` recipe describes the actual token source and any
 additional headers. To support another approved endpoint using bearer tokens,
 add its route data with `authentication_method: bearer`; the same credential
 renderer handles it. A new wire protocol can still require adapter code.
-
-Only selected credentials are staged. The selection and registry digest are
-recorded, and the gateway independently validates them at startup. Subscription
-entitlement still depends on the supplied account.
 
 For attested integrations, `python tools/export-access-policy.py` exports the
 derived endpoint/method/model policy and registry/pricing digests. The application

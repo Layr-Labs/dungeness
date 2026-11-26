@@ -21,9 +21,10 @@ it. ChatGPT's recipe has no expiry field: the caller supplies valid access and
 upstream authentication errors stop model access. No route silently refreshes,
 chooses another account or falls back to an API key.
 
-A run can select an approved endpoint, authentication method and model without
-specifying a route name. The pair resolves to the existing registered route and
-its credential requirements. See [per-run access selection](integrating-model-access.md#choosing-an-endpoint-and-authentication-for-a-run).
+Select the route in `model_access.models[].provider` alongside the model.
+Dungeness derives its endpoint, authentication method and credential requirements.
+See [model selection](integrating-model-access.md#selecting-models).
+
 Google access uses the separate `google` (Gemini API key) and `google-vertex`
 (Cloud OAuth) routes. Both use API billing; Google subscription access is not
 supported. See [Google API setup](integrating-model-access.md#installed-google-routes).

@@ -134,6 +134,11 @@ needed:
 
 ### Model access
 
+Select an access route in `model_access.models[].provider` alongside the model.
+The route determines the upstream endpoint and authentication method.
+Run `./dungeness providers --details` to inspect available routes and use the
+[model-selection example](integrating-model-access.md#selecting-models).
+
 Use the [model-access terms](model-access.md),
 [command model-access contract](command-harness.md) and
 [gateway authentication configuration](gateway-authentication.md). Real credentials
