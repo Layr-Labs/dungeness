@@ -57,13 +57,15 @@ class ExecutionLifecycleTests(unittest.TestCase):
 
     def test_offline_launch_uses_repository_lock(self):
         (self.root / "uv.lock").touch()
-        with patch.dict(os.environ, {"UV_OFFLINE": "1"}):
+        with patch.dict(os.environ, {"UV_OFFLINE": "1", "UV_PROJECT": str(self.root / "other"),
+                                    "UV_NO_PROJECT": "1"}):
             self.assertEqual(self.execute(), 0)
         argv = self.commands.call_args.args[0]
-        self.assertEqual(argv[:10], [
-            "uv", "run", "--isolated", "--locked", "--python", "3.12", "--group",
-            "harbor", "harbor", "run",
+        self.assertEqual(argv[:12], [
+            "uv", "run", "--isolated", "--locked", "--project", str(self.root),
+            "--python", "3.12", "--group", "harbor", "harbor", "run",
         ])
+        self.assertNotIn("UV_NO_PROJECT", self.commands.call_args.kwargs["env"])
 
     def test_offline_lock_matches_uv_boolean_values(self):
         self.assertFalse(harbor.use_offline_lock(self.root, {"UV_OFFLINE": "1"}))

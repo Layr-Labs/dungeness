@@ -32,11 +32,19 @@ With network access and `UV_OFFLINE` unset, warm the cache once from the
 repository root using the Python version and cache directory for the offline run.
 
 ```sh
-uv sync --locked --python 3.12 --group harbor
+uv run --isolated --locked --python 3.12 --group harbor harbor --version
 ```
 
 An earlier online run through `uvx` can leave different dependency versions
 in the cache.
+
+This warms the cache without changing the checkout's `.venv`. The CLI's
+shebang resolves script dependencies using package index metadata, which may
+be absent from the offline cache. Start offline runs with the project lock:
+
+```sh
+UV_OFFLINE=1 uv run --isolated --locked --python 3.12 python dungeness run …
+```
 
 This is currently a source-checkout runtime. The project manifest does not
 provide a wheel or console entrypoint: installed assets and workspace paths

@@ -49,10 +49,11 @@ def use_offline_lock(repository: Path, environment: Mapping[str, str]) -> bool:
     return offline and (repository / "uv.lock").is_file()
 
 
-def launch_command(job_path: Path, env_file: Path | str, *, locked: bool = False) -> list[str]:
+def launch_command(job_path: Path, env_file: Path | str, *, locked_project: Path | None = None) -> list[str]:
     """Build argv for the pinned execution framework; never invoke a shell."""
-    if locked:
-        command = ["uv", "run", "--isolated", "--locked", "--python", "3.12", "--group", "harbor"]
+    if locked_project is not None:
+        command = ["uv", "run", "--isolated", "--locked", "--project", str(locked_project),
+                   "--python", "3.12", "--group", "harbor"]
     else:
         command = ["uvx", "--python", "3.12", "--from", f"harbor=={HARBOR_VERSION}",
                    "--with", f"litellm=={LITELLM_VERSION}"]
