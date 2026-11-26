@@ -4,9 +4,10 @@ Use **access route** for a supported way to call a model service. Describe the
 service and authentication method explicitly: **OpenAI API — API key** or
 **ChatGPT Codex — account access**. A vendor name alone does not identify the route.
 
-The existing configuration field `provider` and IDs such as `openai` are
-historical access-route selectors. They remain valid for compatibility. In prose,
-**provider** means the organization operating the upstream service.
+Select **access route + model** for a run. The configuration field `provider`
+holds the route ID, such as `openai`; its historical name is retained.
+Dungeness derives the endpoint and authentication method from the route.
+In prose, **provider** means the organization operating the upstream service.
 
 ## Terms
 
@@ -56,11 +57,12 @@ resource limits and evidence. Those belong to the run contract rather than the
 credential resolver. Model access alone does not establish execution attestation
 or prove which model the upstream actually executed.
 
-## Existing selectors
+## Selecting a route
 
 The [access-route table](gateway-authentication.md#llm-access-routes) maps readable
-names to the unchanged `provider` IDs. `dungeness providers` reports those IDs for
-compatibility checks. Discovery establishes implementation availability only:
+names to `provider` IDs. `dungeness providers --details` shows those IDs with
+their endpoints, authentication methods, models and credential requirements.
+Discovery establishes implementation availability only:
 it does not test an account, perform inference or establish attested-run support.
 
 See [integrating model access](integrating-model-access.md) for the solver-agent

@@ -34,12 +34,13 @@ has provider credentials and external network access in command-harness runs.
 The gateway source, container environment, pricing catalog and operator credentials
 must remain outside the submitted agent's control.
 
-The trusted launcher may accept an untrusted per-run endpoint/authentication
-selection in each `model_access.models` profile. It must resolve uniquely to an
-approved route in both compilation and gateway startup. Only registered
-endpoint/method pairs are selectable; request validation, model mappings, prices and usage
-parsers remain trusted. `DUNGENESS_ACCESS_SELECTION` carries these validated
-choices to the gateway, never secrets or a replacement registry.
+Each `model_access.models` profile selects a registered route through `provider`
+and a model. Compilation derives its fixed endpoint and authentication method;
+the gateway independently validates the selection at startup. Existing
+endpoint-based profiles resolve to the same registered routes for compatibility.
+Request validation, model mappings, prices and usage parsers remain trusted.
+`DUNGENESS_ACCESS_SELECTION` carries validated choices to the gateway, never
+secrets or a replacement registry.
 
 ## Arbitrary harnesses, explicit access
 
@@ -68,10 +69,10 @@ and browsing are always rejected in model requests. Client flags such as Codex
 The authoritative schemas are in
 [`gateway_request_policy.py`](../services/gateway/gateway_request_policy.py).
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
-Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
-Existing routes retain their native formats. A trusted Google
-[transport selection](integrating-model-access.md#native-google-protocol)
-can translate Chat Completions to Gemini and back.
+Messages and token counting, OpenRouter text completions, OpenAI embeddings, and
+Google generateContent and streamGenerateContent. Routes retain their native
+formats. Google harnesses use the
+[native Google protocol](integrating-model-access.md#native-google-protocol).
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
   Unknown protocol beta headers and query controls are also rejected.
