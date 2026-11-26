@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack, chdir, contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
@@ -34,6 +34,8 @@ STOCK_COMMIT = "ac5b68b4268f94fd10d011e923526086d8973ef4"
 STOCK_SHA256 = "f42b48c62bda371bed37af04f90e7846e85e2f628e9885c163557debd9d647e0"
 CANARY = "dungeness-verify-synthetic-provider-key"
 CANARY_BYTES = CANARY.encode()
+SHARED_CREDENTIALS = Path("/dev/shm")
+IMAGE_OWNER_LABEL = "dungeness.verify.owner"
 ARTIFACT_LEAK = "VERIFY: synthetic credential reached a run artifact"
 OUTPUT_LEAK = "VERIFY: synthetic credential reached scored command output"
 SOURCE_URL = "https://example.invalid/source.git"
@@ -172,11 +174,11 @@ def scratch(env, evidence):
                 raise VerificationError(message) from error
 
 
-def dockerfile(base):
-    return f"FROM {base}\nUSER root\n"
+def dockerfile(base, owner):
+    return f"FROM {base}\nLABEL {IMAGE_OWNER_LABEL}={owner}\nUSER root\n"
 
 
-def stage_gateway(root, base, env, *, scoring=False):
+def stage_gateway(root, base, env, owner, *, scoring=False):
     gateway = root / "services/gateway"
     path = gateway / "Dockerfile"
     original = path.read_text()
@@ -188,7 +190,7 @@ def stage_gateway(root, base, env, *, scoring=False):
             "RUN if [ -d /app ]; then find /app -mindepth 1 -delete; fi\nWORKDIR /app\n")
     account = "useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 gateway"
     replace(gateway, "Dockerfile", account, f'{{ id gateway || {account}; }}')
-    source = dockerfile(base) + path.read_text().partition("\n")[2]
+    source = dockerfile(base, owner) + path.read_text().partition("\n")[2]
     if scoring:
         registry = gateway / "model-access.json"
         document = json.loads(registry.read_text())
@@ -209,7 +211,7 @@ def stage_gateway(root, base, env, *, scoring=False):
     path.write_text(source)
 
 
-def stage_run(root, base, stock, env):
+def stage_run(root, base, stock, env, owner):
     shutil.copytree(root / "tests/fixtures/runtime", root, dirs_exist_ok=True)
     verifier = root / "verifiers/sample-problem/synthetic"
     replace(root, "tasks/projects/dungeness/sample-starter/task.yaml",
@@ -219,11 +221,11 @@ def stage_run(root, base, stock, env):
             "    timeout_sec: 1200\n    build_timeout_sec: 1200\n",
             "resources:\n  agent: {cpus: 1, memory_mb: 512}\n"
             "  verifier: {cpus: 1, memory_mb: 512}\n")
-    (verifier / "Dockerfile").write_text(dockerfile(base) + "COPY . /tests/\n")
+    (verifier / "Dockerfile").write_text(dockerfile(base, owner) + "COPY . /tests/\n")
     for name in ("grade.py", "test.sh"):
         shutil.copy2(FIXTURE / name, verifier / name)
     agent = root / "agents/projects/dungeness/command"
-    (agent / "Dockerfile").write_text(dockerfile(base) + "COPY workspace/ /workspace/repo/\n")
+    (agent / "Dockerfile").write_text(dockerfile(base, owner) + "COPY workspace/ /workspace/repo/\n")
     replace(agent, "agent.yaml",
             '  entrypoint: ["python3", "-c", "import os,json; '
             "print(json.load(open(os.environ['DUNGENESS_TASK']))['instruction'])\"]\n",
@@ -326,20 +328,24 @@ def checked(evidence, name, argv, cwd, env, *, stdout_only=False):
 
 
 @contextmanager
-def gateway_image(root, base, evidence, name, env):
-    with artifact_errors("Cannot stage the gateway fixture"):
-        stage_gateway(root, base, env)
-    tag = "dungeness-verify-" + uuid.uuid4().hex[:12]
+def fixture_images(root, env, evidence, owner):
+    marker = f"{IMAGE_OWNER_LABEL}={owner}"
+    before = image_inventory(root, env)
     try:
-        checked(evidence, name + "-build",
-                ["docker", "build", "--network=none", "-q", "-t", tag, "services/gateway"], root, env)
-        yield tag
+        yield
     finally:
         try:
-            if subprocess.run(["docker", "image", "inspect", tag], env=env, cwd=root,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30).returncode == 0:
-                capture("docker", "image", "rm", "--no-prune", tag, cwd=root, env=env)
-        except (OSError, VerificationError, subprocess.TimeoutExpired) as error:
+            owned = image_inventory(root, env, f"label={marker}")
+            remove_images({image: owned[image] for image in owned.keys() - before.keys()},
+                          root, env, evidence, marker)
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            evidence["cleanup_errors"].append(redact(str(error)))
+        try:
+            for image in sorted(image_inventory(root, env).keys() - before.keys()):
+                history = image_history(image, root, env)
+                if "verify_provider" in history or "dungeness-verify" in history:
+                    evidence["cleanup_errors"].append(f"Verification left a fixture image: {image}")
+        except (VerificationError, subprocess.TimeoutExpired) as error:
             evidence["cleanup_errors"].append(redact(str(error)))
 
 
@@ -348,12 +354,21 @@ def gateway_check(root, base, evidence, name, env, *, linux=False):
     with artifact_errors("Cannot create the gateway probe directory"):
         temp.mkdir()
     env = dict(env, TMPDIR=str(temp))
-    with gateway_image(root, base, evidence, name, env) as tag:
+    tag = "dungeness-verify-" + uuid.uuid4().hex
+    cleanup_start = len(evidence["cleanup_errors"])
+    with fixture_images(root, env, evidence, tag):
+        with artifact_errors("Cannot stage the gateway fixture"):
+            stage_gateway(root, base, env, tag)
+        checked(evidence, name + "-build",
+                ["docker", "build", "--network=none", "-q", "-t", tag, "services/gateway"], root, env)
         argv = ["make", "check-run-isolation", f"VERIFY_GATEWAY_IMAGE={tag}"] if linux else [
             "python3", "script/check-gateway-isolation.py", "--image", tag,
             "--bind-owner", evidence["docker_bind_owner"],
         ]
-        return record_command(evidence, name, argv, root, env)
+        code, log = record_command(evidence, name, argv, root, env)
+    if code == 0 and len(evidence["cleanup_errors"]) > cleanup_start:
+        return failed_assertion(evidence, log, evidence["cleanup_errors"][cleanup_start])
+    return code, log
 
 
 def json_lines(path):
@@ -372,6 +387,58 @@ def find_artifact_leak(result):
     return None
 
 
+def image_inventory(root, env, *filters):
+    arguments = [argument for value in filters for argument in ("--filter", value)]
+    listing = capture("docker", "image", "ls", "--all", "--no-trunc", *arguments,
+                      "--format", "{{.ID}} {{.Repository}}:{{.Tag}}", cwd=root, env=env)
+    images = {}
+    for line in listing.splitlines():
+        image, tag = line.split()
+        refs = images.setdefault(image, set())
+        if "<none>" not in tag:
+            refs.add(tag)
+    return images
+
+
+def image_history(image, root, env):
+    return capture("docker", "image", "history", "--no-trunc", "--format", "{{.CreatedBy}}",
+                   image, cwd=root, env=env)
+
+
+def remove_images(images, root, env, evidence, marker):
+    if not images:
+        return
+    errors = evidence["cleanup_errors"]
+    tags = sorted({tag for refs in images.values() for tag in refs})
+    if tags:
+        try:
+            capture("docker", "image", "rm", "--no-prune", *tags, cwd=root, env=env)
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            errors.append(redact(str(error)))
+    current = image_inventory(root, env)
+    dangling = [image for image in images.keys() & current.keys() if not current[image]]
+    # Every classic Dockerfile step adds a history entry, even for metadata-only steps.
+    dangling.sort(key=lambda image: len(image_history(image, root, env).splitlines()), reverse=True)
+    if dangling:
+        try:
+            capture("docker", "image", "rm", "--no-prune", *dangling, cwd=root, env=env)
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            errors.append(redact(str(error)))
+    remaining = images.keys() & image_inventory(root, env).keys()
+    evidence.setdefault("image_cleanup", []).append({"marker": marker, "removed": sorted(images.keys() - remaining)})
+    if remaining:
+        errors.append(f"Could not remove verification images for {marker}: {', '.join(sorted(remaining))}")
+
+
+def project_images(project, root, env):
+    # Harbor's classic Compose build can omit the project label from its images.
+    images = image_inventory(root, env, f"label=com.docker.compose.project={project}")
+    for image, tags in image_inventory(root, env, f"reference={project}-main:latest",
+                                       f"reference={project}-gateway:latest").items():
+        images.setdefault(image, set()).update(tags)
+    return images
+
+
 def project_resources(project, root, env):
     label = f"label=com.docker.compose.project={project}"
     resources = {}
@@ -380,22 +447,13 @@ def project_resources(project, root, env):
         ids = capture("docker", *args, "--quiet", "--no-trunc", "--filter", label, cwd=root, env=env)
         if ids:
             resources[kind] = sorted(set(ids.splitlines()))
-    # The classic builder can omit the project label from the fixture's Compose images.
-    images = capture("docker", "image", "ls", "--no-trunc",
-                     "--filter", f"reference={project}-main:latest",
-                     "--filter", f"reference={project}-gateway:latest",
-                     "--format", "{{.ID}} {{.Repository}}:{{.Tag}}", cwd=root, env=env)
-    tags = [line.split() for line in images.splitlines()]
-    tagged_ids = {image for image, _ in tags}
-    labeled = capture("docker", "image", "ls", "--all", "--quiet", "--no-trunc",
-                      "--filter", label, cwd=root, env=env)
-    owned = {tag for _, tag in tags} | (set(labeled.splitlines()) - tagged_ids)
-    if owned:
-        resources["images"] = sorted(owned)
+    if images := project_images(project, root, env):
+        resources["images"] = sorted(tag for tags in images.values() for tag in tags)
+        resources["images"].extend(sorted(image for image, tags in images.items() if not tags))
     return resources
 
 
-def check_scored_cleanup(result, temp, root, env, evidence, *, failed):
+def check_scored_cleanup(result, temp, root, env, evidence, *, failed, credentials_before=None):
     errors = evidence["cleanup_errors"]
     count_before = len(errors)
     try:
@@ -405,10 +463,24 @@ def check_scored_cleanup(result, temp, root, env, evidence, *, failed):
             errors.append(f"Scored run left staging paths: {', '.join(staging)}")
     except OSError as error:
         errors.append(redact(f"Cannot check scored run staging: {error}"))
+    if credentials_before is not None:
+        for path in sorted(set(SHARED_CREDENTIALS.glob("dungeness-credentials-*")) - credentials_before):
+            try:
+                info = path.lstat()
+                if stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid() and find_artifact_leak(path):
+                    errors.append(f"Scored run left shared credential staging: {path.name}")
+                    shutil.rmtree(path)
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                errors.append(redact(f"Cannot clean scored run credentials: {error}"))
     try:
-        projects = environments.compose_projects_for_run(result)
-        # The product helper omits Harbor's separate verifier project.
-        projects += [f"{trial}__verifier__trial" for trial in environments.harbor_trials_for_run(result)]
+        trials = environments.harbor_trials_for_run(result)
+        projects = [f"{trial}{suffix}" for trial in trials for suffix in ("__env", "__verifier__trial")]
+        completed = {path.parent.name.lower() for path in (result / "harbor").glob("*/*/result.json")}
+        if completed.difference(trials):
+            errors.append("Cannot identify both Docker projects for each recorded Harbor trial.")
+        evidence.setdefault("scored_run", {})["docker_projects"] = projects
     except OSError as error:
         errors.append(redact(f"Cannot find scored run projects: {error}"))
         return
@@ -424,16 +496,14 @@ def check_scored_cleanup(result, temp, root, env, evidence, *, failed):
         return
     for project in projects:
         try:
-            with chdir(root):
-                if not environments.compose_down(project):
-                    errors.append(f"Could not tear down scored run project {project}.")
-        except OSError as error:
-            errors.append(redact(str(error)))
+            capture("docker", "compose", "--project-name", project, "down", "--volumes", "--remove-orphans",
+                    cwd=root, env=env)
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            errors.append(redact(f"Could not tear down scored run project {project}: {error}"))
         try:
+            remove_images(project_images(project, root, env), root, env, evidence,
+                          f"com.docker.compose.project={project}")
             remaining = project_resources(project, root, env)
-            if images := remaining.pop("images", []):
-                capture("docker", "image", "rm", "--no-prune", *images, cwd=root, env=env)
-                remaining = project_resources(project, root, env)
             if remaining:
                 errors.append(f"Could not remove scored run resources for {project}: {remaining}")
         except (VerificationError, subprocess.TimeoutExpired) as error:
@@ -456,47 +526,58 @@ def scored_run(root, base, stock, evidence, name, env):
     env = dict(env)
     scored = {}
     evidence["scored_run"] = scored
+    invocation = uuid.uuid4().hex
+    run_id = "runtime-verify-" + invocation[:12]
+    image_owner = "dungeness-verify-" + invocation
     with artifact_errors("Cannot stage the scored fixture"):
-        stage_gateway(root, base, env, scoring=True)
+        stage_gateway(root, base, env, image_owner, scoring=True)
         owner = evidence["docker_bind_owner"]
         if owner != f"{os.geteuid()}:{os.getegid()}":
             replace(root, "src/dungeness/compiler.py",
                     '                "user": f"{os.geteuid()}:{os.getegid()}",',
                     f'                "user": "{owner}",')
             scored["patched"] = {"gateway_user": owner}
-        spec, fixture_commit = stage_run(root, base, stock, env)
+        spec, fixture_commit = stage_run(root, base, stock, env, image_owner)
         temp = root.parent / "tmp"
         temp.mkdir()
+        credentials_before = None
+        if SHARED_CREDENTIALS.is_dir() and os.access(SHARED_CREDENTIALS, os.W_OK):
+            credentials_before = set(SHARED_CREDENTIALS.glob("dungeness-credentials-*"))
     env["TMPDIR"] = str(temp)
-    run_id = "runtime-verify-" + uuid.uuid4().hex[:12]
     result = root / "runs/users/verify" / run_id
-    argv = ["uv", "run", "--isolated", "--locked", "python", "dungeness", "run", spec,
+    argv = ["uv", "run", "--isolated", "--locked", "--python", "3.12", "python", "dungeness", "run", spec,
             "--namespace", "users/verify", "--run-id", run_id]
     code = 1
     log = ""
     cleanup_start = len(evidence["cleanup_errors"])
-    try:
-        code, log = record_command(evidence, name, argv, root, env, check_canary=True)
-        with artifact_errors("Cannot read the scored run artifacts"):
-            leak = find_artifact_leak(result) if result.exists() else None
-            trials = list((result / "harbor").glob("*/*/result.json"))
-            if code:
-                for trial in trials:
-                    exception = json.loads(trial.read_text()).get("exception_info")
-                    if exception:
-                        log += "\n" + redact(json.dumps(exception, indent=2))
-            for pattern in ("*/*/agent/harness-output-*.txt", "*/*/verifier/test-std*.txt"):
-                for artifact in (result / "harbor").glob(pattern):
-                    log += "\n" + redact(artifact.read_text(errors="replace"))
-            (OUTPUT / evidence["mode"] / f"{name}.log").write_text(log)
-            require(leak is None, leak)
+    with fixture_images(root, env, evidence, image_owner):
+        try:
+            code, log = record_command(evidence, name, argv, root, env, check_canary=True)
+            with artifact_errors("Cannot read the scored run artifacts"):
+                leak = find_artifact_leak(result) if result.exists() else None
+                trials = list((result / "harbor").glob("*/*/result.json"))
+                if code:
+                    for trial in trials:
+                        exception = json.loads(trial.read_text()).get("exception_info")
+                        if exception:
+                            log += "\n" + redact(json.dumps(exception, indent=2))
+                for pattern in ("*/*/agent/harness-output-*.txt", "*/*/verifier/test-std*.txt"):
+                    for artifact in (result / "harbor").glob(pattern):
+                        log += "\n" + redact(artifact.read_text(errors="replace"))
+                (OUTPUT / evidence["mode"] / f"{name}.log").write_text(log)
+                require(leak is None, leak)
+                if code == 0:
+                    scored.update(read_score(result, run_id, fixture_commit, evidence, trials, log))
+        except AssertionError as error:
+            code, log = failed_assertion(evidence, log, error)
+        except VerificationError as error:
             if code == 0:
-                scored.update(read_score(result, run_id, fixture_commit, evidence, trials, log))
-    except AssertionError as error:
-        code, log = failed_assertion(evidence, log, error)
-    finally:
-        check_scored_cleanup(result, temp, root, env, evidence,
-                             failed=code != 0 or sys.exc_info()[0] is not None)
+                failed_assertion(evidence, log, error)
+            raise
+        finally:
+            check_scored_cleanup(result, temp, root, env, evidence,
+                                 failed=code != 0 or sys.exc_info()[0] is not None,
+                                 credentials_before=credentials_before)
     if code == 0 and len(evidence["cleanup_errors"]) > cleanup_start:
         return failed_assertion(evidence, log, evidence["cleanup_errors"][cleanup_start])
     return code, log
@@ -559,7 +640,8 @@ def read_score(result, run_id, fixture_commit, evidence, trials, log):
 
 def route_check(root, evidence, name, env):
     code, log = record_command(evidence, name,
-                               ["uv", "run", "--isolated", "--locked", "python", "dungeness", "providers", "--details"],
+                               ["uv", "run", "--isolated", "--locked", "--python", "3.12",
+                                "python", "dungeness", "providers", "--details"],
                                root, env, stdout_only=True)
     if code:
         return code, log
@@ -576,6 +658,9 @@ def route_check(root, evidence, name, env):
                     "VERIFY: public policy digest does not match the registry")
     except AssertionError as error:
         return failed_assertion(evidence, log, error)
+    except VerificationError as error:
+        failed_assertion(evidence, log, error)
+        raise
     evidence["routes"] = sorted(actual)
     evidence["public_policy_sha256"] = policy["sha256"]
     return 0, log
@@ -659,7 +744,7 @@ def proof(evidence, base, stock, env, *, fault=None):
         if name == "failed-run-boundary" and not LINUX_X86:
             evidence["faults"].append({"fault": name, "status": "skipped", "reason": LINUX_SKIP})
             continue
-        case = dict(evidence, commands=[], cleanup_errors=[])
+        case = dict(evidence, commands=[], cleanup_errors=[], image_cleanup=[])
         case.pop("scored_run", None)
         entry = {"fault": name, "expected": expected}
         detected = False
@@ -683,6 +768,9 @@ def proof(evidence, base, stock, env, *, fault=None):
         finally:
             evidence["commands"].extend(case["commands"])
             evidence["cleanup_errors"].extend(case["cleanup_errors"])
+            evidence.setdefault("image_cleanup", []).extend(case["image_cleanup"])
+        if "scored_run" in case:
+            entry["docker_projects"] = case["scored_run"].get("docker_projects", [])
         if patched := case.get("scored_run", {}).get("patched"):
             entry["patched"] = patched
         entry.update(status="detected" if detected else "failed", exit_code=code)
@@ -694,9 +782,13 @@ def proof(evidence, base, stock, env, *, fault=None):
 
 def baseline(evidence, base, stock, env):
     log = checked(evidence, "check", ["make", "-j1", "check"], ROOT, env)
-    test_counts = [int(count) for count in re.findall(r"^Ran (\d+) tests? in", log, re.M)]
-    require(test_counts and all(test_counts), "A unittest suite ran no tests. See the check log.")
-    evidence["counts"]["unittest"] = sum(test_counts)
+    suites = re.split(r"^Checking (.+)\n", log, flags=re.M)
+    require(suites[1::2] == ["tests", "services/gateway/tests", "tools/transcripts", "Harbor adapter contract"],
+            "A required unittest suite is missing or repeated. See the check log.")
+    test_counts = [re.findall(r"^Ran (\d+) tests? in", result, re.M) for result in suites[2::2]]
+    require(all(len(counts) == 1 and int(counts[0]) > 0 for counts in test_counts),
+            "A unittest suite ran no tests or reported more than one result. See the check log.")
+    evidence["counts"]["unittest"] = sum(int(counts[0]) for counts in test_counts)
     evidence["counts"]["unittest_skipped"] = sum(map(int, re.findall(r"^OK \(skipped=(\d+)\)", log, re.M)))
     code, _ = route_check(ROOT, evidence, "routes", env)
     require(code == 0, "Route discovery failed. See the routes log.")
@@ -720,16 +812,19 @@ def baseline(evidence, base, stock, env):
         host = f"{os.geteuid()}:{os.getegid()}"
         failures.append("Gateway cannot start unmodified on this Docker engine: "
                         f"bind owner {patched['gateway_user']} != host {host}; see skill Gotchas.")
-    code, _ = record_command(evidence, "google-sdk", [
-        "uv", "run", "--locked", "--offline", "--isolated", "--group", "gateway", "--group", "google-sdk",
-        "python", "-B", "-c",
-        "import importlib.metadata as m, runpy, sys; "
-        "assert sys.version_info[:2] == (3, 12); "
-        "assert m.version('google-genai') == '3.6.1'; "
-        "runpy.run_path('script/check-google-client.py', run_name='__main__')",
-    ], ROOT, env)
-    if code:
-        failures.append("Google SDK failed. See the google-sdk log.")
+    try:
+        code, _ = record_command(evidence, "google-sdk", [
+            "uv", "run", "--locked", "--offline", "--isolated", "--python", "3.12",
+            "--group", "gateway", "--group", "google-sdk", "python", "-B", "-c",
+            "import importlib.metadata as m, runpy, sys; "
+            "assert sys.version_info[:2] == (3, 12); "
+            "assert m.version('google-genai') == '3.6.1'; "
+            "runpy.run_path('script/check-google-client.py', run_name='__main__')",
+        ], ROOT, env)
+        if code:
+            failures.append("Google SDK failed. See the google-sdk log.")
+    except (VerificationError, subprocess.TimeoutExpired) as error:
+        failures.append(str(error))
     require(not failures, " ".join(failures))
 
 

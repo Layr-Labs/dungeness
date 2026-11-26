@@ -14,3 +14,5 @@
 - The run record stores the fixture score in its Harbor execution statistics. The loop checks those statistics against Harbor's job result and compares the record's usage with the gateway summary.
 - The full modes fail when the scored fixture uses a gateway user override. A standalone scored run reports the override and can still pass.
 - The classic Docker builder left an unlabelled verifier image after Harbor was killed. The loop checks the fixture's exact Compose image tags as well as its project labels, and removes tags without deleting shared image references.
+- Round 3 reproduced a green scored run that added a dangling provider image. The staged Dockerfiles now label every classic builder step after the base with a per-leg owner. Teardown removes tags before image IDs, deepest history first, and checks for new fixture images after removal.
+- Scored cleanup checks both Harbor projects and removes new shared-memory staging only when it finds the synthetic credential. Post-command artifact validation records an evidence failure even when the command exited zero.

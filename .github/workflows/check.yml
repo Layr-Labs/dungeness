@@ -26,7 +26,7 @@ jobs:
       - name: Native Google SDK contract
         if: matrix.python == '3.12'
         run: >-
-          uv run --locked --isolated --group gateway --group google-sdk python -B -c
+          uv run --locked --isolated --python 3.12 --group gateway --group google-sdk python -B -c
           "import importlib.metadata as m, runpy, sys;
           assert sys.version_info[:2] == (3, 12);
           assert m.version('google-genai') == '3.6.1';

@@ -39,7 +39,7 @@ Read `.verify/evidence.json` for the latest `make verify` invocation. Read `.ver
 
 # Cleanup
 
-The loop removes its scratch copies and Docker resources after each run. Keep the evidence for review. If Docker teardown fails, inspect only the run or image names in the failing log. Use the logged resource names to establish ownership before removal.
+The loop removes its scratch copies and Docker resources after each run. Evidence records the checked Harbor projects and the image IDs removed under each fixture owner. If Docker teardown fails, use those names and labels to establish ownership before removing any remaining resources.
 
 # Gotchas
 

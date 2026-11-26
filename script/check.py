@@ -20,6 +20,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.harbor_only:
         from harbor.environments.base import ExecResult  # noqa: F401
+        print("Checking Harbor adapter contract", flush=True)
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(ROOT / "tests")
         return subprocess.run(

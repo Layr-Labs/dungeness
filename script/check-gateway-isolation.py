@@ -217,7 +217,7 @@ print('Inference, accounting and a resource download that spills to temporary di
             for attempt in range(60):
                 probe = subprocess.run([*docker,'exec',names[1],'python','-c',
                     "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"],
-                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
                 if probe.returncode == 0: break
                 time.sleep(1)
             else:
