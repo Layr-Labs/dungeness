@@ -65,8 +65,6 @@ jobs:
     timeout-minutes: 25
     env:
       DUNGENESS_VERIFY_IMAGE: ${{ vars.RUNTIME_VERIFY_IMAGE_ID }}
-      DUNGENESS_VERIFY_STOCK_ADAPTER: ${{ runner.temp }}/runtime-verify/stock_adapter.py
-      DUNGENESS_VERIFY_UV_CACHE: ${{ runner.temp }}/runtime-verify/uv
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -85,6 +83,9 @@ jobs:
       - name: Load the local fixture image
         run: docker load --input "$RUNNER_TEMP/runtime-verify/image.tar"
       - run: make verify PROVE=1
+        env:
+          DUNGENESS_VERIFY_STOCK_ADAPTER: ${{ runner.temp }}/runtime-verify/stock_adapter.py
+          DUNGENESS_VERIFY_UV_CACHE: ${{ runner.temp }}/runtime-verify/uv
       - name: Retain verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -244,7 +244,11 @@ print(RUN+': own inference/papers/scorer work; host, other runs, private mounts 
         for listener, thread in reversed(listeners):
             clean(listener.shutdown)
             clean(listener.server_close)
-            clean(thread.join)
+            clean(thread.join, 2)
+            if thread.is_alive():
+                error = RuntimeError('Host listener thread did not stop.')
+                cleanup_errors.append(error)
+                print(f'Run isolation cleanup failed: {error}', file=sys.stderr)
         if temporary is not None:
             clean(temporary.cleanup)
         if cleanup_errors and sys.exc_info()[0] is None:

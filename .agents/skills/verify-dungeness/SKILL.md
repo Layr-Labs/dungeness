@@ -13,7 +13,13 @@ Use a local Docker engine. Use Python 3.12 and the repository's uv lock. Set the
 
 Set the Docker CLI on `PATH`. On macOS, select a Docker context that shares the checkout path with its Linux VM. The loop uses the local Docker builder with image IDs as base references. Use an approved local cache for every input.
 
-For Linux CI, set repository variables `RUNTIME_VERIFY_CACHE_KEY` and `RUNTIME_VERIFY_IMAGE_ID`. The cache contains `uv/`, `stock_adapter.py`, and `image.tar` at its root. Use an x86-64 image and uv cache. The workflow restores that exact key and runs proof mode.
+For Linux CI, a maintainer must save an Actions cache from the repository's default branch before setting `RUNTIME_VERIFY_CACHE_KEY`. Save `${{ runner.temp }}/runtime-verify` using the exact key the job will restore. The directory must contain:
+
+- `uv/` with the locked Python 3.12 gateway, Harbor, and Google SDK packages for Linux x86-64.
+- `stock_adapter.py` with the pinned source and digest described above.
+- `image.tar` from `docker save` of the preloaded Linux x86-64 image described above.
+
+Set `RUNTIME_VERIFY_IMAGE_ID` to that image's full `sha256:…` ID. The job loads the image from the archive and runs proof mode.
 
 # Doctor
 
@@ -38,7 +44,7 @@ The loop removes its scratch copies and Docker resources after each run. Keep th
 # Gotchas
 
 - The host-bridge isolation leg and fault require Linux x86-64. Docker on macOS puts that bridge inside a Linux VM.
-- The loop records Docker's bind-mount UID and GID. The scored fixture uses that owner when the Mac engine maps bind ownership differently from the host.
+- Colima VirtioFS can map the bind owner to a different UID and GID. The unmodified gateway then fails to change permissions on its usage directory. The scored fixture uses Docker's reported owner and records the override as `patched`. The scored leg can pass on its own. Both full modes record a failure whenever the override is used.
 - Image preflight requires a preloaded local image. The verification loop makes zero paid model calls.
 - A fixture score and simulated charges establish local behavior. Live entitlements, provider billing, signed Mac execution, and official verifier receipts require separate runs.
 - The runner rewrites provider destinations in the scratch fixture. The score applies to that fixture route. Adjacent consumers and their deployed pins require their own loops.
@@ -46,5 +52,6 @@ The loop removes its scratch copies and Docker resources after each run. Keep th
 - The scored fixture uses the offline launcher. It does not run the default online launch through `uvx`.
 - The gateway image uses preloaded dependencies. The loop does not run the production image's `pip install`.
 - Only non-streaming Anthropic Messages requests run through the CLI and Harbor. The other routes run against an HTTP mock.
-- GitHub Actions shows the runtime verification job as skipped until `RUNTIME_VERIFY_CACHE_KEY` is set.
+- Update `EXPECTED_POLICY_SHA256` in `script/verify-runtime.py` when the route registry changes deliberately.
+- GitHub Actions skips the runtime verification job until `RUNTIME_VERIFY_CACHE_KEY` is set and fails the restore if the cache is missing. GitHub evicts caches that go unused for seven days. A maintainer must recreate an evicted cache from the default branch.
 - On macOS, `PROVE=1` stops before seeding faults while gateway isolation fails. Use `--leg faults` to diagnose the seeded assertions.

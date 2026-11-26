@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, chdir, contextmanager
 import hashlib
 import json
 import os
@@ -20,9 +20,8 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "src"), str(ROOT / "services/gateway")]
-from access_selection import policy_digest
-from dungeness.execution.environments import harbor_trials_for_run
+sys.path.insert(0, str(ROOT / "src"))
+from dungeness.execution import environments
 
 FIXTURE = ROOT / "script/verify"
 OUTPUT = ROOT / ".verify"
@@ -30,6 +29,7 @@ ROUTES = {
     "anthropic", "claude-subscription", "google", "google-vertex",
     "openai", "openai-chatgpt", "openrouter", "xai",
 }
+EXPECTED_POLICY_SHA256 = "70fe147b1b6385c3b17f5521588396a4a1bb5ba62f4172384613be540f3e175e"
 STOCK_COMMIT = "ac5b68b4268f94fd10d011e923526086d8973ef4"
 STOCK_SHA256 = "f42b48c62bda371bed37af04f90e7846e85e2f628e9885c163557debd9d647e0"
 CANARY = "dungeness-verify-synthetic-provider-key"
@@ -48,6 +48,11 @@ class VerificationError(Exception):
 def need(condition, reason):
     if not condition:
         raise VerificationError(reason)
+
+
+def require(condition, reason):
+    if not condition:
+        raise AssertionError(reason)
 
 
 @contextmanager
@@ -72,6 +77,9 @@ def capture(*argv, cwd=ROOT, env=None):
     try:
         return subprocess.run(argv, cwd=cwd, env=env, check=True, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        diagnostic = redact((error.stderr or "").strip())
+        raise VerificationError(f"{argv[0]} exited {error.returncode}. {diagnostic}".rstrip()) from error
     except OSError as error:
         raise VerificationError(f"Cannot run {argv[0]}: {error}") from error
 
@@ -124,9 +132,8 @@ def inputs(env):
     )
     with artifact_errors("Cannot read the stock adapter"):
         need(sha256(stock) == STOCK_SHA256, "Stock adapter digest differs from the pinned source.")
-    endpoint = env.get("DOCKER_HOST") if not env.get("DOCKER_CONTEXT") else None
-    if not endpoint:
-        endpoint = capture("docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}", env=env)
+    endpoint = env.get("DOCKER_HOST") or capture(
+        "docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}", env=env)
     need(endpoint.startswith("unix://"), "Use a local Docker Unix socket for verification.")
     template = "{{.Id}} {{.Os}}/{{.Architecture}}"
     architecture = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64"}.get(platform.machine())
@@ -171,17 +178,17 @@ def dockerfile(base):
 
 def stage_gateway(root, base, env, *, scoring=False):
     gateway = root / "services/gateway"
-    source = (gateway / "Dockerfile").read_text()
-    need(source.startswith("FROM ") and len(re.findall(r"^FROM ", source, re.M)) == 1
-         and re.search(r"^ADD ", source, re.M) is None, "Unsupported gateway build inputs.")
-    source = dockerfile(base) + source.partition("\n")[2]
+    path = gateway / "Dockerfile"
+    original = path.read_text()
+    need(original.startswith("FROM ") and len(re.findall(r"^FROM ", original, re.M)) == 1
+         and re.search(r"^ADD ", original, re.M) is None, "Unsupported gateway build inputs.")
     install = "RUN pip install --no-cache-dir --requirement /app/requirements.txt"
-    need(source.count(install) == 1, "The gateway image dependency install changed.")
-    source = source.replace(install, "")
-    source = source.replace("WORKDIR /app", "RUN if [ -d /app ]; then find /app -mindepth 1 -delete; fi\nWORKDIR /app")
+    replace(gateway, "Dockerfile", f"{install}\n", "")
+    replace(gateway, "Dockerfile", "WORKDIR /app\n",
+            "RUN if [ -d /app ]; then find /app -mindepth 1 -delete; fi\nWORKDIR /app\n")
     account = "useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 gateway"
-    need(source.count(account) == 1, "The gateway account configuration changed.")
-    source = source.replace(account, f'{{ id gateway || {account}; }}')
+    replace(gateway, "Dockerfile", account, f'{{ id gateway || {account}; }}')
+    source = dockerfile(base) + path.read_text().partition("\n")[2]
     if scoring:
         registry = gateway / "model-access.json"
         document = json.loads(registry.read_text())
@@ -199,34 +206,37 @@ def stage_gateway(root, base, env, *, scoring=False):
         source += ('\nUSER root\nCOPY verify_provider.py verify-key.pem verify-cert.pem /app/\n'
                    'RUN cat verify-cert.pem >> "$(python -m certifi)"\n'
                    'USER gateway\nCMD ["python", "/app/verify_provider.py"]\n')
-    (gateway / "Dockerfile").write_text(source)
+    path.write_text(source)
 
 
 def stage_run(root, base, stock, env):
     shutil.copytree(root / "tests/fixtures/runtime", root, dirs_exist_ok=True)
     verifier = root / "verifiers/sample-problem/synthetic"
-    task = root / "tasks/projects/dungeness/sample-starter/task.yaml"
-    task.write_text(task.read_text().split("evaluation:")[0] +
-                    "resources:\n  agent: {cpus: 1, memory_mb: 512}\n"
-                    "  verifier: {cpus: 1, memory_mb: 512}\n")
+    replace(root, "tasks/projects/dungeness/sample-starter/task.yaml",
+            "evaluation:\n  mode: full-benchmark\n\n"
+            "resources:\n  agent:\n    memory_mb: 4096\n    cpus: 4\n"
+            "  verifier:\n    memory_mb: 8192\n    cpus: 4\n"
+            "    timeout_sec: 1200\n    build_timeout_sec: 1200\n",
+            "resources:\n  agent: {cpus: 1, memory_mb: 512}\n"
+            "  verifier: {cpus: 1, memory_mb: 512}\n")
     (verifier / "Dockerfile").write_text(dockerfile(base) + "COPY . /tests/\n")
     for name in ("grade.py", "test.sh"):
         shutil.copy2(FIXTURE / name, verifier / name)
     agent = root / "agents/projects/dungeness/command"
     (agent / "Dockerfile").write_text(dockerfile(base) + "COPY workspace/ /workspace/repo/\n")
-    descriptor = agent / "agent.yaml"
-    descriptor.write_text(descriptor.read_text().split("execution:")[0] +
-                          'execution:\n  interface: dungeness-command-v1\n'
-                          '  entrypoint: ["python", "/workspace/repo/harness.py"]\n')
+    replace(agent, "agent.yaml",
+            '  entrypoint: ["python3", "-c", "import os,json; '
+            "print(json.load(open(os.environ['DUNGENESS_TASK']))['instruction'])\"]\n",
+            '  entrypoint: ["python", "/workspace/repo/harness.py"]\n')
 
     source = root.parent / "fixture-source"
     source.mkdir()
     (source / "solution").mkdir()
     (source / "solution/value.txt").write_text("0\n")
     (source / "check.txt").write_text("42\n")
-    harness = (FIXTURE / "harness.py").read_text().replace(
-        "@CANARY_SHA256@", hashlib.sha256(CANARY_BYTES).hexdigest())
-    (source / "harness.py").write_text(harness.replace("@CANARY_BYTES@", str(len(CANARY_BYTES))))
+    shutil.copy2(FIXTURE / "harness.py", source / "harness.py")
+    replace(source, "harness.py", "@CANARY_SHA256@", hashlib.sha256(CANARY_BYTES).hexdigest())
+    replace(source, "harness.py", "@CANARY_BYTES@", str(len(CANARY_BYTES)))
     shutil.copy2(stock, source / "stock_adapter.py")
     capture("git", "init", "-q", cwd=source, env=env)
     capture("git", "add", ".", cwd=source, env=env)
@@ -252,17 +262,17 @@ data:
   web_cutoff: "2024-12-31T23:59:59.999Z"
   interface: sample-directory-v1
 """)
-    spec = root / "run-specs/projects/dungeness/sample-starter.yaml"
-    spec.write_text(spec.read_text().replace("62ae3d00d1e01d7bc640b5163cfea8dabffd8392", commit)
-                    .replace("provider: openai", "provider: anthropic")
-                    .replace("openai/gpt-6-astra", "anthropic/claude-opus-5")
-                    .replace("gpt-6-astra", "claude-opus-5")
-                    .replace("api: openai-responses", "api: anthropic-messages")
-                    .replace("max_usd: 1", "max_usd: 0.005"))
+    spec = Path("run-specs/projects/dungeness/sample-starter.yaml")
+    replace(root, spec, "62ae3d00d1e01d7bc640b5163cfea8dabffd8392", commit)
+    replace(root, spec, "provider: openai\n", "provider: anthropic\n")
+    replace(root, spec, "upstream_id: openai/gpt-6-astra\n", "upstream_id: anthropic/claude-opus-5\n")
+    replace(root, spec, "request_model: gpt-6-astra\n", "request_model: claude-opus-5\n")
+    replace(root, spec, "api: openai-responses\n", "api: anthropic-messages\n")
+    replace(root, spec, "max_usd: 1\n", "max_usd: 0.005\n")
     credentials = root / ".env"
     credentials.write_text(f"TESTBED_ANTHROPIC_API_KEY={CANARY}\n")
     credentials.chmod(0o600)
-    return spec.relative_to(root), commit
+    return spec, commit
 
 
 def record_command(evidence, name, argv, cwd, env, *, stdout_only=False, check_canary=False):
@@ -299,7 +309,8 @@ def record_command(evidence, name, argv, cwd, env, *, stdout_only=False, check_c
                     if primary_error is None:
                         raise VerificationError(message) from error
                     entry["log_error"] = redact(message)
-            need(not leaked, OUTPUT_LEAK)
+            if leaked:
+                return 1, f"{log}\n{OUTPUT_LEAK}"
             entry["status"] = "passed" if code == 0 else "failed"
             return code, log
     except OSError as error:
@@ -308,8 +319,8 @@ def record_command(evidence, name, argv, cwd, env, *, stdout_only=False, check_c
         entry["wall_seconds"] = round(time.monotonic() - start, 3)
 
 
-def checked(evidence, name, argv, cwd, env):
-    code, log = record_command(evidence, name, argv, cwd, env)
+def checked(evidence, name, argv, cwd, env, *, stdout_only=False):
+    code, log = record_command(evidence, name, argv, cwd, env, stdout_only=stdout_only)
     need(code == 0, f"{name} exited {code}. See {evidence['commands'][-1]['log']}.")
     return log
 
@@ -328,7 +339,7 @@ def gateway_image(root, base, evidence, name, env):
             if subprocess.run(["docker", "image", "inspect", tag], env=env, cwd=root,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30).returncode == 0:
                 capture("docker", "image", "rm", "--no-prune", tag, cwd=root, env=env)
-        except (OSError, VerificationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        except (OSError, VerificationError, subprocess.TimeoutExpired) as error:
             evidence["cleanup_errors"].append(redact(str(error)))
 
 
@@ -356,49 +367,84 @@ def find_artifact_leak(result):
     for folder, _, filenames in os.walk(result, onerror=unreadable):
         for filename in filenames:
             path = Path(folder) / filename
-            if stat.S_ISREG(path.stat().st_mode) and CANARY_BYTES in path.read_bytes():
+            if stat.S_ISREG(path.lstat().st_mode) and CANARY_BYTES in path.read_bytes():
                 return f"{ARTIFACT_LEAK}: {path.relative_to(result)}"
     return None
 
 
-def teardown_scored_run(result, root, env, evidence):
+def project_resources(project, root, env):
+    label = f"label=com.docker.compose.project={project}"
+    resources = {}
+    for kind, args in (("containers", ("container", "ls", "--all")),
+                       ("networks", ("network", "ls")),
+                       ("images", ("image", "ls", "--all"))):
+        ids = capture("docker", *args, "--quiet", "--no-trunc", "--filter", label, cwd=root, env=env)
+        if ids:
+            resources[kind] = sorted(set(ids.splitlines()))
+    return resources
+
+
+def check_scored_cleanup(result, temp, root, env, evidence, *, failed):
+    errors = evidence["cleanup_errors"]
+    count_before = len(errors)
     try:
-        trials = harbor_trials_for_run(result)
+        staging = sorted(path.name for path in temp.iterdir()
+                         if path.name.startswith(("dungeness-credentials-", f"dungeness-{result.name}-")))
+        if staging:
+            errors.append(f"Scored run left staging paths: {', '.join(staging)}")
     except OSError as error:
-        evidence["cleanup_errors"].append(redact(str(error)))
+        errors.append(redact(f"Cannot check scored run staging: {error}"))
+    try:
+        projects = environments.compose_projects_for_run(result)
+        # The product helper omits Harbor's separate verifier project.
+        projects += [f"{trial}__verifier__trial" for trial in environments.harbor_trials_for_run(result)]
+    except OSError as error:
+        errors.append(redact(f"Cannot find scored run projects: {error}"))
         return
-    for trial in trials:
-        # Harbor 0.18 names the single-step verifier separately from the agent environment.
-        for project in (f"{trial}__env", f"{trial}__verifier__trial"):
-            try:
-                capture("docker", "compose", "--project-name", project, "down",
-                        "--volumes", "--remove-orphans", cwd=root, env=env)
-            except (VerificationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-                evidence["cleanup_errors"].append(redact(str(error)))
-            try:
-                images = capture("docker", "image", "ls", "--filter", f"reference={project}-*",
-                                 "--format", "{{.Repository}}:{{.Tag}}", cwd=root, env=env)
-                tags = [image for image in images.splitlines() if "<none>" not in image]
-                if tags:
-                    capture("docker", "image", "rm", "--no-prune", *tags, cwd=root, env=env)
-            except (VerificationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-                evidence["cleanup_errors"].append(redact(str(error)))
+
+    for project in projects:
+        try:
+            remaining = project_resources(project, root, env)
+            if remaining:
+                errors.append(f"Scored run left Docker resources for {project}: {remaining}")
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            errors.append(redact(str(error)))
+    if not failed and len(errors) == count_before:
+        return
+    for project in projects:
+        try:
+            with chdir(root):
+                if not environments.compose_down(project):
+                    errors.append(f"Could not tear down scored run project {project}.")
+        except OSError as error:
+            errors.append(redact(str(error)))
+        try:
+            remaining = project_resources(project, root, env)
+            if images := remaining.pop("images", []):
+                capture("docker", "image", "rm", "--no-prune", *images, cwd=root, env=env)
+                remaining = project_resources(project, root, env)
+            if remaining:
+                errors.append(f"Could not remove scored run resources for {project}: {remaining}")
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            errors.append(redact(str(error)))
 
 
-def failed_assertion(evidence, error):
+def failed_assertion(evidence, log, error):
     entry = evidence["commands"][-1]
     reason = redact(str(error))
     entry.update(status="failed", assertion=reason)
     try:
-        with (ROOT / entry["log"]).open("a") as log:
-            log.write(f"\n{reason}\n")
+        with (ROOT / entry["log"]).open("a") as handle:
+            handle.write(f"\n{reason}\n")
     except OSError as log_error:
         entry["log_error"] = redact(str(log_error))
+    return 1, f"{log}\n{reason}"
 
 
 def scored_run(root, base, stock, evidence, name, env):
     env = dict(env)
-    patched = {}
+    scored = {}
+    evidence["scored_run"] = scored
     with artifact_errors("Cannot stage the scored fixture"):
         stage_gateway(root, base, env, scoring=True)
         owner = evidence["docker_bind_owner"]
@@ -406,22 +452,20 @@ def scored_run(root, base, stock, evidence, name, env):
             replace(root, "src/dungeness/compiler.py",
                     '                "user": f"{os.geteuid()}:{os.getegid()}",',
                     f'                "user": "{owner}",')
-            patched["gateway_user"] = owner
+            scored["patched"] = {"gateway_user": owner}
         spec, fixture_commit = stage_run(root, base, stock, env)
         temp = root.parent / "tmp"
         temp.mkdir()
     env["TMPDIR"] = str(temp)
     run_id = "runtime-verify-" + uuid.uuid4().hex[:12]
     result = root / "runs/users/verify" / run_id
-    argv = ["uv", "run", "--locked", "python", "dungeness", "run", spec,
+    argv = ["uv", "run", "--isolated", "--locked", "python", "dungeness", "run", spec,
             "--namespace", "users/verify", "--run-id", run_id]
+    code = 1
+    log = ""
+    cleanup_start = len(evidence["cleanup_errors"])
     try:
         code, log = record_command(evidence, name, argv, root, env, check_canary=True)
-    finally:
-        if isinstance(sys.exc_info()[1], (KeyboardInterrupt, subprocess.TimeoutExpired)):
-            teardown_scored_run(result, root, env, evidence)
-
-    try:
         with artifact_errors("Cannot read the scored run artifacts"):
             leak = find_artifact_leak(result) if result.exists() else None
             trials = list((result / "harbor").glob("*/*/result.json"))
@@ -434,57 +478,66 @@ def scored_run(root, base, stock, evidence, name, env):
                 for artifact in (result / "harbor").glob(pattern):
                     log += "\n" + redact(artifact.read_text(errors="replace"))
             (OUTPUT / evidence["mode"] / f"{name}.log").write_text(log)
-            if leak and code:
-                failed_assertion(evidence, leak)
-                return code, log + "\n" + redact(leak)
-            need(leak is None, leak)
+            require(leak is None, leak)
             if code == 0:
-                evidence["scored_run"] = read_score(result, run_id, fixture_commit, evidence, trials, log)
-                if patched:
-                    evidence["scored_run"]["patched"] = patched
-    except VerificationError as error:
-        failed_assertion(evidence, error)
-        raise
+                scored.update(read_score(result, run_id, fixture_commit, evidence, trials, log))
+    except AssertionError as error:
+        code, log = failed_assertion(evidence, log, error)
+    finally:
+        check_scored_cleanup(result, temp, root, env, evidence,
+                             failed=code != 0 or sys.exc_info()[0] is not None)
+    if code == 0 and len(evidence["cleanup_errors"]) > cleanup_start:
+        return failed_assertion(evidence, log, evidence["cleanup_errors"][cleanup_start])
     return code, log
 
 
 def read_score(result, run_id, fixture_commit, evidence, trials, log):
     data = json.loads((result / "record.json").read_text())["data"]
-    need(data["status"] == "completed", "The run record is not terminal and completed.")
+    require(data.get("status") == "completed", "The run record is not terminal and completed.")
     pins = data["configuration"]
-    need(pins["repository"]["commit"] == evidence["commit"], "The run record has the wrong runtime pin.")
+    require(pins["repository"]["commit"] == evidence["commit"], "The run record has the wrong runtime pin.")
     launcher = pins["launcher"]
     expected_pins = evidence["pins"]
-    need(launcher["harbor_version"] == expected_pins["harbor"]
+    require(launcher["harbor_version"] == expected_pins["harbor"]
          and launcher["litellm_version"] == expected_pins["litellm"],
          "The run record has the wrong launcher pins.")
-    need(data["checkpoint"]["repository"]["commit"] == fixture_commit
+    require(data["checkpoint"]["repository"]["commit"] == fixture_commit
          and data["task"]["evaluator"]["commit"] == fixture_commit,
          "The run record does not bind the staged checkpoint and evaluator.")
 
-    need(len(trials) == 1, "Expected exactly one scored Harbor trial.")
+    require(len(trials) == 1, "Expected exactly one scored Harbor trial.")
     rewards = json.loads(trials[0].read_text())["verifier_result"]["rewards"]
     score = rewards["sample_score"]
-    need(score == 42, f"Expected score 42, received {score}.")
+    require(score == 42, f"Expected score 42, received {score}.")
+    job = json.loads((result / "harbor" / run_id / "result.json").read_text())
+    stats = job["stats"]
+    require(job["n_total_trials"] == stats["n_completed_trials"] == 1 and
+            all(stats[key] == 0 for key in (
+                "n_errored_trials", "n_cancelled_trials", "n_running_trials", "n_pending_trials")),
+            "Harbor did not report one successfully completed trial.")
+    execution = data.get("execution", {})
+    require(execution.get("stats") == stats and execution.get("n_total_trials") == job["n_total_trials"],
+            "The run record does not match Harbor's outcome and score.")
     summary = json.loads((result / "usage/summary.json").read_text())
     usage = summary.get("usage")
-    need(summary.get("run_id") == run_id and isinstance(usage, dict)
+    require(summary.get("run_id") == run_id and isinstance(usage, dict)
          and type(usage.get("model_requests")) is int and type(usage.get("model_tokens")) is int
          and type(usage.get("normalized_usd")) in (int, float),
          "Incompatible gateway usage summary.")
-    need(usage.get("model_accounting_state") == "settled" and usage["model_requests"] == 2
+    require(data.get("usage") == usage, "The run record usage does not match the gateway usage summary.")
+    require(usage.get("model_accounting_state") == "settled" and usage["model_requests"] == 2
          and usage["model_tokens"] == 2056
          and usage["normalized_usd"] == 0.01044, "Scored run usage did not settle at the fixture amounts.")
     provider = json_lines(result / "usage/fixture-provider.jsonl")
-    need(len(provider) == 2 and provider[0] == provider[1],
+    require(len(provider) == 2 and provider[0] == provider[1],
          "Expected two identical upstream requests and no budget replay.")
     ledger = json_lines(result / "usage/events.jsonl")
     rejected = sum(entry["data"].get("code") == "model_budget_exhausted" for entry in ledger)
     requests = sum(entry["kind"] == "gateway.http_request_completed"
                    and entry["data"]["route"].startswith("/model/") for entry in ledger)
-    need(rejected == 1, "Expected exactly one gateway budget rejection.")
-    need(requests == len(provider) + rejected, "Gateway events did not account for every fixture request.")
-    need("VERIFY: scaffold sent two attempts and one budget probe" in log,
+    require(rejected == 1, "Expected exactly one gateway budget rejection.")
+    require(requests == len(provider) + rejected, "Gateway events did not account for every fixture request.")
+    require("VERIFY: scaffold sent two attempts and one budget probe" in log,
          "The harness did not record its recovery checks.")
     return {
         "score": score, "checkpoint_and_evaluator": fixture_commit,
@@ -500,20 +553,18 @@ def route_check(root, evidence, name, env):
     if code:
         return code, log
     try:
-        with artifact_errors("Cannot parse the route report or registry"):
+        with artifact_errors("Cannot parse the route report"):
             document = json.loads(log)
             actual = set(document["providers"])
             missing = sorted(ROUTES - actual)
             extra = sorted(actual - ROUTES)
-            need(not missing, f"VERIFY: missing registered route {', '.join(missing)}")
-            need(not extra, f"VERIFY: unexpected registered route {', '.join(extra)}")
-            registry = json.loads((root / "services/gateway/model-access.json").read_text())["access_routes"]
+            require(not missing, f"VERIFY: missing registered route {', '.join(missing)}")
+            require(not extra, f"VERIFY: unexpected registered route {', '.join(extra)}")
             policy = document["access_policy"]
-            need(policy["schema_version"] == 1 and policy["sha256"] == policy_digest(registry),
-                 "VERIFY: public policy digest does not match the registry")
-    except VerificationError as error:
-        failed_assertion(evidence, error)
-        raise
+            require(policy.get("schema_version") == 1 and policy.get("sha256") == EXPECTED_POLICY_SHA256,
+                    "VERIFY: public policy digest does not match the registry")
+    except AssertionError as error:
+        return failed_assertion(evidence, log, error)
     evidence["routes"] = sorted(actual)
     evidence["public_policy_sha256"] = policy["sha256"]
     return 0, log
@@ -522,7 +573,7 @@ def route_check(root, evidence, name, env):
 def replace(root, relative, before, after):
     path = root / relative
     source = path.read_text()
-    need(source.count(before) == 1, f"The proof mutation no longer matches {relative}.")
+    need(source.count(before) == 1, f"The verification substitution no longer matches {relative}.")
     path.write_text(source.replace(before, after))
 
 
@@ -598,7 +649,9 @@ def proof(evidence, base, stock, env, *, fault=None):
             evidence["faults"].append({"fault": name, "status": "skipped", "reason": LINUX_SKIP})
             continue
         case = dict(evidence, commands=[], cleanup_errors=[])
+        case.pop("scored_run", None)
         entry = {"fault": name, "expected": expected}
+        detected = False
         try:
             with scratch(env, case) as root:
                 with artifact_errors(f"Cannot seed {name}"):
@@ -611,43 +664,51 @@ def proof(evidence, base, stock, env, *, fault=None):
                 else:
                     code, log = gateway_check(root, base, case, name, env,
                                               linux=name == "failed-run-boundary")
-        except (VerificationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-            code = error.returncode if isinstance(error, subprocess.CalledProcessError) else 1
-            log = redact(str(error))
-            entry["error"] = log
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            code = 1
+            entry["error"] = redact(str(error))
+        else:
+            detected = code != 0 and expected in log and not case["cleanup_errors"]
         finally:
             evidence["commands"].extend(case["commands"])
             evidence["cleanup_errors"].extend(case["cleanup_errors"])
-        detected = code != 0 and expected in log and not case["cleanup_errors"]
+        if patched := case.get("scored_run", {}).get("patched"):
+            entry["patched"] = patched
         entry.update(status="detected" if detected else "failed", exit_code=code)
         evidence["faults"].append(entry)
         print(f"{name}: {entry['status']}", flush=True)
-    need(all(item["status"] != "failed" for item in evidence["faults"]),
-         "A fault survived or failed somewhere other than its expected assertion.")
+    require(all(item["status"] != "failed" for item in evidence["faults"]),
+            "A fault survived or failed somewhere other than its expected assertion.")
 
 
 def baseline(evidence, base, stock, env):
     log = checked(evidence, "check", ["make", "-j1", "check"], ROOT, env)
-    evidence["counts"]["unittest"] = sum(map(int, re.findall(r"^Ran (\d+) tests? in", log, re.M)))
+    test_counts = [int(count) for count in re.findall(r"^Ran (\d+) tests? in", log, re.M)]
+    require(test_counts and all(test_counts), "A unittest suite ran no tests. See the check log.")
+    evidence["counts"]["unittest"] = sum(test_counts)
     evidence["counts"]["unittest_skipped"] = sum(map(int, re.findall(r"^OK \(skipped=(\d+)\)", log, re.M)))
     code, _ = route_check(ROOT, evidence, "routes", env)
-    need(code == 0, "Route discovery failed. See the routes log.")
+    require(code == 0, "Route discovery failed. See the routes log.")
     failures = []
-    with scratch(env, evidence) as root:
-        code, _ = gateway_check(root, base, evidence, "gateway-isolation", env)
-    if code:
-        failures.append("Gateway isolation failed. See the gateway-isolation log.")
-    if LINUX_X86:
-        with scratch(env, evidence) as root:
-            code, _ = gateway_check(root, base, evidence, "run-isolation", env, linux=True)
-        if code:
-            failures.append("Run isolation failed. See the run-isolation log.")
+    for leg in ("gateway-isolation", "run-isolation") if LINUX_X86 else ("gateway-isolation",):
+        try:
+            with scratch(env, evidence) as root:
+                code, _ = gateway_check(root, base, evidence, leg, env, linux=leg == "run-isolation")
+            if code:
+                failures.append(f"{leg.replace('-', ' ').capitalize()} failed. See the {leg} log.")
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            failures.append(str(error))
     try:
         with scratch(env, evidence) as root:
             code, _ = scored_run(root, base, stock, evidence, "scored-run", env)
-        need(code == 0, "Scored run failed. See the scored-run log.")
-    except VerificationError as error:
+        if code:
+            failures.append("Scored run failed. See the scored-run log.")
+    except (VerificationError, subprocess.TimeoutExpired) as error:
         failures.append(str(error))
+    if patched := evidence.get("scored_run", {}).get("patched"):
+        host = f"{os.geteuid()}:{os.getegid()}"
+        failures.append("Gateway cannot start unmodified on this Docker engine: "
+                        f"bind owner {patched['gateway_user']} != host {host}; see skill Gotchas.")
     code, _ = record_command(evidence, "google-sdk", [
         "uv", "run", "--locked", "--offline", "--isolated", "--group", "gateway", "--group", "google-sdk",
         "python", "-B", "-c",
@@ -658,7 +719,7 @@ def baseline(evidence, base, stock, env):
     ], ROOT, env)
     if code:
         failures.append("Google SDK failed. See the google-sdk log.")
-    need(not failures, " ".join(failures))
+    require(not failures, " ".join(failures))
 
 
 def write_evidence(path, encoded):
@@ -730,24 +791,27 @@ def main():
                 "--pull=never", "--network=none", "--user=0:0",
                 "--mount", f"type=bind,src={ROOT / 'services/gateway/requirements.txt'},dst=/verify-requirements,readonly",
                 base, "python", "-c",
+                "import shutil, sys\n"
                 "from importlib.metadata import version\n"
                 "from pathlib import Path\n"
+                "assert sys.version_info[:2] == (3, 12), 'The fixture requires Python 3.12'\n"
+                "assert shutil.which('bash'), 'The fixture requires bash'\n"
                 "for line in Path('/verify-requirements').read_text().splitlines():\n"
                 "    if line.strip() and not line.startswith('#'):\n"
                 "        name, expected = line.split('==')\n"
                 "        assert version(name) == expected, name\n"
                 "owner = Path('/verify-requirements').stat()\n"
-                "print(f'{owner.st_uid}:{owner.st_gid}')"], ROOT, env).strip()
+                "print(f'{owner.st_uid}:{owner.st_gid}')"], ROOT, env, stdout_only=True).strip()
         need(re.fullmatch(r"[0-9]+:[0-9]+", owner), "Docker did not report a bind-mount owner.")
         evidence["docker_bind_owner"] = owner
         if args.leg == "scored-run":
             with scratch(env, evidence) as root:
                 code, _ = scored_run(root, base, stock, evidence, name, env)
-            need(code == 0, "Scored run failed. See the scored-run log.")
+            require(code == 0, evidence["commands"][-1].get("assertion", "Scored run failed. See the scored-run log."))
         elif args.leg == "gateway-isolation":
             with scratch(env, evidence) as root:
                 code, _ = gateway_check(root, base, evidence, name, env)
-            need(code == 0, "Gateway isolation failed. See the gateway-isolation log.")
+            require(code == 0, "Gateway isolation failed. See the gateway-isolation log.")
         elif args.leg == "faults" or args.fault:
             proof(evidence, base, stock, env, fault=args.fault)
         elif not args.doctor:
@@ -766,7 +830,7 @@ def main():
             evidence["status"] = "skipped"
         else:
             evidence["status"] = "passed"
-    except (VerificationError, subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as error:
+    except (AssertionError, VerificationError, subprocess.TimeoutExpired, FileNotFoundError) as error:
         evidence["error"] = redact(str(error))
     except KeyboardInterrupt:
         evidence["error"] = "Interrupted."
@@ -793,7 +857,10 @@ def main():
         return 0
     provenance = {key: evidence[key] for key in
                   ("commit", "pins", "tools", "worktree_dirty", "worktree_dirty_at_end")}
-    patched = evidence.get("scored_run", {}).get("patched")
+    provenance["skipped_legs"] = [item["leg"] for item in evidence["skipped"]]
+    provenance["skipped_faults"] = [item["fault"] for item in evidence["faults"] if item["status"] == "skipped"]
+    patched = evidence.get("scored_run", {}).get("patched") or next(
+        (item["patched"] for item in evidence["faults"] if "patched" in item), None)
     if patched:
         provenance["patched"] = patched
     status = "READY" if args.doctor else "PASS"

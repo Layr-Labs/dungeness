@@ -10,3 +10,6 @@
 - The unpatched Colima scored run failed when Compose waited for the gateway container. The scored evidence and PASS line report the gateway user override when it is applied.
 - The scored fixture counts completed gateway HTTP events for model routes, including budget rejections. The usage summary retains the fixture's simulated charges.
 - Timeout cleanup uses the Harbor trial names recorded under the scored run to remove only those Compose projects and their locally tagged images.
+- The scored leg checks resources before recovery so a successful teardown cannot hide a product leak. Killing Harbor during verification reproduced a surviving verifier container. The loop tears down both projects by their recorded names and checks their exact Compose labels.
+- The run record stores the fixture score in its Harbor execution statistics. The loop checks those statistics against Harbor's job result and compares the record's usage with the gateway summary.
+- The full modes fail when the scored fixture uses a gateway user override. A standalone scored run reports the override and can still pass.
