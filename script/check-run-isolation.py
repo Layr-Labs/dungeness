@@ -11,6 +11,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
@@ -45,13 +46,19 @@ Server(('::',PORT),Handler).serve_forever()
 '''
 
 
+def interrupt(_signum, _frame):
+    raise KeyboardInterrupt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', action='store_true')
     parser.add_argument('--ipv6', action='store_true', help='Also exercise dual-stack bridges.')
+    parser.add_argument('--image', help='Use this prebuilt local gateway image without pulling.')
     args = parser.parse_args()
+    signal.signal(signal.SIGTERM, interrupt)
     prefix = 'run-isolation-' + uuid.uuid4().hex[:10]
-    image = prefix + ':test'
+    image = args.image or prefix + ':test'
     projects = []
     def docker(*cmd, **kwargs):
         try:
@@ -69,6 +76,7 @@ def main():
     server = ThreadingHTTPServer(('0.0.0.0', 0), Canary)
     thread = threading.Thread(target=server.serve_forever, daemon=True);thread.start()
     ipv6_server = None
+    ipv6_thread = None
     if args.ipv6:
         class IPv6Canary(ThreadingHTTPServer):
             address_family = socket.AF_INET6
@@ -76,12 +84,16 @@ def main():
                 self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                 super().server_bind()
         ipv6_server = IPv6Canary(('::', server.server_port), Canary)
-        threading.Thread(target=ipv6_server.serve_forever, daemon=True).start()
+        ipv6_thread = threading.Thread(target=ipv6_server.serve_forever, daemon=True)
+        ipv6_thread.start()
     temporary = tempfile.TemporaryDirectory(prefix=prefix)
     try:
         tmp = temporary.name
         root = Path(tmp)
-        docker('build', '-q', '-t', image, str(ROOT/'services/gateway'))
+        if args.image:
+            docker('image', 'inspect', image)
+        else:
+            docker('build', '-q', '-t', image, str(ROOT/'services/gateway'))
         runs = []
         for suffix in ('a', 'b'):
             run = prefix + '-' + suffix
@@ -128,7 +140,7 @@ def main():
             path=folder/'compose.yaml';path.write_text(yaml.safe_dump(doc,sort_keys=False))
             compose=['compose','-p',run,'-f',str(path)]
             projects.append(compose)
-            docker(*compose,'up','-d','--wait','--wait-timeout','90')
+            docker(*compose,'up','-d','--pull','never','--wait','--wait-timeout','90')
             containers={name:inspect(docker(*compose,'ps','-q',name).strip()) for name in doc['services']}
             networks={name:json.loads(docker('network','inspect',run+'_'+name))[0] for name in doc['networks']}
             runs.append((run,containers,networks,canary))
@@ -201,12 +213,26 @@ print(RUN+': own inference/papers/scorer work; host, other runs, private mounts 
             for service in containers.values():assert not service['HostConfig'].get('PortBindings')
         print('PASS: two simultaneous generated run topologies; no paid inference')
     finally:
+        cleanup_failed = False
         for compose in reversed(projects):
-            subprocess.run(['docker',*compose,'down','--timeout','1','--volumes','--remove-orphans'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        subprocess.run(['docker','image','rm',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        if ipv6_server:ipv6_server.shutdown();ipv6_server.server_close()
+            try:
+                docker(*compose, 'down', '--timeout', '1', '--volumes', '--remove-orphans')
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                print(f'Docker cleanup failed: {error}', file=sys.stderr)
+                cleanup_failed = True
+        if not args.image:
+            subprocess.run(['docker','image','rm','--no-prune',image],
+                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if ipv6_server and ipv6_thread:
+            ipv6_server.shutdown()
+            ipv6_server.server_close()
+            ipv6_thread.join()
         temporary.cleanup()
-        server.shutdown();server.server_close();thread.join(timeout=2)
+        server.shutdown()
+        server.server_close()
+        thread.join()
+        if cleanup_failed and sys.exc_info()[0] is None:
+            raise RuntimeError('Run isolation cleanup failed.')
 
 
 if __name__=='__main__':main()
