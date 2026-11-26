@@ -6,6 +6,24 @@ id: model-pricing
 # Trusted accounting prices used by the gateway for run records and USD limits.
 # Agent manifests select a provider/model but cannot supply or override prices.
 entries:
+  # Grok 4.7 text reference: https://openrouter.ai/api/v1/models, 2026-11-25;
+  # corroborated by https://docs.x.ai/developers/pricing.
+  # The tier starts at >= 200,000 inclusive input tokens. The pricing engine
+  # switches above threshold_input_tokens, hence 199999. All tokens use that tier.
+  - provider: xai
+    upstream_id: x-ai/grok-4.7
+    request_models: [grok-4.7]
+    text_only: true
+    input_per_mtok: 2
+    cached_read_per_mtok: 0.5
+    output_per_mtok: 6
+    long_context:
+      threshold_input_tokens: 199999
+      input_per_mtok: 4
+      cached_read_per_mtok: 1
+      output_per_mtok: 12
+    note: normalized text cost including reasoning; provider invoice may differ
+
   # Google text reference rates: https://openrouter.ai/api/v1/models,
   # retrieved 2026-11-25. These are normalized comparison rates, not a Cloud bill.
   # Answer and thought tokens share the output rate. Explicit cache creation is

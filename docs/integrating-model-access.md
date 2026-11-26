@@ -87,6 +87,46 @@ Reference prices measure comparison cost, not subscription billing or account
 entitlement. Adding a model requires qualifying the caller's catalog and packaged
 runtime together; a selector change alone is insufficient.
 
+### Grok API access
+
+Select the official xAI API route and Grok 4.7:
+
+```yaml
+model_access:
+  models:
+    - provider: xai
+      upstream_id: x-ai/grok-4.7
+      request_model: grok-4.7
+      api: openai-responses
+      name_format: request
+```
+
+The trusted launcher supplies `TESTBED_XAI_API_KEY` through its private env file.
+The gateway sends it as a bearer token to the fixed `https://api.x.ai/v1`
+endpoint. The harness uses its assigned gateway URL and placeholder `testbed`
+key with a Responses-compatible client. No protocol translation is performed.
+Chat Completions is also supported through `api: openai-chat`.
+
+Use Grok's supported reasoning effort (`low`, `medium`, `high` or `xhigh`).
+Replay native reasoning items, including `encrypted_content`, and local function
+results unchanged. Use `store: false` and explicit conversation history; remote
+conversation retrieval and provider-hosted tools such as X search, web search
+and code execution are unavailable. See the
+[Grok developer guide](https://docs.x.ai/developers/grok-4-7).
+
+The pinned OpenRouter reference rates meter input, cached input and output
+(including reasoning), with the long-context tier starting at 200,000 input
+tokens. This is normalized comparison cost; the provider's `cost_in_usd_ticks`
+remains in the retained native response and is not interpreted as `billed_usd`.
+This route uses an API key, not a Grok subscription. It does not enable a hosted
+platform's funding policy or qualify an attested release.
+
+The [API terms](https://x.ai/legal/terms-of-service-enterprise) permit product
+integrations, subject to their conditions and the
+[acceptable-use policy](https://x.ai/legal/acceptable-use-policy). The latter
+restricts using the service or outputs to develop competing models or products;
+route availability is not a determination that every research use is permitted.
+
 ## Discovering credential inputs
 
 Run from a trusted, pinned Dungeness checkout:

@@ -17,7 +17,7 @@ class RuntimeContractTests(unittest.TestCase):
         from dungeness.contracts import model_providers
         expected = model_providers(ROOT)
         self.assertEqual(expected["providers"], ["anthropic", "claude-subscription", "google", "google-vertex",
-                                                "openai", "openai-chatgpt", "openrouter"])
+                                                "openai", "openai-chatgpt", "openrouter", "xai"])
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             # Prove registry extensions come from this runtime, not OpenRSI or
@@ -37,7 +37,7 @@ class RuntimeContractTests(unittest.TestCase):
                 capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(result.stdout)["providers"],
                              ["anthropic", "claude-subscription", "example", "google", "google-vertex",
-                              "openai", "openai-chatgpt", "openrouter"])
+                              "openai", "openai-chatgpt", "openrouter", "xai"])
             (gateway / "providers.json").write_text('{"schema_version": 1, "providers": {"broken": {}}}')
             bad = subprocess.run([sys.executable, str(gateway / "gateway_models.py")],
                                  capture_output=True, text=True)
@@ -51,7 +51,7 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout), {
                 "schema_version": 1, "runtime": "dungeness",
                 "providers": ["anthropic", "claude-subscription", "google", "google-vertex",
-                              "openai", "openai-chatgpt", "openrouter"]})
+                              "openai", "openai-chatgpt", "openrouter", "xai"]})
             self.assertEqual(list(Path(temp).iterdir()), [])
 
     def test_capabilities_from_an_unrelated_directory_need_no_workspace_or_credentials(self):
