@@ -18,6 +18,7 @@ from gateway_request_policy import validate_model_request
 
 
 MODELS = {
+    "xai": "grok-4.7",
     "openai": "gpt-5.6-sol",
     "anthropic": "claude-opus-5",
     "claude-subscription": "example-model",
@@ -67,6 +68,7 @@ async def harness(*, declared=True, web=False):
         "EXAMPLE_SESSION_TOKEN": "unused-session",
         "EXAMPLE_SESSION_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "GEMINI_API_KEY": "unused-google-key",
+        "XAI_API_KEY": "unused-xai-key",
         "VERTEX_ACCESS_TOKEN": "unused-google-token",
         "VERTEX_ACCESS_TOKEN_EXPIRES_AT": "2099-01-01T00:00:00Z",
         "VERTEX_PROJECT_ID": "synthetic-project",

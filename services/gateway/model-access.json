@@ -1,6 +1,26 @@
 {
   "schema_version": 1,
   "access_routes": {
+    "xai": {
+      "authentication_method": "bearer",
+      "upstream_default": "https://api.x.ai/v1",
+      "upstream_env": "XAI_UPSTREAM_BASE_URL",
+      "routes": ["responses", "chat/completions", "models"],
+      "auth": "gateway_secret",
+      "billed": true,
+      "passthrough": ["x-grok-conv-id"],
+      "usage_parser": "openai",
+      "authentication": {
+        "sources": [{
+          "headers": {
+            "authorization": {"env": "XAI_API_KEY", "prefix": "Bearer "}
+          }
+        }]
+      },
+      "models": {
+        "grok-4.7": {"upstream": "grok-4.7", "catalog": "x-ai/grok-4.7"}
+      }
+    },
     "google": {
       "authentication_method": "api-key",
       "transport": "google-generate-content",

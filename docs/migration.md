@@ -90,10 +90,12 @@ just to make an old test pass. Keep fixture changes out of release artifacts.
 
 ## Removed bundled routes
 
-Grok and MiniMax access routes and reference prices have been removed, including
+Grok subscription and MiniMax access routes and reference prices have been removed, including
 their OpenRouter model entries. Existing runs requiring them need their previous
 runtime pin; this revision does not fall back to another model or account.
-OpenAI API, ChatGPT, Anthropic API, Claude account access and OpenRouter remain.
+Official Grok API access is now a separate `xai` route using `TESTBED_XAI_API_KEY`;
+it does not restore subscription access. See
+[Grok API setup](integrating-model-access.md#grok-api-access).
 
 ## Retired interfaces
 
