@@ -220,13 +220,30 @@ class RuntimeVerificationTests(unittest.TestCase):
         before = {"sha256:base": set(), "sha256:existing": set()}
         after = {**before, "sha256:leak": set()}
         history = Mock(return_value="CMD /app/verify_provider.py")
-        with patch.dict(self.loop, image_inventory=Mock(side_effect=(before, {}, after)),
+        with patch.dict(self.loop, capture=Mock(return_value=""), image_inventory=Mock(side_effect=(before, {}, after)),
                         image_history=history, remove_images=Mock()):
             with self.loop["fixture_images"](self.root, {}, self.evidence, "owner"):
                 pass
 
         history.assert_called_once_with("sha256:leak", self.root, {})
         self.assertIn("Verification left a fixture image: sha256:leak", self.evidence["cleanup_errors"])
+
+    def test_fixture_cleanup_releases_failed_builder_container_before_its_image(self):
+        operations = Mock()
+        operations.capture.return_value = "fixture-container"
+        operations.inventory.side_effect = ({}, {"sha256:fixture": set()}, {})
+        env = {"DOCKER_CONTEXT": "fixture"}
+        with patch.dict(self.loop, capture=operations.capture, image_inventory=operations.inventory,
+                        remove_images=operations.remove_images):
+            with self.assertRaisesRegex(AssertionError, "primary error"):
+                with self.loop["fixture_images"](self.root, env, self.evidence, "owner"):
+                    raise AssertionError("primary error")
+
+        self.assertEqual(operations.capture.call_args_list[0].args[-1], "label=dungeness.verify.owner=owner")
+        self.assertEqual(operations.mock_calls[2].args,
+                         ("docker", "container", "rm", "--force", "fixture-container"))
+        self.assertEqual(operations.mock_calls[4].args[0], {"sha256:fixture": set()})
+        self.assertIn("Verification left fixture containers: fixture-container", self.evidence["cleanup_errors"])
 
     def test_health_poll_bounds_docker_exec(self):
         isolation = runpy.run_path(REPOSITORY / "script/check-gateway-isolation.py")["main"].__globals__

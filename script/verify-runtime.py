@@ -212,6 +212,8 @@ def stage_gateway(root, base, env, owner, *, scoring=False):
 
 
 def stage_run(root, base, stock, env, owner):
+    replace(root, "src/dungeness/compiler.py", '"build": {"context": "./gateway"},',
+            '"build": {"context": "./gateway", "network": "none"},')
     shutil.copytree(root / "tests/fixtures/runtime", root, dirs_exist_ok=True)
     verifier = root / "verifiers/sample-problem/synthetic"
     replace(root, "tasks/projects/dungeness/sample-starter/task.yaml",
@@ -334,6 +336,14 @@ def fixture_images(root, env, evidence, owner):
     try:
         yield
     finally:
+        try:
+            containers = capture("docker", "container", "ls", "--all", "--quiet", "--no-trunc",
+                                 "--filter", f"label={marker}", cwd=root, env=env).splitlines()
+            if containers:
+                evidence["cleanup_errors"].append(f"Verification left fixture containers: {', '.join(containers)}")
+                capture("docker", "container", "rm", "--force", *containers, cwd=root, env=env)
+        except (VerificationError, subprocess.TimeoutExpired) as error:
+            evidence["cleanup_errors"].append(redact(str(error)))
         try:
             owned = image_inventory(root, env, f"label={marker}")
             remove_images({image: owned[image] for image in owned.keys() - before.keys()},
