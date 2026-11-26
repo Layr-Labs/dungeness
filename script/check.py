@@ -24,8 +24,8 @@ def main() -> int:
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(ROOT / "tests")
         return subprocess.run(
-            [sys.executable, "-m", "unittest",
-             "test_command_harness.CommandHarnessTests.test_adapter_uses_real_harbor_exec_result_contract"],
+            [sys.executable, "-m", "unittest", "-k", "test_adapter_",
+             "test_command_harness.CommandHarnessTests"],
             cwd=ROOT, env=environment,
         ).returncode
 

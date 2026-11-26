@@ -30,6 +30,16 @@ MODELS = {
     'openrouter': 'openai/gpt-5.6-sol', 'xai': 'grok-4.7',
     'google': 'gemini-4-carbon', 'google-vertex': 'gemini-4-carbon',
 }
+ROUTE_AUTH = {
+    'openai-chatgpt': ('authorization', 'Bearer ', SECRET),
+    'openai': ('authorization', 'Bearer ', SECRETS['OPENAI_API_KEY']),
+    'anthropic': ('x-api-key', '', SECRETS['ANTHROPIC_API_KEY']),
+    'claude-subscription': ('authorization', 'Bearer ', SECRETS['CLAUDE_ACCESS_TOKEN']),
+    'openrouter': ('authorization', 'Bearer ', SECRETS['OPENROUTER_API_KEY']),
+    'xai': ('authorization', 'Bearer ', SECRETS['XAI_API_KEY']),
+    'google': ('x-goog-api-key', '', SECRETS['GEMINI_API_KEY']),
+    'google-vertex': ('authorization', 'Bearer ', SECRETS['VERTEX_ACCESS_TOKEN']),
+}
 
 
 def interrupt(_signum, _frame):
@@ -73,7 +83,7 @@ def main():
         gateway_fixture.write_text(
             "from model_access import MODEL_ACCESS\n"
             f"for name in {tuple(MODELS)!r}:\n"
-            "    MODEL_ACCESS[name]['upstream_default'] = 'http://mock:8081/v1'\n"
+            "    MODEL_ACCESS[name]['upstream_default'] = f'http://mock:8081/{name}/v1'\n"
             "import runpy\nrunpy.run_path('/app/gateway.py', run_name='__main__')\n")
         mock = root / 'mock.py'
         mock.write_text('''from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -89,9 +99,12 @@ class Handler(BaseHTTPRequestHandler):
   self.end_headers(); self.wfile.write(body)
  def do_POST(self):
   request=json.loads(self.rfile.read(int(self.headers.get('content-length','0'))))
-  access=(self.headers.get('authorization','').removeprefix('Bearer ')
-          or self.headers.get('x-api-key') or self.headers.get('x-goog-api-key'))
-  assert access in [SECRET,*SECRETS.values()]
+  route=self.path.split('/')[1]
+  if route not in ROUTE_AUTH:
+   self.send_error(404); return
+  header,prefix,access=ROUTE_AUTH[route]
+  if self.headers.get_all(header)!=[prefix+access]:
+   self.send_error(401,'Unexpected route credential'); return
   if request.get('input')=='cut-stream':
    content=b'data: {"type":"response.output_text.delta","delta":"partial"}\\n\\n'
    self.send_response(200)
@@ -126,7 +139,7 @@ ThreadingHTTPServer(('0.0.0.0',8081),Handler).serve_forever()
 ''')
         task={'schema_version':1,'attachments':[{'name':'fixture.bin','bytes':2*1024*1024,
               'sha256':hashlib.sha256(b'x'*(2*1024*1024)).hexdigest(),'media_type':'application/octet-stream'}]}
-        mock.write_text('SECRETS='+repr(SECRETS)+'\nTASK='+repr(task)+'\n'+'SECRET='+repr(SECRET)+'\nID_TOKEN='+repr(ID_TOKEN)+'\nACCOUNT='+repr(ACCOUNT)+'\n'+mock.read_text())
+        mock.write_text('ROUTE_AUTH='+repr(ROUTE_AUTH)+'\nSECRETS='+repr(SECRETS)+'\nTASK='+repr(task)+'\n'+'SECRET='+repr(SECRET)+'\nID_TOKEN='+repr(ID_TOKEN)+'\nACCOUNT='+repr(ACCOUNT)+'\n'+mock.read_text())
         try:
             if args.image:
                 run('image', 'inspect', image, stdout=subprocess.DEVNULL)
@@ -234,7 +247,7 @@ s=Path('/proc/self/status').read_text()
 assert 'NoNewPrivs:\\t1' in s and 'CapEff:\\t0000000000000000' in s
 for name in ('auth.json','credentials.json'):
  try: Path('/run/dungeness',name).write_text('no')
- except OSError: pass
+ except OSError as e: assert e.errno == errno.EROFS, f'Expected read-only mount for {name}, got errno {e.errno}'
  else: raise AssertionError('Credential mount is writable')
 print('Root and credential mount read-only; temporary writes work; no capabilities or privilege escalation.')
 ''')

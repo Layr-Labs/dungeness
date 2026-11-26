@@ -17,3 +17,5 @@
 - Round 3 reproduced a green scored run that added a dangling provider image. The staged Dockerfiles now label every classic builder step after the base with a per-leg owner. Teardown removes tags before image IDs, deepest history first, and checks for new fixture images after removal.
 - Scored cleanup checks both Harbor projects and removes new shared-memory staging only when it finds the synthetic credential. Post-command artifact validation records an evidence failure even when the command exited zero.
 - A Colima build failed when the default bridge disappeared and left a labelled classic-builder container holding an image. The scored gateway build now uses no network, and fixture cleanup removes surviving containers with the exact owner label before removing images.
+- The gateway probe assigns each mock endpoint a fixed credential and header independently of the route registry. A provider key sent to another endpoint now fails inference in the probe.
+- The scored cleanup flags new shared-memory staging directories owned by the current UID. It removes a directory only when the fixture credential establishes ownership.

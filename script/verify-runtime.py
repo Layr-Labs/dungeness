@@ -164,14 +164,10 @@ def scratch(env, evidence):
                     shutil.copy2(source, target)
         yield root
     finally:
-        primary_error = sys.exc_info()[0]
         try:
             temporary.cleanup()
         except OSError as error:
-            message = f"Cannot clean the scratch checkout: {error}"
-            evidence["cleanup_errors"].append(redact(message))
-            if primary_error is None:
-                raise VerificationError(message) from error
+            evidence["cleanup_errors"].append(redact(f"Cannot clean the scratch checkout: {error}"))
 
 
 def dockerfile(base, owner):
@@ -204,7 +200,8 @@ def stage_gateway(root, base, env, owner, *, scoring=False):
         capture("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                 "-subj", "/CN=runtime-loop", "-addext", "subjectAltName=IP:127.0.0.1",
                 "-keyout", "verify-key.pem", "-out", "verify-cert.pem", cwd=gateway, env=env)
-        (gateway / "verify-key.pem").chmod(0o444)
+        for name in ("verify_provider.py", "verify-key.pem", "verify-cert.pem"):
+            (gateway / name).chmod(0o444)
         source += ('\nUSER root\nCOPY verify_provider.py verify-key.pem verify-cert.pem /app/\n'
                    'RUN cat verify-cert.pem >> "$(python -m certifi)"\n'
                    'USER gateway\nCMD ["python", "/app/verify_provider.py"]\n')
@@ -477,9 +474,10 @@ def check_scored_cleanup(result, temp, root, env, evidence, *, failed, credentia
         for path in sorted(set(SHARED_CREDENTIALS.glob("dungeness-credentials-*")) - credentials_before):
             try:
                 info = path.lstat()
-                if stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid() and find_artifact_leak(path):
+                if stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid():
                     errors.append(f"Scored run left shared credential staging: {path.name}")
-                    shutil.rmtree(path)
+                    if find_artifact_leak(path):
+                        shutil.rmtree(path)
             except FileNotFoundError:
                 continue
             except OSError as error:
@@ -566,9 +564,13 @@ def scored_run(root, base, stock, evidence, name, env):
             with artifact_errors("Cannot read the scored run artifacts"):
                 leak = find_artifact_leak(result) if result.exists() else None
                 trials = list((result / "harbor").glob("*/*/result.json"))
-                if code:
+                if code and leak is None:
                     for trial in trials:
-                        exception = json.loads(trial.read_text()).get("exception_info")
+                        try:
+                            exception = json.loads(trial.read_text()).get("exception_info")
+                        except (AttributeError, OSError, ValueError) as error:
+                            log += "\n" + redact(f"Cannot read Harbor trial result {trial.relative_to(result)}: {error}")
+                            continue
                         if exception:
                             log += "\n" + redact(json.dumps(exception, indent=2))
                 for pattern in ("*/*/agent/harness-output-*.txt", "*/*/verifier/test-std*.txt"):
@@ -795,11 +797,19 @@ def baseline(evidence, base, stock, env):
     suites = re.split(r"^Checking (.+)\n", log, flags=re.M)
     require(suites[1::2] == ["tests", "services/gateway/tests", "tools/transcripts", "Harbor adapter contract"],
             "A required unittest suite is missing or repeated. See the check log.")
-    test_counts = [re.findall(r"^Ran (\d+) tests? in", result, re.M) for result in suites[2::2]]
-    require(all(len(counts) == 1 and int(counts[0]) > 0 for counts in test_counts),
-            "A unittest suite ran no tests or reported more than one result. See the check log.")
-    evidence["counts"]["unittest"] = sum(int(counts[0]) for counts in test_counts)
-    evidence["counts"]["unittest_skipped"] = sum(map(int, re.findall(r"^OK \(skipped=(\d+)\)", log, re.M)))
+    test_counts = []
+    for result in suites[2::2]:
+        runs = re.findall(r"^Ran (\d+) tests? in", result, re.M)
+        require(len(runs) == 1, "A unittest suite did not report exactly one result. See the check log.")
+        skipped = re.search(r"^OK \(skipped=(\d+)\b", result, re.M)
+        ran, skipped_count = int(runs[0]), int(skipped[1]) if skipped else 0
+        require(ran > skipped_count, "A unittest suite ran no tests. See the check log.")
+        test_counts.append((ran, skipped_count))
+    harbor_ran, harbor_skipped = test_counts[-1]
+    require(test_counts[0][1] <= harbor_ran - harbor_skipped,
+            "Harbor adapter tests did not cover the core suite's skips. See the check log.")
+    evidence["counts"]["unittest"] = sum(ran for ran, _ in test_counts)
+    evidence["counts"]["unittest_skipped"] = sum(skipped for _, skipped in test_counts)
     code, _ = route_check(ROOT, evidence, "routes", env)
     require(code == 0, "Route discovery failed. See the routes log.")
     failures = []

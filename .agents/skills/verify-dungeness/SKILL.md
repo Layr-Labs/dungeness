@@ -50,6 +50,8 @@ The loop removes its scratch copies and Docker resources after each run. Evidenc
 - The runner rewrites provider destinations in the scratch fixture. The score applies to that fixture route. Adjacent consumers and their deployed pins require their own loops.
 - A Docker engine that grants another UID access to private bind-mounted files fails the gateway isolation leg. Use a compatible local engine for a full pass.
 - The scored fixture uses the offline launcher. It does not run the default online launch through `uvx`.
+- The loop starts the CLI with `python dungeness` in the locked environment. This bypasses the CLI shebang.
+- The scored fixture removes the full-benchmark evaluation stanza. The evaluation sidecar stays off.
 - The gateway image uses preloaded dependencies. The loop does not run the production image's `pip install`.
 - Only non-streaming Anthropic Messages requests run through the CLI and Harbor. The other routes run against an HTTP mock.
 - Update `EXPECTED_POLICY_SHA256` in `script/verify-runtime.py` when the route registry changes deliberately.

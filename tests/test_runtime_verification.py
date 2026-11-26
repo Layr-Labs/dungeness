@@ -1,10 +1,11 @@
 """Exercise loop failures without a Docker daemon or a provider."""
-from contextlib import nullcontext, redirect_stderr
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 import io
 import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -122,6 +123,37 @@ class RuntimeVerificationTests(unittest.TestCase):
         self.assertEqual(entry["status"], "failed")
         self.assertIn("record.json", (self.logs / "scored.log").read_text())
 
+    def test_scored_failure_keeps_logs_when_trial_json_is_corrupt(self):
+        self.evidence["docker_bind_owner"] = f"{os.geteuid()}:{os.getegid()}"
+        root = self.root / "repo"
+        root.mkdir()
+        temp = root.parent / "tmp"
+        for leak in (False, True):
+            def command(argv, *_):
+                trial = root / "runs/users/verify" / argv[-1] / "harbor/job/trial"
+                (trial / "agent").mkdir(parents=True)
+                (trial / "result.json").write_text("{")
+                (trial / "agent/harness-output-fixture.txt").write_text("saved harness output")
+                if leak:
+                    (trial / "leak.txt").write_bytes(self.loop["CANARY_BYTES"])
+                return 17
+
+            with self.subTest(leak=leak), patch.dict(
+                self.loop, stage_gateway=Mock(), stage_run=Mock(return_value=("spec", "fixture")),
+                command=command, check_scored_cleanup=Mock(), fixture_images=Mock(return_value=nullcontext()),
+            ):
+                try:
+                    code, log = self.loop["scored_run"](root, None, None, self.evidence, "scored", {})
+                    self.assertEqual(code, 1 if leak else 17)
+                    expected = self.loop["ARTIFACT_LEAK"] if leak else "Cannot read Harbor trial result"
+                    self.assertIn(expected, log)
+                    persisted = (self.logs / "scored.log").read_text()
+                    self.assertIn(expected, persisted)
+                    self.assertIn("saved harness output", persisted)
+                    self.assertNotIn(self.loop["CANARY"], persisted)
+                finally:
+                    temp.rmdir()
+
     def test_shared_credential_cleanup_owns_only_new_canary_directories(self):
         shm = self.root / "shm"
         shm.mkdir()
@@ -139,7 +171,7 @@ class RuntimeVerificationTests(unittest.TestCase):
         other = credential_dir("other", b"unrelated")
 
         def command(*_):
-            credential_dir("foreign", b"unrelated")
+            (shm / "dungeness-credentials-empty").mkdir()
             credential_dir("leak", self.loop["CANARY_BYTES"])
             return 0
 
@@ -149,9 +181,25 @@ class RuntimeVerificationTests(unittest.TestCase):
             code, log = self.loop["scored_run"](root, None, None, self.evidence, "scored", {})
 
         self.assertEqual(code, 1)
-        self.assertIn("dungeness-credentials-leak", log)
+        self.assertIn("dungeness-credentials-empty", log)
+        self.assertIn("dungeness-credentials-leak", str(self.evidence["cleanup_errors"]))
         self.assertNotIn(self.loop["CANARY"], log)
-        self.assertEqual(set(shm.iterdir()), {old, other, shm / "dungeness-credentials-foreign"})
+        self.assertEqual(set(shm.iterdir()), {old, other, shm / "dungeness-credentials-empty"})
+
+    def test_scratch_cleanup_preserves_returned_failure(self):
+        temporary = Mock(name=self.root.name)
+        temporary.name = str(self.root)
+        temporary.cleanup.side_effect = OSError("fixture cleanup failed")
+
+        def run():
+            with self.loop["scratch"]({}, self.evidence):
+                return 17
+
+        with patch("tempfile.TemporaryDirectory", return_value=temporary), \
+             patch.dict(self.loop, capture=Mock(return_value="")):
+            self.assertEqual(run(), 17)
+        self.assertEqual(self.evidence["cleanup_errors"],
+                         ["Cannot clean the scratch checkout: fixture cleanup failed"])
 
     def test_trial_result_requires_both_projects(self):
         trial = self.root / "harbor/job/renamed-trial"
@@ -256,6 +304,7 @@ class RuntimeVerificationTests(unittest.TestCase):
 
         with patch.object(subprocess, "run", side_effect=docker), \
              patch.object(sys, "argv", ["isolation", "--image", "fixture"]), \
+             patch.object(signal, "signal"), \
              self.assertRaises(subprocess.TimeoutExpired):
             isolation["main"]()
 
@@ -355,6 +404,26 @@ class RuntimeVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(self.loop["VerificationError"], "substitution no longer matches Dockerfile"):
             self.loop["stage_gateway"](self.root, "base", {}, "owner")
 
+    def test_scored_gateway_files_are_readable_under_restrictive_umask(self):
+        gateway = self.root / "services/gateway"
+        gateway.mkdir(parents=True)
+        for name in ("Dockerfile", "model-access.json"):
+            (gateway / name).write_bytes((REPOSITORY / "services/gateway" / name).read_bytes())
+
+        def openssl(*_, cwd, **kwargs):
+            for name in ("verify-key.pem", "verify-cert.pem"):
+                (cwd / name).touch()
+
+        original = os.umask(0o077)
+        try:
+            with patch.dict(self.loop, capture=openssl):
+                self.loop["stage_gateway"](self.root, "base", {}, "owner", scoring=True)
+        finally:
+            os.umask(original)
+        for name in ("verify_provider.py", "verify-key.pem", "verify-cert.pem"):
+            with self.subTest(name=name):
+                self.assertEqual((gateway / name).stat().st_mode & 0o777, 0o444)
+
     def test_baseline_rejects_missing_or_empty_unittest_suite(self):
         self.evidence["counts"] = {}
         for missing in (True, False):
@@ -367,6 +436,52 @@ class RuntimeVerificationTests(unittest.TestCase):
                                                            route_check=Mock(return_value=(1, ""))):
                 with self.assertRaisesRegex(AssertionError, "unittest suite"):
                     self.loop["baseline"](self.evidence, None, None, {})
+
+    def test_baseline_requires_executed_tests_and_harbor_coverage(self):
+        self.evidence["counts"] = {}
+        for ran, skipped, message in (
+            (1, 1, "A unittest suite ran no tests"),
+            (3, 2, "Harbor adapter tests did not cover the core suite's skips"),
+        ):
+            log = self.check_log().replace("Ran 1 test in 0s\n", f"Ran {ran} tests in 0s\n"
+                                          f"\nOK (skipped={skipped})\n", 1)
+            with self.subTest(skipped=skipped), patch.dict(
+                self.loop, checked=Mock(return_value=log), route_check=Mock(return_value=(1, "")),
+            ):
+                with self.assertRaisesRegex(AssertionError, message):
+                    self.loop["baseline"](self.evidence, None, None, {})
+
+    def test_main_reports_dirty_cleanup_and_skipped_outcomes(self):
+        cases = (
+            ("dirty", [], 1, "verify", "failed", "dirty at startup"),
+            ("cleanup", [], 1, "verify", "failed", "Verification cleanup failed"),
+            ("skipped", ["--fault", "failed-run-boundary"], 0, "failed-run-boundary", "skipped", None),
+        )
+        for case, args, exit_code, mode, status, error in cases:
+            def capture(*argv, **kwargs):
+                if argv[:2] == ("git", "status"):
+                    return " M changed.py" if case == "dirty" else ""
+                return "fixture"
+
+            def baseline(evidence, *_):
+                evidence["cleanup_errors"].append("fixture cleanup failed")
+
+            def proof(evidence, *_, fault):
+                evidence["faults"].append({"fault": fault, "status": "skipped", "reason": "Requires Linux."})
+
+            inputs = Mock(return_value=("base", "stock"))
+            with self.subTest(case=case), patch.dict(
+                self.loop, ROOT=REPOSITORY, capture=capture, inputs=inputs, baseline=baseline,
+                proof=proof, checked=Mock(return_value="0:0"),
+            ), patch.object(sys, "argv", ["verify-runtime", *args]), patch.object(signal, "signal"), \
+               redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(self.loop["main"](), exit_code)
+                evidence = json.loads((self.logs.parent / mode / "evidence.json").read_text())
+                self.assertEqual(evidence["status"], status)
+                if error:
+                    self.assertIn(error, evidence["error"])
+                if case == "dirty":
+                    inputs.assert_not_called()
 
     def test_sdk_timeout_preserves_earlier_baseline_failures(self):
         self.evidence["counts"] = {}
@@ -446,6 +561,7 @@ class RuntimeVerificationTests(unittest.TestCase):
         with patch.dict(isolation, ThreadingHTTPServer=Server), \
              patch("threading.Thread", return_value=thread), patch.object(subprocess, "run", side_effect=primary), \
              patch.object(sys, "argv", ["isolation", "--image", "fixture"]), redirect_stderr(io.StringIO()) as stderr, \
+             patch.object(signal, "signal"), \
              self.assertRaises(subprocess.CalledProcessError) as caught:
             isolation["main"]()
 
