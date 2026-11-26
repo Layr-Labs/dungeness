@@ -123,3 +123,12 @@ The offline request checker now defaults to the bundled YAML reference schedule
 and checks the route's supported operation. Existing explicit `--pricing` JSON
 schedules remain supported. Runtime source exports now include the integration
 guides and checker; no credentials, local notes or run outputs are added.
+
+## Native Google clients
+
+Google routes now require `api: google-genai`. Replace experimental OpenAI Chat
+Completions clients with the Google client using the assigned gateway base URL,
+`api_version="v1beta"`, and placeholder key `testbed`. Keep native conversation
+parts and signatures. The old Google translation endpoint is removed; OpenAI,
+ChatGPT, Anthropic and Claude subscription routes keep their existing interfaces.
+See [setup and SDK example](integrating-model-access.md#native-google-protocol).

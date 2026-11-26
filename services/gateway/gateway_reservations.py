@@ -6,7 +6,7 @@ input. Opaque provider state, media and remote history cannot be bounded here.
 import json
 import math
 
-GENERATION = {'responses', 'chat/completions', 'completions', 'messages'}
+GENERATION = {'responses', 'chat/completions', 'completions', 'messages', 'generateContent', 'streamGenerateContent'}
 
 
 class OutputLimitError(ValueError):
@@ -44,22 +44,27 @@ def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd
         elif isinstance(value, list):
             return any(opaque(item) for item in value)
         return False
-    fields = [k for k in ('max_output_tokens', 'max_completion_tokens', 'max_tokens') if k in payload]
+    google = operation in {'generateContent', 'streamGenerateContent'}
+    generation_key = 'generation_config' if 'generation_config' in payload else 'generationConfig'
+    settings = payload.get(generation_key, {}) if google else payload
+    fields = [k for k in ('maxOutputTokens', 'max_output_tokens') if k in settings] if google else [k for k in ('max_output_tokens', 'max_completion_tokens', 'max_tokens') if k in payload]
     if len(fields) > 1:
         raise ValueError('Use a single output-token limit')
-    allowed_fields = ({'max_output_tokens'} if operation == 'responses'
+    allowed_fields = ({'maxOutputTokens', 'max_output_tokens'} if google else {'max_output_tokens'} if operation == 'responses'
                       else {'max_tokens', 'max_completion_tokens'} if operation == 'chat/completions'
                       else {'max_tokens'})
     if fields and fields[0] not in allowed_fields:
         raise ValueError('Output-token limit does not match this API operation')
-    limit = payload[fields[0]] if fields else min(maximum, 16384)
+    limit = settings[fields[0]] if fields else min(maximum, 16384)
     if type(limit) is not int or not 1 <= limit <= maximum:
         raise OutputLimitError(maximum)
     result = dict(payload)
-    key = (fields[0] if fields else 'max_output_tokens' if operation == 'responses'
+    key = (fields[0] if fields else 'maxOutputTokens' if google else 'max_output_tokens' if operation == 'responses'
            else 'max_completion_tokens' if operation == 'chat/completions' else 'max_tokens')
-    result[key] = limit
-    if opaque(payload.get('input', [])) or opaque(payload.get('messages', [])):
+    output = {**settings, key: limit} if google else result
+    if google: result[generation_key] = output
+    else: output[key] = limit
+    if opaque(payload.get('input', [])) or opaque(payload.get('messages', [])) or opaque(payload.get('contents', [])):
         # Ciphertext is not a token count. Preserve supported protocol history,
         # but admit it exclusively against the entire remaining allowance.
         return result, None, None
@@ -86,7 +91,7 @@ def bounded_request(payload, operation, pricing, *, maximum=65536, available_usd
             raise ValueError('Invalid available model budget')
         affordable = math.floor((available_usd * 1e6 - inputs * input_rate) / output_rate)
         limit = max(1, min(limit, affordable))
-        result[key] = limit
+        output[key] = limit
     tokens = math.ceil(inputs * input_weight) + limit
     usd = (inputs * input_rate + limit * output_rate) / 1e6
     if not math.isfinite(usd) or usd < 0:

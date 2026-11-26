@@ -117,8 +117,9 @@ def instrumentation_route(path: str) -> str:
 
     for name, config in MODEL_PROVIDERS.items():
         route = config.get("gateway_route", name)
-        if path.startswith(f"/model/{route}/v1/"):
-            return f"/model/{route}/v1/{{operation}}"
+        for version in ("v1", "v1beta"):
+            if path.startswith(f"/model/{route}/{version}/"):
+                return f"/model/{route}/{version}/{{operation}}"
     if path.startswith("/task/files/"):
         return "/task/files/{name}"
     if re.fullmatch(r"/[^/]+(?:/[^/]+)?/(?:description|knowledge-base|resources/[^/]+)", path):
@@ -444,6 +445,8 @@ async def model_configured(request: Request) -> Response:
                      if config.get("gateway_route", name) == route), None)
     if provider is None:
         return JSONResponse({"error": "Unknown model access route."}, status_code=404)
+    if "/v1beta/" in request.url.path and MODEL_PROVIDERS[provider].get("transport") != "google-generate-content":
+        return JSONResponse({"error": "Unsupported model API version."}, status_code=404)
     return await proxy_registered_model(provider, request)
 
 
@@ -542,6 +545,7 @@ app = Starlette(
         Route("/web/search", external_web_disabled, methods=["POST"]),
         Route("/web/fetch", external_web_disabled, methods=["POST"]),
         Route('/model/{provider}/v1/{path:path}', model_configured, methods=['GET', 'POST']),
+        Route('/model/{provider}/v1beta/{path:path}', model_configured, methods=['GET', 'POST']),
     ],
     lifespan=lifespan,
 )

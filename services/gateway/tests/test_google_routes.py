@@ -16,8 +16,8 @@ from access_selection import resolve_endpoint
 from model_access import DEFAULT_MODEL_ACCESS
 
 MODEL = "gemini-4-carbon"
-PAYLOAD = {"model": MODEL, "messages": [{"role": "user", "content": "Return 42"}],
-           "max_completion_tokens": 512, "reasoning_effort": "low"}
+PAYLOAD = {"contents": [{"role": "user", "parts": [{"text": "Return 42"}]}],
+           "generationConfig": {"maxOutputTokens": 512, "thinkingConfig": {"thinkingLevel": "LOW"}}}
 RESULT = {
     "candidates": [{"content": {"role": "model", "parts": [{"text": "42"}]}, "finishReason": "STOP"}],
     "usageMetadata": {"promptTokenCount": 100, "cachedContentTokenCount": 40,
@@ -71,12 +71,12 @@ class RegisteredGoogleRoutesTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(provider=provider):
                 async with registered_route(provider) as (client, runtime, calls):
                     listing = await client.get(f"/model/{provider}/v1/models")
-                    self.assertEqual([entry["id"] for entry in listing.json()["data"]], [MODEL])
+                    self.assertEqual([entry["name"] for entry in listing.json()["models"]], ["models/" + MODEL])
                     self.assertFalse(calls)
-                    response = await client.post(f"/model/{provider}/v1/chat/completions",
+                    response = await client.post(f"/model/{provider}/v1beta/models/{MODEL}:generateContent",
                         json=PAYLOAD, headers={"authorization": "Bearer harness-placeholder"})
                     self.assertEqual(response.status_code, 200, response.text)
-                    self.assertEqual(response.json()["choices"][0]["message"]["content"], "42")
+                    self.assertEqual(response.json(), RESULT)
                     self.assertEqual(len(calls), 1)
                     request = calls[0]
                     if provider == "google":
@@ -109,7 +109,7 @@ class RegisteredGoogleRoutesTests(unittest.IsolatedAsyncioTestCase):
         for values in cases:
             async with registered_route("google-vertex", values) as (client, runtime, calls):
                 before = dict(runtime.ledger.counts)
-                response = await client.post("/model/google-vertex/v1/chat/completions", json=PAYLOAD)
+                response = await client.post(f"/model/google-vertex/v1beta/models/{MODEL}:generateContent", json=PAYLOAD)
                 self.assertEqual(response.json()["diagnostic"]["code"], "provider_credentials_unavailable")
                 self.assertNotIn("private-sentinel", response.text)
                 self.assertFalse(calls)
@@ -118,7 +118,7 @@ class RegisteredGoogleRoutesTests(unittest.IsolatedAsyncioTestCase):
     async def test_redirects_do_not_forward_credentials(self):
         for provider in ("google", "google-vertex"):
             async with registered_route(provider, redirect=True) as (client, _, calls):
-                response = await client.post(f"/model/{provider}/v1/chat/completions", json=PAYLOAD)
+                response = await client.post(f"/model/{provider}/v1beta/models/{MODEL}:generateContent", json=PAYLOAD)
                 self.assertEqual(response.status_code, 502)
                 self.assertEqual(len(calls), 1)
                 self.assertNotIn("location", response.headers)
@@ -127,7 +127,7 @@ class RegisteredGoogleRoutesTests(unittest.IsolatedAsyncioTestCase):
         async with registered_route("google-vertex") as (client, runtime, calls):
             before = dict(runtime.ledger.counts)
             for extra in ({"project": "another-project"}, {"tools": [{"googleSearch": {}}]}):
-                response = await client.post("/model/google-vertex/v1/chat/completions",
+                response = await client.post(f"/model/google-vertex/v1beta/models/{MODEL}:generateContent",
                                              json={**PAYLOAD, **extra})
                 self.assertEqual(response.status_code, 400)
             self.assertFalse(calls)

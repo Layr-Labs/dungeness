@@ -14,7 +14,8 @@ from model_access import MODEL_ACCESS, upstream_model
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--provider', required=True)
-parser.add_argument('--operation', required=True, choices=['messages', 'responses', 'chat/completions', 'completions'])
+parser.add_argument('--operation', required=True, choices=['messages', 'responses', 'chat/completions', 'completions', 'generateContent', 'streamGenerateContent'])
+parser.add_argument('--model', help='Native Google model ID (part of the URL, not the JSON body)')
 parser.add_argument('--request', type=Path, required=True)
 parser.add_argument('--pricing', type=Path, default=ROOT / 'services/gateway/pricing.yaml',
                     help='JSON or YAML schedule; defaults to the bundled reference prices')
@@ -29,15 +30,14 @@ try:
     if not isinstance(payload, dict):
         raise ValueError('Request must be a JSON object')
     schedule = yaml.safe_load(args.pricing.read_text())
-    matches = [e for e in schedule['entries'] if e['provider'] == args.provider and payload.get('model') in e['request_models']]
+    model = args.model if args.operation in {'generateContent', 'streamGenerateContent'} else payload.get('model')
+    matches = [e for e in schedule['entries'] if e['provider'] == args.provider and model in e['request_models']]
     if len(matches) != 1:
         raise ValueError('Pricing must contain exactly one entry for this provider/model')
     checked, tokens, usd = validate_generation(args.provider, args.operation, payload, matches[0], maximum=args.max_output_tokens)
     config = MODEL_ACCESS[args.provider]
     if config.get('transport', 'passthrough') != 'passthrough':
-        from gateway_google import request_body
-        upstream_model(config, checked['model'])
-        request_body(checked)
+        upstream_model(config, model)
     print(json.dumps({'valid': True, 'reservation_tokens': tokens, 'reservation_usd': usd,
                       'limitations': 'No authentication, live balance, routing or upstream compatibility check.'}))
 except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:

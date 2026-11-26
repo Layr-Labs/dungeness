@@ -453,6 +453,16 @@ def text_or_tokens(value: Any) -> None:
 
 def validate_model_request(provider: str, operation: str, payload: Any) -> None:
     """All model routes call this before accounting, translation or forwarding."""
+    if operation in {"generateContent", "streamGenerateContent"}:
+        from gateway_google import validate_request
+        stack = [(payload, 0)]
+        while stack:
+            value, depth = stack.pop()
+            if depth > 64: raise ValueError("model request exceeds maximum nesting depth")
+            if isinstance(value, dict): stack.extend((v, depth + 1) for v in value.values())
+            elif isinstance(value, list): stack.extend((v, depth + 1) for v in value)
+        validate_request(payload)
+        return
     if operation == "responses":
         allowed = RESPONSES_FIELDS
     elif operation == "responses/compact":
@@ -574,7 +584,8 @@ def validate_model_transport(operation: str, method: str, query: list[tuple[str,
         raise ValueError("model inference requires POST")
     # Anthropic SDK beta endpoints use this marker. No arbitrary query options
     # may be forwarded around the body schema, including duplicate parameters.
-    if query and not (operation in ("messages", "messages/count_tokens") and query == [("beta", "true")]):
+    if query and not (operation in ("messages", "messages/count_tokens") and query == [("beta", "true")]
+                      or operation == "streamGenerateContent" and query == [("alt", "sse")]):
         raise ValueError("unsupported model query parameters")
 
 

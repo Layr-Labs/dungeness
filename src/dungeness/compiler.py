@@ -996,7 +996,7 @@ def command_models(agent: dict[str, Any]) -> list[dict[str, Any]]:
         # "openai-completions". Keep that public label as an alias.
         operation = {"openai-chat": "chat/completions", "openai-completions": "chat/completions",
                      "openai-responses": "responses",
-                     "anthropic-messages": "messages"}.get(model["api"])
+                     "anthropic-messages": "messages", "google-genai": "generateContent"}.get(model["api"])
         if operation not in config["routes"]:
             raise ValueError("Model protocol is not supported by the selected endpoint.")
         identity = (provider, model["request_model"])

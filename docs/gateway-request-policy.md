@@ -70,7 +70,7 @@ The authoritative schemas are in
 They cover Responses (including ChatGPT compaction), Chat Completions, Anthropic
 Messages and token counting, OpenRouter text completions, and OpenAI embeddings.
 Existing routes retain their native formats. A trusted Google
-[transport selection](integrating-model-access.md#google-protocol-translation)
+[transport selection](integrating-model-access.md#native-google-protocol)
 can translate Chat Completions to Gemini and back.
 
 - Unknown top-level fields and tool-envelope fields are rejected with HTTP 400.
@@ -92,8 +92,8 @@ can translate Chat Completions to Gemini and back.
 - The current content subset is text and local-tool data. Adding a provider
   feature or content type requires a trusted schema review, not an agent-side
   passthrough option. Pricing restrictions apply separately.
-- Inference uses POST. The only accepted query marker is `beta=true` on Messages
-  and token-counting routes. Model listings use GET, are served locally from the
+- Inference uses POST. Accepted query markers are `beta=true` on Messages and
+  token-counting routes, and `alt=sse` on native Google streaming. Model listings use GET, are served locally from the
   trusted pricing catalog, and are filtered by the run's model allowlist.
 - Arbitrary request headers are not forwarded. OpenAI organization/project selection and
   opaque Codex routing/turn-state override headers are not forwarded either.
@@ -108,35 +108,12 @@ fields. The selected upstream model determines which levels it supports.
 | OpenAI Responses, including ChatGPT | `reasoning: {"effort": "high"}` |
 | Anthropic Messages, including Claude subscription | `thinking: {"type": "enabled", "budget_tokens": 1024}`, or model-supported adaptive thinking with `output_config.effort` |
 | Chat Completions | `reasoning_effort: "high"` |
-| Google's Chat Completions extension | `extra_body.google.thinking_config` |
+| Native Google | `generationConfig.thinkingConfig` with `thinkingLevel`, `thinkingBudget`, or `includeThoughts` |
 
-For the Google extension, the **wire JSON** is:
-
-```json
-{
-  "extra_body": {
-    "google": {
-      "thinking_config": {
-        "thinking_level": "high",
-        "include_thoughts": true
-      }
-    }
-  }
-}
-```
-
-Use one of `reasoning_effort`, `thinking_level` or `thinking_budget`.
-`include_thoughts` is optional. Thinking levels are `minimal`, `low`, `medium`,
-`high` and `xhigh`; a budget is an integer, with `-1` for dynamic thinking and
-`0` to disable it where the model permits. Other fields inside `extra_body`
-remain rejected, including hosted tools and remote cached content.
-
-The Python OpenAI SDK merges its `extra_body` argument into the wire request:
-pass `extra_body={"extra_body": {"google": {"thinking_config": ...}}}` to that
-SDK. See [Google's compatibility examples](https://aistudio.google.com/docs/openai#thinking).
-This reviewed wire format works with configured route names; it does not
-register a Google endpoint or make a credential compatible with the
-Gemini API-key service.
+Google's SDK may serialize native fields as snake_case; these aliases are also
+accepted and forwarded unchanged. Use either a thinking level or a thinking
+budget, not both. The gateway does not map OpenAI reasoning effort to Google
+thinking settings. See [native Google setup](integrating-model-access.md#native-google-protocol).
 
 ## Conversation history compatibility
 
@@ -149,19 +126,12 @@ versions. The gateway preserves accepted history, including signatures,
 encrypted content, item order and tool associations, without removing fields.
 Requests are limited to 8 MiB and 64 levels of JSON nesting.
 
-History schema 3 accepts Google's
-`extra_content.google.thought_signature` on assistant Chat Completions messages
-and their function calls. Preserve the complete returned message, including
-signatures arriving in late streaming deltas, when sending local tool results.
-Only the nonempty opaque signature string is accepted in that extension.
-Bounded admission treats it as opaque state rather than estimating tokens from
-its encoded length. See [Google's signature format](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures).
-The Google adapter also returns `extra_content.google.parts` on assistant
-messages. This contains reviewed native text/thought and function-call parts,
-preserving multiple signatures without flattening them. Keep those parts in
-order, including when collecting streaming deltas; the translator checks them
-against the visible text and tool calls on replay. Native server-tool and media
-parts are rejected.
+Google clients replay native `contents` and `parts`, including `thoughtSignature`
+and function-call/result associations. The gateway preserves those fields rather
+than wrapping them in OpenAI extensions. Signed history uses conservative budget
+admission; signature length is not treated as an input-token count. Configured
+OpenAI-compatible services retain their existing validated history extensions,
+but the Google routes no longer expose that interface.
 
 Unknown history structures fail explicitly with HTTP 400 and the diagnostic code
 `conversation_history_rejected`. Diagnostics version 1 adds a structural `path`

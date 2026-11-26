@@ -25,12 +25,11 @@ class GoogleRouteTests(unittest.TestCase):
     def test_offline_request_checker_needs_no_cloud_credentials(self):
         with tempfile.TemporaryDirectory() as temp:
             request = Path(temp) / "request.json"
-            request.write_text(json.dumps({"model": "gemini-4-carbon",
-                "messages": [{"role": "user", "content": "Return 42"}],
-                "max_completion_tokens": 512, "reasoning_effort": "low"}))
+            request.write_text(json.dumps({"contents": [{"role": "user", "parts": [{"text": "Return 42"}]}],
+                "generationConfig": {"maxOutputTokens": 512, "thinkingConfig": {"thinkingLevel": "LOW"}}}))
             for provider in ("google", "google-vertex"):
                 result = subprocess.run([sys.executable, str(ROOT / "tools/validate-model-request.py"),
-                    "--provider", provider, "--operation", "chat/completions", "--request", str(request)],
+                    "--provider", provider, "--operation", "generateContent", "--model", "gemini-4-carbon", "--request", str(request)],
                     env={"PATH": os.defpath, "DUNGENESS_CREDENTIALS_FILE": "/must-not-read"},
                     capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -47,7 +46,7 @@ class GoogleRouteTests(unittest.TestCase):
                 with self.subTest(provider=provider, model=model):
                     self.assertEqual(pricing_for_request(provider, model)["upstream_id"], mapping["catalog"])
                     selected = {"provider": provider, "request_model": model,
-                                "upstream_id": mapping["catalog"], "api": "openai-chat",
+                                "upstream_id": mapping["catalog"], "api": "google-genai",
                                 "name_format": "request"}
                     models = compiler.command_models({"model": selected})
                     by_endpoint = {key: value for key, value in selected.items() if key != "provider"}
@@ -62,7 +61,7 @@ class GoogleRouteTests(unittest.TestCase):
                     self.assertEqual(gateway["x-dungeness-credential-env"], requirements["environment"])
                     self.assertEqual(json.loads(gateway["environment"]["DUNGENESS_ALLOWED_MODELS"]),
                                      [[provider, model]])
-                    self.assertEqual(models[0]["base_url"], f"http://gateway:8080/model/{provider}/v1")
+                    self.assertEqual(models[0]["base_url"], f"http://gateway:8080/model/{provider}")
                     self.assertEqual(json.loads(gateway["environment"]["DUNGENESS_ACCESS_SELECTION"]),
                                      {provider: {"endpoint": by_endpoint["endpoint"],
                                                  "authentication": by_endpoint["authentication"]}})
@@ -81,9 +80,7 @@ class GoogleRouteTests(unittest.TestCase):
             with patch.dict(os.environ, paths, clear=True):
                 config = MODEL_ACCESS["google-vertex"]
                 headers = authentication_headers(config["authentication"])
-                url, _, _ = upstream_request(config, {
-                    "model": "gemini-4-carbon", "messages": [{"role": "user", "content": "42"}]},
-                    "gemini-4-carbon", "fixture", headers)
+                url, _ = upstream_request(config, "generateContent", "gemini-4-carbon", headers)
             self.assertEqual(url, "https://aiplatform.googleapis.com/v1/projects/"
                              "sample-project/locations/global/publishers/google/models/"
                              "gemini-4-carbon:generateContent")

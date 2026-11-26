@@ -36,6 +36,10 @@ def completes_response(frame: bytes, operation: str) -> bool:
     kind = document.get("type")
     if isinstance(kind, str) and kind.encode() in terminal:
         return True
+    if operation == "streamGenerateContent":
+        candidates = document.get("candidates", [])
+        return (isinstance(candidates, list) and any(isinstance(c, dict) and c.get("finishReason") for c in candidates)
+                or isinstance(document.get("promptFeedback"), dict) and bool(document["promptFeedback"].get("blockReason")))
     if operation in {"chat/completions", "completions"}:
         choices = document.get("choices")
         return isinstance(choices, list) and any(

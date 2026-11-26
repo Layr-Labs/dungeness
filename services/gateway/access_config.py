@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 CONFIG_PATH = Path(__file__).with_name("model-access.json")
 OPERATIONS = {
     "responses", "responses/compact", "chat/completions", "completions",
-    "embeddings", "models", "messages", "messages/count_tokens",
+    "embeddings", "models", "messages", "messages/count_tokens", "generateContent", "streamGenerateContent",
 }
 TRANSPORT_HEADERS = {
     "host", "content-type", "content-length", "transfer-encoding", "connection",
@@ -102,12 +102,15 @@ def validate_access_routes(entries):
                  and all(isinstance(item, str) and item in OPERATIONS for item in operations))
         _require(len(set(operations)) == len(operations))
         _require(config["auth"] == "gateway_secret" and type(config["billed"]) is bool)
-        _require(config["usage_parser"] in ("openai", "anthropic"))
+        _require(config["usage_parser"] in ("openai", "anthropic", "google"))
         transport = config.get("transport", "passthrough")
         _require(transport in ("passthrough", "google-generate-content"))
         if transport != "passthrough":
-            _require(set(operations) <= {"chat/completions", "models"}
-                     and "chat/completions" in operations and config["usage_parser"] == "openai")
+            _require(set(operations) <= {"generateContent", "streamGenerateContent", "models"}
+                     and "generateContent" in operations and config["usage_parser"] == "google")
+        else:
+            _require(not set(operations) & {"generateContent", "streamGenerateContent"}
+                     and config["usage_parser"] != "google")
         variable = config["upstream_env"]
         _require(_matches(r"[A-Z][A-Z0-9_]*", variable) and variable not in variables)
         variables.add(variable)

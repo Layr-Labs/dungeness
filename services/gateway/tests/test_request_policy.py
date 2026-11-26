@@ -32,10 +32,14 @@ MODELS = {
 
 def route(provider, operation):
     slug = "chatgpt" if provider == "openai-chatgpt" else provider
+    if operation in {"generateContent", "streamGenerateContent"}:
+        return f"/model/{slug}/v1beta/models/{MODELS[provider]}:{operation}"
     return f"/model/{slug}/v1/{operation}"
 
 
 def request_body(provider, operation):
+    if operation in {"generateContent", "streamGenerateContent"}:
+        return {"contents": [{"role": "user", "parts": [{"text": "solve locally"}]}]}
     payload = {"model": MODELS[provider]}
     if operation.startswith("messages") or operation == "chat/completions":
         payload["messages"] = [{"role": "user", "content": "solve locally"}]
