@@ -21,6 +21,11 @@ mechanism for a missing receipt. Current consumers must retain the incomplete
 state rather than estimate usage or mint receipts from it. Local harness tests
 cannot rule out future upstream interruptions.
 
+The [request deadline](gateway-request-policy.md#request-lifetime) bounds slow
+reasoning and disconnected drains. Disable automatic SDK retries and handle
+gateway recovery receipts explicitly; otherwise a client can time out and start
+another generation while the original is still running and consuming budget.
+
 `test_command_gateway.py` checks interrupted streams with and without final usage,
 safe failure labels and unchanged admission behavior. `test_gateway.py` covers
 usage capture after downstream disconnects and accounting during shutdown.

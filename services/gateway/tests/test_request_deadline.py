@@ -25,6 +25,19 @@ class Trickle(httpx.AsyncByteStream):
 
 
 class RequestDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_transport_does_not_impose_an_earlier_read_deadline(self):
+        # This is the production client; harness() replaces it with MockTransport,
+        # which does not enforce socket timeouts and cannot catch this regression.
+        with patch.dict(os.environ, {'DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS': '900'}):
+            runtime = Gateway()
+            try:
+                request = runtime.client.build_request('POST', 'https://example.invalid/')
+                self.assertIsNone(request.extensions['timeout']['read'])
+                self.assertEqual(request.extensions['timeout']['connect'], 30)
+                self.assertEqual(runtime.request_timeout_seconds, 900)
+            finally:
+                await runtime.client.aclose()
+
     async def response(self,runtime,stream,headers_delay=0,streaming=True):
         async def upstream(req):
             await asyncio.sleep(headers_delay)

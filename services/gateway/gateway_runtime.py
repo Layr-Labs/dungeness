@@ -195,11 +195,11 @@ class Gateway:
         # a run spec or agent request. Leave the route closed until configured.
         self.openrouter_inference_only = os.environ.get("DUNGENESS_OPENROUTER_INFERENCE_ONLY") == "1"
         # Model reasoning can legitimately take longer than an ordinary web
-        # request. Responses are streamed to the agent as they arrive, while a
-        # read timeout bounds inactivity. A separate monotonic deadline bounds
-        # the entire upstream request, including detached streaming drains.
+        # request. The monotonic deadline bounds headers, body and detached
+        # accounting drains, even without bytes or with endless heartbeats.
+        # A shorter read timeout would abandon slow reasoning before that limit.
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(600.0, connect=30.0), trust_env=False, follow_redirects=False,
+            timeout=httpx.Timeout(600.0, connect=30.0, read=None), trust_env=False, follow_redirects=False,
             proxy=trusted_model_proxy()
         )
 
