@@ -45,7 +45,8 @@ def build_job(
 
 
 def use_offline_lock(repository: Path, environment: Mapping[str, str]) -> bool:
-    return environment.get("UV_OFFLINE", "").lower() in {"1", "true"} and (repository / "uv.lock").is_file()
+    offline = environment.get("UV_OFFLINE", "").lower() in {"1", "true", "yes", "on", "y", "t"}
+    return offline and (repository / "uv.lock").is_file()
 
 
 def launch_command(job_path: Path, env_file: Path | str, *, locked: bool = False) -> list[str]:

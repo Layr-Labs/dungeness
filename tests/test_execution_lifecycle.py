@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from dungeness.execution import process, runner
+from dungeness.execution import harbor, process, runner
 
 loader = SourceFileLoader("lifecycle_cli", str(ROOT / "dungeness"))
 cli = module_from_spec(spec_from_loader(loader.name, loader))
@@ -64,6 +64,39 @@ class ExecutionLifecycleTests(unittest.TestCase):
             "uv", "run", "--isolated", "--locked", "--python", "3.12", "--group",
             "harbor", "harbor", "run",
         ])
+
+    def test_offline_lock_matches_uv_boolean_values(self):
+        self.assertFalse(harbor.use_offline_lock(self.root, {"UV_OFFLINE": "1"}))
+        (self.root / "uv.lock").touch()
+        self.assertFalse(harbor.use_offline_lock(self.root, {}))
+        for value in ("0", "False", "No", "Off", "N", "F"):
+            with self.subTest(value=value):
+                self.assertFalse(harbor.use_offline_lock(self.root, {"UV_OFFLINE": value}))
+        for value in ("1", "True", "YES", "On", "Y", "T"):
+            with self.subTest(value=value):
+                self.assertTrue(harbor.use_offline_lock(self.root, {"UV_OFFLINE": value}))
+
+    def test_build_command_argv_for_online_and_locked_runs(self):
+        (self.root / "uv.lock").touch()
+        args = SimpleNamespace(
+            task="sample-task", task_namespace="projects/tasks",
+            agent="sample-agent", agent_namespace="projects/agents",
+            checkpoint="sample-checkpoint", namespace="projects/test",
+            resume_from=None, max_model_tokens=None, max_usd=None,
+            reasoning_effort=None, reasoning_summary=None, label=[],
+            fresh_start=False, run_spec_path=None,
+        )
+        compiler = "src/dungeness/compiler.py"
+        expected = [
+            compiler, args.task, "--task-namespace", args.task_namespace,
+            "--agent", args.agent, "--agent-namespace", args.agent_namespace,
+            "--checkpoint", args.checkpoint, "--run-id", self.run_id,
+            "--namespace", args.namespace,
+        ]
+        with patch.object(cli, "BUILD_SCRIPT", self.root / compiler):
+            self.assertEqual(cli.build_command(args, self.run_id), ["uv", "run", *expected])
+            with patch.dict(os.environ, {"UV_OFFLINE": "YES"}):
+                self.assertEqual(cli.build_command(args, self.run_id), [sys.executable, *expected])
 
     def execute(self, **overrides):
         options = dict(
