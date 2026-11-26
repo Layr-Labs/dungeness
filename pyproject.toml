@@ -9,7 +9,10 @@ dependencies = ["PyYAML==6.0.3", "python-dotenv==1.2.4"]
 # locked developer environment; it does not claim wheel installation support.
 [tool.uv]
 package = false
-conflicts = [[{ group = "gateway" }, { group = "harbor" }]]
+conflicts = [
+    [{ group = "gateway" }, { group = "harbor" }],
+    [{ group = "google-sdk" }, { group = "harbor" }],
+]
 
 [tool.uv.dependency-groups]
 harbor = { requires-python = ">=3.12" }
@@ -29,3 +32,4 @@ gateway = [
     "uvicorn==0.35.0",
 ]
 harbor = ["harbor==0.18.0", "litellm==1.88.6"]
+google-sdk = ["google-genai==3.6.1"]

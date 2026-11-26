@@ -25,7 +25,12 @@ jobs:
       - run: make check-core
       - name: Native Google SDK contract
         if: matrix.python == '3.12'
-        run: uv run --frozen --group gateway --with google-genai==3.6.1 python -B script/check-google-client.py
+        run: >-
+          uv run --locked --isolated --group gateway --group google-sdk python -B -c
+          "import importlib.metadata as m, runpy, sys;
+          assert sys.version_info[:2] == (3, 12);
+          assert m.version('google-genai') == '3.6.1';
+          runpy.run_path('script/check-google-client.py', run_name='__main__')"
       - name: Harbor adapter contract
         if: matrix.python == '3.12'
         run: make check-harbor
@@ -62,7 +67,6 @@ jobs:
       DUNGENESS_VERIFY_IMAGE: ${{ vars.RUNTIME_VERIFY_IMAGE_ID }}
       DUNGENESS_VERIFY_STOCK_ADAPTER: ${{ runner.temp }}/runtime-verify/stock_adapter.py
       DUNGENESS_VERIFY_UV_CACHE: ${{ runner.temp }}/runtime-verify/uv
-      DUNGENESS_VERIFY_GOOGLE_PYTHON: ${{ runner.temp }}/runtime-verify/google/bin/python
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

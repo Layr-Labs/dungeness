@@ -7,14 +7,13 @@ description: Run Dungeness Runtime verification after changes to launch, gateway
 
 Use a local Docker engine. Use Python 3.12 and the repository's uv lock. Set these inputs before you run the loop.
 
-- Set `DUNGENESS_VERIFY_UV_CACHE` to the local uv cache with the locked gateway and Harbor packages.
+- Set `DUNGENESS_VERIFY_UV_CACHE` to the local uv cache with the locked gateway, Harbor, and Google SDK packages.
 - Set `DUNGENESS_VERIFY_IMAGE` to the full `sha256:…` ID of a local Linux image for the host architecture. The image must contain Python 3.12, Bash, and the exact packages in `services/gateway/requirements.txt`. The image ID and package versions must match. It builds the gateway from the checkout.
-- Set `DUNGENESS_VERIFY_GOOGLE_PYTHON` to the Python 3.12 executable in an approved local environment with `google-genai==3.6.1` and the gateway dependencies. The loop uses this environment directly and requires the pinned SDK version.
 - Set `DUNGENESS_VERIFY_STOCK_ADAPTER` to the local copy of `src/openrsi_space/integrations/dungeness/stock_adapter.py` from OpenRSI Space dev commit `ac5b68b4268f94fd10d011e923526086d8973ef4`. The file must match the pinned SHA-256 digest.
 
 Set the Docker CLI on `PATH`. On macOS, select a Docker context that shares the checkout path with its Linux VM. The loop uses the local Docker builder with image IDs as base references. Use an approved local cache for every input.
 
-For Linux CI, set repository variables `RUNTIME_VERIFY_CACHE_KEY` and `RUNTIME_VERIFY_IMAGE_ID`. The cache contains `uv/`, `stock_adapter.py`, `google/bin/python`, and `image.tar` at its root. Use an x86-64 image and uv cache. The workflow restores that exact key and runs proof mode.
+For Linux CI, set repository variables `RUNTIME_VERIFY_CACHE_KEY` and `RUNTIME_VERIFY_IMAGE_ID`. The cache contains `uv/`, `stock_adapter.py`, and `image.tar` at its root. Use an x86-64 image and uv cache. The workflow restores that exact key and runs proof mode.
 
 # Doctor
 

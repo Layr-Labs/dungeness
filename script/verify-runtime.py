@@ -31,7 +31,6 @@ CANARY = "dungeness-verify-synthetic-provider-key"
 SOURCE_URL = "https://example.invalid/source.git"
 LINUX_X86 = platform.system() == "Linux" and platform.machine() == "x86_64"
 LINUX_SKIP = "Requires Linux x86-64 with a local Docker bridge and host listener. On macOS the bridge is inside a Linux VM."
-GOOGLE_INPUT = "Set DUNGENESS_VERIFY_GOOGLE_PYTHON to a local Python 3.12 environment with google-genai 3.6.1."
 
 
 class VerificationError(Exception):
@@ -505,28 +504,17 @@ def baseline(evidence, base, stock, env):
         need(code == 0, "Scored run failed. See the scored-run log.")
     except VerificationError as error:
         failures.append(str(error))
-    python = google_python()
-    if python:
-        code, _ = record_command(evidence, "google-sdk", [python, "-B", "-c",
-                "import importlib.metadata as m, runpy, sys; "
-                "assert sys.version_info[:2] == (3, 12); "
-                "assert m.version('google-genai') == '3.6.1'; "
-                "runpy.run_path('script/check-google-client.py', run_name='__main__')"], ROOT, env)
-        if code:
-            failures.append("Google SDK failed. See the google-sdk log.")
-    else:
-        evidence["blocked"] = [{"leg": "google-sdk", "reason": GOOGLE_INPUT}]
-        failures.append(GOOGLE_INPUT)
+    code, _ = record_command(evidence, "google-sdk", [
+        "uv", "run", "--locked", "--offline", "--isolated", "--group", "gateway", "--group", "google-sdk",
+        "python", "-B", "-c",
+        "import importlib.metadata as m, runpy, sys; "
+        "assert sys.version_info[:2] == (3, 12); "
+        "assert m.version('google-genai') == '3.6.1'; "
+        "runpy.run_path('script/check-google-client.py', run_name='__main__')",
+    ], ROOT, env)
+    if code:
+        failures.append("Google SDK failed. See the google-sdk log.")
     need(not failures, " ".join(failures))
-
-
-def google_python():
-    value = os.environ.get("DUNGENESS_VERIFY_GOOGLE_PYTHON")
-    if value:
-        path = Path(value).expanduser().absolute()
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    return None
 
 
 def main():
@@ -551,9 +539,6 @@ def main():
         evidence["commit"] = capture("git", "rev-parse", "HEAD", env=env)
         evidence["worktree_dirty"] = bool(capture("git", "status", "--porcelain", env=env))
         base, stock = inputs(env)
-        if args.prove and google_python() is None:
-            evidence["blocked"] = [{"leg": "google-sdk", "reason": GOOGLE_INPUT}]
-            raise VerificationError(GOOGLE_INPUT)
         if not LINUX_X86:
             print(f"SKIP run-isolation. {LINUX_SKIP}", flush=True)
         evidence["pins"] = {
