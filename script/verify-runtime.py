@@ -69,11 +69,17 @@ def command(argv, cwd, env):
             try:
                 child.wait(timeout=420)
             except (KeyboardInterrupt, subprocess.TimeoutExpired):
-                os.killpg(child.pid, signal.SIGTERM)
+                try:
+                    os.killpg(child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
                 try:
                     child.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                     child.wait()
                 raise
         output.seek(0)
@@ -421,11 +427,12 @@ def seed(root, name):
                 '        error.details.update(retryable=True, run_action="continue")\n'
                 '    permanent = not error.details["retryable"]')
     elif name == "replay-after-cut":
-        replace(root, "services/gateway/gateway_usage.py",
-                '                if self.model_accounting_incomplete:\n'
-                '                    raise BudgetExceeded("model accounting is incomplete",'
-                ' code="model_accounting_incomplete", action="check_accounting")\n',
-                '')
+        for indent in (" " * 16, " " * 12):
+            replace(root, "services/gateway/gateway_usage.py",
+                    f'\n{indent}if self.model_accounting_incomplete:\n'
+                    f'{indent}    raise BudgetExceeded("model accounting is incomplete",'
+                    ' code="model_accounting_incomplete", action="check_accounting")',
+                    '')
     elif name == "wrong-policy-digest":
         replace(root, "src/dungeness/contracts.py", '"sha256": policy_digest(registry)', '"sha256": "0" * 64')
     elif name == "failed-run-boundary":
@@ -451,8 +458,9 @@ FAULTS = {
 }
 
 
-def proof(evidence, base, stock, env):
-    for name, expected in FAULTS.items():
+def proof(evidence, base, stock, env, *, fault=None):
+    cases = {fault: FAULTS[fault]} if fault else FAULTS
+    for name, expected in cases.items():
         if name == "failed-run-boundary" and not LINUX_X86:
             evidence["faults"].append({"fault": name, "status": "skipped", "reason": LINUX_SKIP})
             continue
@@ -527,28 +535,32 @@ def main():
     mode.add_argument("--prove", action="store_true")
     mode.add_argument("--doctor", action="store_true")
     mode.add_argument("--leg", choices=("scored-run", "gateway-isolation", "faults"))
+    mode.add_argument("--fault", choices=tuple(FAULTS))
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupt)
     start = time.monotonic()
-    name = args.leg or ("prove" if args.prove else "doctor" if args.doctor else "verify")
+    name = args.fault or args.leg or ("prove" if args.prove else "doctor" if args.doctor else "verify")
     OUTPUT.mkdir(mode=0o700, exist_ok=True)
     (OUTPUT / name).mkdir(mode=0o700, exist_ok=True)
     evidence = {"status": "failed", "mode": name, "commands": [], "counts": {}, "faults": [],
                 "cleanup_errors": [], "skipped": [], "platform": platform.platform()}
     if not LINUX_X86:
         evidence["skipped"].append({"leg": "run-isolation", "reason": LINUX_SKIP})
-        print(f"SKIP run-isolation. {LINUX_SKIP}", flush=True)
     env = offline_environment()
     try:
         evidence["commit"] = capture("git", "rev-parse", "HEAD", env=env)
+        evidence["worktree_dirty"] = bool(capture("git", "status", "--porcelain", env=env))
         base, stock = inputs(env)
         if args.prove and google_python() is None:
             evidence["blocked"] = [{"leg": "google-sdk", "reason": GOOGLE_INPUT}]
             raise VerificationError(GOOGLE_INPUT)
+        if not LINUX_X86:
+            print(f"SKIP run-isolation. {LINUX_SKIP}", flush=True)
         evidence["pins"] = {
             "local_image": base, "stock_adapter_sha256": STOCK_SHA256, "stock_adapter_commit": STOCK_COMMIT,
             "google_genai": "3.6.1",
             "uv_lock_sha256": sha256(ROOT / "uv.lock"),
+            "verification_script_sha256": sha256(Path(__file__)),
             "pricing_sha256": sha256(ROOT / "services/gateway/pricing.yaml"),
             "registry_sha256": sha256(ROOT / "services/gateway/model-access.json"),
             "fixture_sha256": {path.name: sha256(path) for path in sorted(FIXTURE.iterdir()) if path.is_file()},
@@ -584,8 +596,8 @@ def main():
             with scratch(env) as root:
                 code, _ = gateway_check(root, base, evidence, name, env)
             need(code == 0, "Gateway isolation failed. See the gateway-isolation log.")
-        elif args.leg == "faults":
-            proof(evidence, base, stock, env)
+        elif args.leg == "faults" or args.fault:
+            proof(evidence, base, stock, env, fault=args.fault)
         elif not args.doctor:
             baseline(evidence, base, stock, env)
             if args.prove:
@@ -608,9 +620,10 @@ def main():
         )
         encoded = json.dumps(evidence, indent=2, sort_keys=True) + "\n"
         (OUTPUT / name / "evidence.json").write_text(encoded)
-        with tempfile.NamedTemporaryFile(mode="w", dir=OUTPUT, delete=False) as handle:
-            handle.write(encoded)
-        Path(handle.name).replace(OUTPUT / "evidence.json")
+        if name in {"verify", "prove"}:
+            with tempfile.NamedTemporaryFile(mode="w", dir=OUTPUT, delete=False) as handle:
+                handle.write(encoded)
+            Path(handle.name).replace(OUTPUT / "evidence.json")
     return 0 if evidence["status"] == "passed" else 1
 
 
