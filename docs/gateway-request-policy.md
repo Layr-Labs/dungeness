@@ -210,7 +210,9 @@ Each admitted model request has one absolute, monotonic deadline, defaulting to
 3,600 seconds. Operators can set `TESTBED_MODEL_REQUEST_TIMEOUT_SECONDS` when
 launching compiled runs, or `DUNGENESS_MODEL_REQUEST_TIMEOUT_SECONDS` for a
 standalone gateway. The value must be finite and positive. It is not a harness
-request option. Existing connection and read-inactivity timeouts still apply.
+request option. Connection establishment is still limited to 30 seconds.
+Response headers and body reads use the absolute deadline, without a shorter
+read-inactivity cutoff that would interrupt quiet reasoning.
 
 The same deadline covers connection, response headers, body reads, and streaming
 drains after a client disconnect or stall. Cleanup allows up to five additional
@@ -222,6 +224,14 @@ charges remain unknown and block further model admissions; a timeout is never
 assumed to mean free inference. The gateway does not restart research or retry
 paid inference automatically. Stopping the local connection cannot guarantee
 that a provider stops computation or billing immediately.
+
+Harness SDKs and CLIs should disable automatic transport/stream retries. Let one
+recovery layer interpret the gateway's `run_action` and `retryable` receipt.
+Wait at least as long as the configured request deadline plus cleanup, or let
+the run supervisor stop the harness at its research deadline. A buffering
+adapter may withhold even HTTP headers until completion; configure first-byte
+and response timeouts accordingly. A client timeout or disconnect is not a
+gateway receipt and does not authorize a replacement generation.
 
 ## OpenRouter usage and charges
 
