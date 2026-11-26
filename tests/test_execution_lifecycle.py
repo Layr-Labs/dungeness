@@ -55,6 +55,16 @@ class ExecutionLifecycleTests(unittest.TestCase):
         self.start = Mock(wraps=cli.start_run_record)
         self.finish = Mock(wraps=cli.finalize_run_record)
 
+    def test_offline_launch_uses_repository_lock(self):
+        (self.root / "uv.lock").touch()
+        with patch.dict(os.environ, {"UV_OFFLINE": "1"}):
+            self.assertEqual(self.execute(), 0)
+        argv = self.commands.call_args.args[0]
+        self.assertEqual(argv[:10], [
+            "uv", "run", "--isolated", "--locked", "--python", "3.12", "--group",
+            "harbor", "harbor", "run",
+        ])
+
     def execute(self, **overrides):
         options = dict(
             repository_root=self.root, render_command=["synthetic-compiler"],

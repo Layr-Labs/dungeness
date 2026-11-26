@@ -44,13 +44,18 @@ def build_job(
     }, sort_keys=False)
 
 
-def launch_command(job_path: Path, env_file: Path | str) -> list[str]:
+def use_offline_lock(repository: Path, environment: Mapping[str, str]) -> bool:
+    return environment.get("UV_OFFLINE", "").lower() in {"1", "true"} and (repository / "uv.lock").is_file()
+
+
+def launch_command(job_path: Path, env_file: Path | str, *, locked: bool = False) -> list[str]:
     """Build argv for the pinned execution framework; never invoke a shell."""
-    return [
-        "uvx", "--python", "3.12", "--from", f"harbor=={HARBOR_VERSION}",
-        "--with", f"litellm=={LITELLM_VERSION}", "harbor", "run",
-        "--env-file", str(env_file), "--config", str(job_path),
-    ]
+    if locked:
+        command = ["uv", "run", "--isolated", "--locked", "--python", "3.12", "--group", "harbor"]
+    else:
+        command = ["uvx", "--python", "3.12", "--from", f"harbor=={HARBOR_VERSION}",
+                   "--with", f"litellm=={LITELLM_VERSION}"]
+    return [*command, "harbor", "run", "--env-file", str(env_file), "--config", str(job_path)]
 
 
 def toml_string(value: str) -> str:

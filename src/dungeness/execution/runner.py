@@ -17,7 +17,7 @@ from typing import Protocol
 from .timing import StartupTiming
 from . import environments
 from .credentials import gateway_credentials
-from .harbor import harbor_launch_environment, launch_command, validate_command_job
+from .harbor import harbor_launch_environment, launch_command, use_offline_lock, validate_command_job
 from .process import stream_command, termination_as_interrupt
 
 
@@ -119,7 +119,9 @@ def execute(
         environment, safe_env_file = credentials.enter_context(gateway_credentials(
             rendered_path, repository_root / environment_file, environment))
         timing.mark("harbor_started")
-        stream_command(launch_command(job_path, safe_env_file), cwd=repository_root, env=environment)
+        locked = use_offline_lock(repository_root, environment)
+        stream_command(launch_command(job_path, safe_env_file, locked=locked),
+                       cwd=repository_root, env=environment)
         timing.mark("harbor_finished")
         final_status = "completed"
     except KeyboardInterrupt:
