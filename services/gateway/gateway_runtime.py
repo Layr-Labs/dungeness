@@ -35,7 +35,7 @@ from gateway_models import (
 )
 from gateway_provider_cost import openrouter_charge
 from gateway_stream import CompletionBarrier
-from gateway_google import GoogleResponse, request_body as google_request_body, upstream_request as google_upstream_request
+from gateway_google import NativeGoogleResponse, parse_path as google_path, upstream_request as google_upstream_request
 from gateway_reservations import validate_generation
 from gateway_errors import GatewayPolicyError, recovery
 from gateway_security import SecretFilter, ResponseLimitExceeded, MAX_RESPONSE_BYTES, safe_provider_error
@@ -210,7 +210,7 @@ class Gateway:
     async def fetch(self, url, options=None, request_id="internal"):
         raise ValueError("External web search and fetch are disabled.")
 
-    async def admit_model(self, provider: str, request: Request, operation: str) -> dict:
+    async def admit_model(self, provider: str, request: Request, operation: str, path_model: str | None = None) -> dict:
         request.state.upstream_request_sent = False
         validate_model_transport(operation, request.method, list(request.query_params.multi_items()),
                                  await request.body())
@@ -223,18 +223,16 @@ class Gateway:
         # pricing mode, web budgets, and whether a model allowlist was supplied.
         validate_model_request(provider, operation, payload)
         config = MODEL_PROVIDERS[provider]
-        mapped_model = upstream_model(config, payload["model"])
-        if config.get("transport", "passthrough") != "passthrough":
-            # Validate translation before admission or credential reads. Unknown
-            # controls must not disappear when converting between protocols.
-            google_request_body(payload)
+        model = path_model if path_model is not None else payload["model"]
+        request.state.model = model
+        mapped_model = upstream_model(config, model)
         # All credential types are checked before admitting a model request.
         try:
             private_values = set()
             request.state.provider_headers = provider_auth_headers(provider, private_values=private_values)
             request.state.provider_private_values = private_values
             if config.get("transport", "passthrough") != "passthrough":
-                google_upstream_request(config, payload, mapped_model, request.state.request_id,
+                google_upstream_request(config, operation, mapped_model,
                                         request.state.provider_headers)
         except ValueError as error:
             raise GatewayPolicyError("provider_credentials_unavailable",
@@ -244,11 +242,11 @@ class Gateway:
                 "OpenRouter inference requires the operator to disable account-default "
                 "server tools/plugins and set TESTBED_OPENROUTER_INFERENCE_ONLY=1"
             )
-        if self.allowed_models is not None and (provider, payload["model"]) not in self.allowed_models:
+        if self.allowed_models is not None and (provider, model) not in self.allowed_models:
             raise ValueError("model is not authorized for this run")
         from gateway_models import validate_declared_request
         try:
-            request_pricing = pricing_for_request(provider, payload["model"])
+            request_pricing = pricing_for_request(provider, model)
         except ValueError as error:
             raise GatewayPolicyError("provider_configuration_invalid" if self.allowed_models is not None
                                      else "model_pricing_unavailable",
@@ -263,7 +261,7 @@ class Gateway:
                 # cannot each allocate the same remaining credits.
                 with self.ledger.lock:
                     payload, tokens, usd = validate_generation(
-                        provider, operation, payload, pricing_for_request(provider, payload["model"]),
+                        provider, operation, payload, pricing_for_request(provider, model),
                         maximum=int(os.environ.get("DUNGENESS_MAX_OUTPUT_TOKENS", "65536")),
                         available_usd=self.ledger.available_model_usd())
                     self.ledger.admit_model(request.state.request_id, tokens=tokens or 0, usd=usd,
@@ -278,6 +276,13 @@ class Gateway:
     ) -> Response:
         normalized = path.strip("/")
         cfg = MODEL_PROVIDERS[provider]
+        path_model = None
+        native_google = cfg.get("transport") == "google-generate-content"
+        if native_google and normalized != "models":
+            try:
+                path_model, normalized = google_path(normalized)
+            except ValueError:
+                return JSONResponse({"error": "Use the native Google API: models/{model}:generateContent or :streamGenerateContent."}, status_code=404)
         extract = usage_extractor(cfg, normalized)
 
         # Never concatenate an arbitrary agent-supplied path onto the provider
@@ -295,9 +300,12 @@ class Gateway:
             names = sorted({name for entry in gateway_pricing.MODEL_PRICING if entry["provider"] == provider
                             for name in entry["request_models"]
                             if self.allowed_models is None or (provider, name) in self.allowed_models})
+            if native_google:
+                return JSONResponse({"models": [{"name": "models/" + name,
+                    "supportedGenerationMethods": sorted(cfg["routes"] - {"models"})} for name in names]})
             return JSONResponse({"object": "list", "data": [
                 {"id": name, "object": "model", "owned_by": provider} for name in names]})
-        payload = await self.admit_model(provider, request, normalized)
+        payload = await self.admit_model(provider, request, normalized, path_model)
         started = time.monotonic()
         deadline = asyncio.get_running_loop().time() + self.request_timeout_seconds
         status = "error"
@@ -537,7 +545,7 @@ class Gateway:
 
         content_type = "application/json"
         try:
-            model = bounded_model_name(payload.get("model"))
+            model = bounded_model_name(request.state.model)
             request_pricing = pricing_for_request(provider, model)
             if normalized == "chat/completions" and payload.get("stream"):
                 payload["stream_options"] = {**(payload.get("stream_options") or {}), "include_usage": True}
@@ -565,17 +573,15 @@ class Gateway:
             )
             upstream_base = cfg["upstream_default"].rstrip("/")
             profile_headers = {}
-            if "models" in cfg:
+            if "models" in cfg and not native_google:
                 routed_model = upstream_model(cfg, model)
                 if cfg.get('model_header'):
                     profile_headers[cfg['model_header']] = routed_model
                 body = json.dumps({**payload, 'model': routed_model}, separators=(',', ':')).encode()
             target_url, target_query = f"{upstream_base}/{normalized}", request.query_params
-            google_transport = cfg.get("transport", "passthrough") != "passthrough"
-            if google_transport:
-                target_url, target_query, translated = google_upstream_request(
-                    cfg, payload, upstream_model(cfg, model), request_id, auth_headers)
-                body = json.dumps(translated, separators=(",", ":")).encode()
+            if native_google:
+                target_url, target_query = google_upstream_request(
+                    cfg, normalized, upstream_model(cfg, model), auth_headers)
             upstream_request = self.client.build_request(
                 request.method,
                 target_url,
@@ -603,12 +609,8 @@ class Gateway:
             request.state.upstream_request_sent = True
             async with request_deadline(deadline):
                 upstream = await self.client.send(upstream_request, stream=True)
-            if google_transport and upstream.is_success:
-                upstream = GoogleResponse(upstream, payload, request_id)
-                # Meter the latest native receipt, independently of downstream
-                # translation or a disconnect after the final usage event.
-                extract = lambda _body, _type: (upstream.translator.usage
-                                               if upstream.translator.finish_reason is not None else {})
+            if native_google and upstream.is_success:
+                upstream = NativeGoogleResponse(upstream)
             upstream_status = upstream.status_code
             if provider == "openrouter":
                 upstream_generation_id = upstream.headers.get("x-generation-id")

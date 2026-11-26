@@ -6,11 +6,11 @@
       "transport": "google-generate-content",
       "upstream_default": "https://generativelanguage.googleapis.com/v1beta",
       "upstream_env": "GOOGLE_UPSTREAM_BASE_URL",
-      "routes": ["chat/completions", "models"],
+      "routes": ["generateContent", "streamGenerateContent", "models"],
       "auth": "gateway_secret",
       "billed": true,
       "passthrough": [],
-      "usage_parser": "openai",
+      "usage_parser": "google",
       "authentication": {
         "sources": [{
           "headers": {
@@ -31,11 +31,11 @@
       "upstream_default": "https://aiplatform.googleapis.com/v1",
       "upstream_env": "VERTEX_UPSTREAM_BASE_URL",
       "project_header": "x-goog-user-project",
-      "routes": ["chat/completions", "models"],
+      "routes": ["generateContent", "streamGenerateContent", "models"],
       "auth": "gateway_secret",
       "billed": true,
       "passthrough": [],
-      "usage_parser": "openai",
+      "usage_parser": "google",
       "authentication": {
         "sources": [{
           "expires_at": {"env": "VERTEX_ACCESS_TOKEN_EXPIRES_AT"},

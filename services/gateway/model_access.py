@@ -101,7 +101,7 @@ def credential_requirements(access_routes, selections=None):
 
 def gateway_base_url(provider, api):
     route = MODEL_ACCESS[provider].get("gateway_route", provider)
-    suffix = "" if api == "anthropic-messages" else "/v1"
+    suffix = "" if api in {"anthropic-messages", "google-genai"} else "/v1"
     return f"http://gateway:8080/model/{route}{suffix}"
 
 

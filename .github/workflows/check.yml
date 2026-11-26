@@ -23,6 +23,9 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - run: make check-core
+      - name: Native Google SDK contract
+        if: matrix.python == '3.12'
+        run: uv run --frozen --group gateway --with google-genai==3.6.1 python -B script/check-google-client.py
       - name: Harbor adapter contract
         if: matrix.python == '3.12'
         run: make check-harbor

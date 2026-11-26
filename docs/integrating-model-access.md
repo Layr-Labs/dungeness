@@ -248,15 +248,45 @@ Validate private staging, missing/expired credentials, field filtering and
 cleanup; then streaming, tool history, accounting, error recovery and an actual
 harness run. VM packaging and attested qualification follow separately.
 
-### Google protocol translation
+### Native Google protocol
 
-The gateway includes a text/function-call adapter in
-[`gateway_google.py`](../services/gateway/gateway_google.py). Harnesses use their
-assigned Chat Completions URL. The trusted route selects:
+The Google routes expose native `generateContent` and `streamGenerateContent`.
+Use a Google client, not an OpenAI client. The gateway validates the native
+request, adds credentials and forwards the conversation without converting its
+messages, function calls, signatures or response events. Usage is parsed into
+our ledger separately; native response usage fields remain unchanged.
 
-| `transport` | Fixed upstream base | Behavior |
-| --- | --- | --- |
-| `google-generate-content` | An authorized Gemini-compatible base, such as `https://generativelanguage.googleapis.com/v1beta` | Appends `/models/{model}:generateContent` or `:streamGenerateContent?alt=sse` |
+For a harness using the Google Python SDK:
+
+```python
+import json, os
+from google import genai
+from google.genai import types
+
+model = json.load(open(os.environ["DUNGENESS_TASK"]))["models"][0]
+assert model["api"] == "google-genai"
+client = genai.Client(
+    api_key="testbed",
+    http_options=types.HttpOptions(base_url=model["base_url"], api_version="v1beta"),
+)
+response = client.models.generate_content(
+    model=model["request_model"],
+    contents="Return 42",
+    config=types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level="LOW"),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    ),
+)
+```
+
+The same client setup works for both Gemini API and Vertex routes: the gateway
+supplies the real key or bearer token and the approved Vertex project path.
+The SDK stays in API-key mode with the placeholder; the harness does not run ADC
+or receive project credentials. Execute local tools in the harness and replay the
+returned native content, including thought signatures, with its function results.
+Native JSON and fragmented SSE tool rounds are tested with `google-genai==3.6.1`.
+See the [SDK configuration](https://googleapis.github.io/python-genai/) and
+[Google API reference](https://ai.google.dev/api/generate-content).
 
 #### Installed Google routes
 
@@ -276,14 +306,15 @@ model_access:
     - provider: google-vertex
       upstream_id: google/gemini-4-carbon
       request_model: gemini-4-carbon
-      api: openai-chat
+      api: google-genai
       name_format: request
 ```
 
-The compiler supplies the harness URL:
-`http://gateway:8080/model/google-vertex/v1`. Use `google` for API-key access.
-The harness uses a placeholder credential; real account inputs stay in private
-gateway staging. The routes do not fall back to each other.
+The compiler supplies `api: google-genai` and the harness base URL
+`http://gateway:8080/model/google-vertex`. The SDK appends
+`/v1beta/models/{model}:generateContent` or `:streamGenerateContent?alt=sse`.
+Use `google` for the Gemini API route. Real credentials stay in private gateway
+staging. The routes do not fall back to each other.
 
 For Vertex, sign in on the host using `gcloud auth application-default login`.
 The trusted launcher obtains a Cloud-scoped access token from that login and
@@ -306,19 +337,28 @@ and [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key).
 
 Google subscription access is not supported. Use the API credentials listed above.
 
-The translated response uses the existing OpenAI-compatible usage schema
-(`usage_parser: "openai"`); accounting reads the native Google receipt directly.
-`candidatesTokenCount + thoughtsTokenCount` becomes output tokens, while cached
-tokens remain a subset of prompt tokens. Repeated streaming counters are not
-added together. Missing, inconsistent or incomplete usage blocks further model
-admissions. Select exact model IDs and pinned OpenRouter **reference prices**
-in `pricing.yaml`. OpenRouter supplies reference rates; requests go directly
-to the selected Google API endpoint.
+The native `usageMetadata` receipt supplies input, cached, output and thinking
+token counts. Output accounting includes `candidatesTokenCount + thoughtsTokenCount`;
+repeated streaming counters are cumulative, not additive. Missing or invalid
+final receipts block further model admissions. OpenRouter supplies the pinned
+**reference prices**; requests go directly to the selected Google API endpoint.
 
-Keep the entire returned assistant message. In addition to ordinary tool calls,
-the adapter returns `extra_content.google.parts` to preserve each native part
-and signature; append these parts across streaming deltas in order. Altering
-visible content without updating its native history fails explicitly.
-Only text, thinking, local functions and structured JSON output are supported.
-Unmapped options and server-side tools fail before admission. The offline
-request checker also validates this translation.
+Only text, thinking, structured JSON and locally executed function calls are
+supported. Hosted tools, remote cached content, file/media inputs and unreviewed
+operations are rejected. Native camelCase and snake_case field names are accepted
+without rewriting them; duplicate aliases are rejected. The gateway can insert
+an omitted output allowance for budget enforcement. Explicit allowances are
+honored or rejected, never silently reduced.
+
+Check a native request offline (the model is in the URL, not the JSON body):
+
+```sh
+python tools/validate-model-request.py --provider google --model gemini-4-carbon \
+  --operation generateContent --request request.json
+```
+
+The runtime advertises `google-native-protocol-v1`. Earlier experimental Google
+Chat Completions configurations must switch to `api: google-genai` and a native
+client; the translation endpoint is removed. OpenAI and Anthropic interfaces are
+unchanged. Attested users need a rebuilt, approved runtime before selecting this
+protocol; a source update does not publish or approve a VM.

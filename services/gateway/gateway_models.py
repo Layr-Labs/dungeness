@@ -519,7 +519,8 @@ def extract_anthropic_usage(body: bytes, content_type: str) -> dict[str, int]:
 
 def gateway_provider_config(config):
     """Attach runtime parsing to the shared, credential-free access-route definition."""
-    parsers = {"openai": extract_usage, "anthropic": extract_anthropic_usage}
+    from gateway_google import extract_usage as extract_google_usage
+    parsers = {"openai": extract_usage, "anthropic": extract_anthropic_usage, "google": extract_google_usage}
     return {**config, "extract_usage": parsers[config["usage_parser"]]}
 
 

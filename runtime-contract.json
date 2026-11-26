@@ -14,6 +14,7 @@
     "declarative-scaffolds-v2",
     "model-provider-registry-v1",
     "model-credential-inputs-v1",
-    "validated-access-selection-v1"
+    "validated-access-selection-v1",
+    "google-native-protocol-v1"
   ]
 }
