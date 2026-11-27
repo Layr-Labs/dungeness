@@ -11,6 +11,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
@@ -45,14 +46,48 @@ Server(('::',PORT),Handler).serve_forever()
 '''
 
 
+def interrupt(_signum, _frame):
+    raise KeyboardInterrupt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', action='store_true')
     parser.add_argument('--ipv6', action='store_true', help='Also exercise dual-stack bridges.')
+    parser.add_argument('--image', help='Use this prebuilt local gateway image without pulling.')
     args = parser.parse_args()
+    signal.signal(signal.SIGTERM, interrupt)
     prefix = 'run-isolation-' + uuid.uuid4().hex[:10]
-    image = prefix + ':test'
+    image = args.image or prefix + ':test'
     projects = []
+    listeners = []
+    cleanup_errors = []
+    temporary = None
+    building_image = False
+
+    def clean(action, *arguments):
+        try:
+            action(*arguments)
+        except (OSError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            cleanup_errors.append(error)
+            print(f'Run isolation cleanup failed: {error}', file=sys.stderr)
+
+    def listen(server):
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        try:
+            thread.start()
+        except (OSError, RuntimeError):
+            clean(server.server_close)
+            raise
+        listeners.append((server, thread))
+        return server
+
+    def remove_image():
+        result = subprocess.run(['docker', 'image', 'rm', '--no-prune', image],
+                                capture_output=True, text=True, timeout=30)
+        if 'No such image' not in result.stderr:
+            result.check_returncode()
+
     def docker(*cmd, **kwargs):
         try:
             return subprocess.run(['docker', *cmd], check=True, text=True, capture_output=True,
@@ -66,22 +101,24 @@ def main():
         def log_message(self, *_):pass
         def do_GET(self):
             self.send_response(200);self.end_headers();self.wfile.write(b'host-canary')
-    server = ThreadingHTTPServer(('0.0.0.0', 0), Canary)
-    thread = threading.Thread(target=server.serve_forever, daemon=True);thread.start()
-    ipv6_server = None
-    if args.ipv6:
-        class IPv6Canary(ThreadingHTTPServer):
-            address_family = socket.AF_INET6
-            def server_bind(self):
-                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-                super().server_bind()
-        ipv6_server = IPv6Canary(('::', server.server_port), Canary)
-        threading.Thread(target=ipv6_server.serve_forever, daemon=True).start()
-    temporary = tempfile.TemporaryDirectory(prefix=prefix)
+    class IPv6Canary(ThreadingHTTPServer):
+        address_family = socket.AF_INET6
+        def server_bind(self):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            super().server_bind()
+
     try:
+        server = listen(ThreadingHTTPServer(('0.0.0.0', 0), Canary))
+        if args.ipv6:
+            listen(IPv6Canary(('::', server.server_port), Canary))
+        temporary = tempfile.TemporaryDirectory(prefix=prefix)
         tmp = temporary.name
         root = Path(tmp)
-        docker('build', '-q', '-t', image, str(ROOT/'services/gateway'))
+        if args.image:
+            docker('image', 'inspect', image)
+        else:
+            building_image = True
+            docker('build', '-q', '-t', image, str(ROOT/'services/gateway'))
         runs = []
         for suffix in ('a', 'b'):
             run = prefix + '-' + suffix
@@ -128,7 +165,7 @@ def main():
             path=folder/'compose.yaml';path.write_text(yaml.safe_dump(doc,sort_keys=False))
             compose=['compose','-p',run,'-f',str(path)]
             projects.append(compose)
-            docker(*compose,'up','-d','--wait','--wait-timeout','90')
+            docker(*compose,'up','-d','--pull','never','--wait','--wait-timeout','90')
             containers={name:inspect(docker(*compose,'ps','-q',name).strip()) for name in doc['services']}
             networks={name:json.loads(docker('network','inspect',run+'_'+name))[0] for name in doc['networks']}
             runs.append((run,containers,networks,canary))
@@ -199,14 +236,24 @@ print(RUN+': own inference/papers/scorer work; host, other runs, private mounts 
             assert not main['HostConfig']['Privileged']
             assert set(main['NetworkSettings']['Networks'])=={run+'_agent_internal'}
             for service in containers.values():assert not service['HostConfig'].get('PortBindings')
-        print('PASS: two simultaneous generated run topologies; no paid inference')
     finally:
         for compose in reversed(projects):
-            subprocess.run(['docker',*compose,'down','--timeout','1','--volumes','--remove-orphans'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        subprocess.run(['docker','image','rm',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        if ipv6_server:ipv6_server.shutdown();ipv6_server.server_close()
-        temporary.cleanup()
-        server.shutdown();server.server_close();thread.join(timeout=2)
+            clean(docker, *compose, 'down', '--timeout', '1', '--volumes', '--remove-orphans')
+        if building_image:
+            clean(remove_image)
+        for listener, thread in reversed(listeners):
+            clean(listener.shutdown)
+            clean(listener.server_close)
+            clean(thread.join, 2)
+            if thread.is_alive():
+                error = RuntimeError('Host listener thread did not stop.')
+                cleanup_errors.append(error)
+                print(f'Run isolation cleanup failed: {error}', file=sys.stderr)
+        if temporary is not None:
+            clean(temporary.cleanup)
+        if cleanup_errors and sys.exc_info()[0] is None:
+            raise RuntimeError('Run isolation cleanup failed.') from cleanup_errors[0]
+    print('PASS: two simultaneous generated run topologies; no paid inference')
 
 
 if __name__=='__main__':main()

@@ -25,7 +25,12 @@ jobs:
       - run: make check-core
       - name: Native Google SDK contract
         if: matrix.python == '3.12'
-        run: uv run --frozen --group gateway --with google-genai==3.6.1 python -B script/check-google-client.py
+        run: >-
+          uv run --locked --isolated --python 3.12 --group gateway --group google-sdk python -B -c
+          "import importlib.metadata as m, runpy, sys;
+          assert sys.version_info[:2] == (3, 12);
+          assert m.version('google-genai') == '3.6.1';
+          runpy.run_path('script/check-google-client.py', run_name='__main__')"
       - name: Harbor adapter contract
         if: matrix.python == '3.12'
         run: make check-harbor
@@ -53,3 +58,38 @@ jobs:
           python-version: "3.12"
       - name: Two concurrent runs with synthetic services and credentials
         run: make check-run-isolation
+
+  runtime-verification:
+    if: vars.RUNTIME_VERIFY_CACHE_KEY != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DUNGENESS_VERIFY_IMAGE: ${{ vars.RUNTIME_VERIFY_IMAGE_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.12.3"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Restore approved fixture inputs
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/runtime-verify
+          key: ${{ vars.RUNTIME_VERIFY_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - name: Load the local fixture image
+        run: docker load --input "$RUNNER_TEMP/runtime-verify/image.tar"
+      - run: make verify PROVE=1
+        env:
+          DUNGENESS_VERIFY_STOCK_ADAPTER: ${{ runner.temp }}/runtime-verify/stock_adapter.py
+          DUNGENESS_VERIFY_UV_CACHE: ${{ runner.temp }}/runtime-verify/uv
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-verification
+          path: .verify/prove/
+          include-hidden-files: true

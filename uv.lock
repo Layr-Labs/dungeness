@@ -2,13 +2,20 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor'",
-    "python_full_version < '3.12' and extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor'",
-    "extra == 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
-    "extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor'",
+    "python_full_version < '3.12' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.14' and extra == 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten' and extra == 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (python_full_version < '3.12' and sys_platform == 'emscripten' and extra == 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor')",
+    "python_full_version >= '3.14' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor')",
 ]
 conflicts = [[
     { package = "dungeness", group = "gateway" },
+    { package = "dungeness", group = "harbor" },
+], [
+    { package = "dungeness", group = "google-sdk" },
     { package = "dungeness", group = "harbor" },
 ]]
 
@@ -216,9 +223,14 @@ wheels = [
 name = "anyio"
 version = "4.14.2"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+]
 dependencies = [
-    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway'" },
-    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'group-9-dungeness-gateway') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'group-9-dungeness-gateway') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176, upload-time = "2026-07-12T20:29:07.082Z" }
 wheels = [
@@ -230,11 +242,14 @@ name = "anyio"
 version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
+    "python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.14' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor')",
 ]
 dependencies = [
-    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
-    { name = "typing-extensions", marker = "(python_full_version >= '3.12' and python_full_version < '3.15' and extra == 'group-9-dungeness-harbor') or (python_full_version < '3.12' and extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.15' and extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway') or (extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "typing-extensions", marker = "(python_full_version >= '3.12' and python_full_version < '3.15' and extra != 'group-9-dungeness-gateway') or (python_full_version < '3.12' and extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (python_full_version < '3.12' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (python_full_version >= '3.15' and extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
@@ -264,7 +279,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "python_full_version >= '3.12' and implementation_name != 'PyPy'" },
+    { name = "pycparser", marker = "(python_full_version >= '3.12' and implementation_name != 'PyPy') or (implementation_name != 'PyPy' and extra == 'group-9-dungeness-gateway') or (implementation_name != 'PyPy' and extra == 'group-9-dungeness-google-sdk') or (implementation_name != 'PyPy' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -508,6 +523,11 @@ wheels = [
 name = "click"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+]
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
@@ -542,7 +562,7 @@ name = "cryptography"
 version = "50.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "python_full_version >= '3.12' and platform_python_implementation != 'PyPy'" },
+    { name = "cffi", marker = "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (platform_python_implementation != 'PyPy' and extra == 'group-9-dungeness-gateway') or (platform_python_implementation != 'PyPy' and extra == 'group-9-dungeness-google-sdk') or (platform_python_implementation != 'PyPy' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz", hash = "sha256:7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5", size = 880623, upload-time = "2026-09-30T15:30:04.884Z" }
 wheels = [
@@ -661,6 +681,9 @@ gateway = [
     { name = "typing-extensions" },
     { name = "uvicorn", version = "0.35.0", source = { registry = "https://pypi.org/simple" } },
 ]
+google-sdk = [
+    { name = "google-genai" },
+]
 harbor = [
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "litellm", marker = "python_full_version >= '3.12'" },
@@ -685,6 +708,7 @@ gateway = [
     { name = "typing-extensions", specifier = "==4.16.0" },
     { name = "uvicorn", specifier = "==0.35.0" },
 ]
+google-sdk = [{ name = "google-genai", specifier = "==3.6.1" }]
 harbor = [
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = "==0.18.0" },
     { name = "litellm", marker = "python_full_version >= '3.12'", specifier = "==1.88.6" },
@@ -883,6 +907,46 @@ wheels = [
 ]
 
 [[package]]
+name = "google-auth"
+version = "2.63.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "pyasn1-modules" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/0e/e8125c650f126f8703feabca892277f258af7c761fd93f7d51a404e56d75/google_auth-2.63.1.tar.gz", hash = "sha256:f69f387dba9abe536fec87483a749485f2ef0c81bfa79f609d9873e57054a1a5", size = 409098, upload-time = "2026-11-21T20:36:15.511Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/21/868ddea6de119b3e47ee0ae8de70bffabb6c0fe8a6f395ea62bdfb2ec062/google_auth-2.63.1-py3-none-any.whl", hash = "sha256:3c977ca57114a302c2589f3a24be7ca1b6862d30da7619f4230a78809f58a0e9", size = 271264, upload-time = "2026-11-21T20:36:13.886Z" },
+]
+
+[package.optional-dependencies]
+requests = [
+    { name = "requests" },
+]
+
+[[package]]
+name = "google-genai"
+version = "3.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor')" },
+    { name = "distro" },
+    { name = "google-auth", extra = ["requests"], marker = "extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "httpx2" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "sniffio" },
+    { name = "tenacity", version = "9.1.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/15/ecebc770eb7edec0e588498d6b872aff6091ce1af1a9c503bd70b5a1ea7a/google_genai-3.6.1.tar.gz", hash = "sha256:dfd4120a15ba5aff6a3de8a85d76e1d5d0af65c70a54c459b1c5e76f503e46e7", size = 885277, upload-time = "2026-11-18T22:18:48.819Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/1a/576adc030b48c7491b33ab94b96521151ef5b956552c0057628ef39c69bb/google_genai-3.6.1-py3-none-any.whl", hash = "sha256:4b35064da644f61d7e5f6c0e9406bf63b945e7e96b4af18cadb3371cbc3acf74", size = 1472097, upload-time = "2026-11-18T22:18:46.803Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -926,7 +990,7 @@ dependencies = [
     { name = "rich", marker = "python_full_version >= '3.12'" },
     { name = "shortuuid", marker = "python_full_version >= '3.12'" },
     { name = "supabase", marker = "python_full_version >= '3.12'" },
-    { name = "tenacity", marker = "python_full_version >= '3.12'" },
+    { name = "tenacity", version = "9.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "toml", marker = "python_full_version >= '3.12'" },
     { name = "typer", marker = "python_full_version >= '3.12'" },
     { name = "uvicorn", version = "0.54.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -974,8 +1038,8 @@ name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "certifi", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway'" },
-    { name = "h11", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway'" },
+    { name = "certifi", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "h11", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
 wheels = [
@@ -987,8 +1051,8 @@ name = "httpcore2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version >= '3.12'" },
-    { name = "truststore", marker = "python_full_version >= '3.12'" },
+    { name = "h11", marker = "(python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.12' and sys_platform != 'emscripten') or (python_full_version >= '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.12' and extra == 'group-9-dungeness-gateway') or (python_full_version < '3.12' and extra == 'group-9-dungeness-google-sdk') or (python_full_version < '3.12' and extra != 'group-9-dungeness-harbor')" },
+    { name = "truststore", marker = "(python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.12' and sys_platform != 'emscripten') or (python_full_version >= '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.12' and extra == 'group-9-dungeness-gateway') or (python_full_version < '3.12' and extra == 'group-9-dungeness-google-sdk') or (python_full_version < '3.12' and extra != 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/61/afa9d6b7452f9eca73f73d45324eb0bb52f098fd5e6049bf6b8263be9b4e/httpcore2-2.16.0.tar.gz", hash = "sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643", size = 69886, upload-time = "2026-10-21T07:09:45.31Z" }
 wheels = [
@@ -1000,12 +1064,12 @@ name = "httpx"
 version = "0.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway'" },
-    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
-    { name = "certifi", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway'" },
-    { name = "httpcore", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway'" },
-    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway'" },
-    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "certifi", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpcore", marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [
@@ -1022,12 +1086,14 @@ name = "httpx2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform != 'emscripten'" },
-    { name = "httpcore2", marker = "python_full_version >= '3.12' and sys_platform != 'emscripten'" },
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'emscripten' and extra == 'group-9-dungeness-gateway') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway') or (sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpcore2", marker = "(python_full_version >= '3.12' and sys_platform != 'emscripten') or (sys_platform != 'emscripten' and extra == 'group-9-dungeness-gateway') or (sys_platform != 'emscripten' and extra == 'group-9-dungeness-google-sdk') or (sys_platform != 'emscripten' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
     { name = "httpx2-jsfetch", marker = "python_full_version >= '3.12' and sys_platform == 'emscripten'" },
-    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "truststore", marker = "python_full_version >= '3.12' and sys_platform != 'emscripten'" },
-    { name = "typing-extensions", marker = "python_full_version == '3.12.*'" },
+    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway') or (extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "truststore", marker = "(python_full_version >= '3.12' and sys_platform != 'emscripten') or (sys_platform != 'emscripten' and extra == 'group-9-dungeness-gateway') or (sys_platform != 'emscripten' and extra == 'group-9-dungeness-google-sdk') or (sys_platform != 'emscripten' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "typing-extensions", marker = "python_full_version == '3.12.*' or (python_full_version < '3.12' and extra == 'group-9-dungeness-gateway') or (python_full_version < '3.12' and extra == 'group-9-dungeness-google-sdk') or (python_full_version < '3.12' and extra != 'group-9-dungeness-harbor') or (python_full_version >= '3.13' and extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.13' and extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/43/73/5ca2cedf5e4e50423d1c258877865a6b62793633b561c58499f8aeb33b7e/httpx2-2.16.0.tar.gz", hash = "sha256:0d54c98128e8f2ff7fbbde0fca8c359e5f032edeaaaac443cdb7f31f685bcd7f", size = 103116, upload-time = "2026-10-21T07:09:46.348Z" }
 wheels = [
@@ -1076,6 +1142,11 @@ wheels = [
 name = "idna"
 version = "3.18"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/cd/63/9496c57188a2ee585e0f1db071d75089a11e98aa86eb99d9d7618fc1edce/idna-3.18.tar.gz", hash = "sha256:ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848", size = 196711, upload-time = "2026-06-02T14:34:07.794Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/5e/d4e9f1a599fb8e573b7b87160658329fbf28d19eac2718f51fc3def3aa5a/idna-3.18-py3-none-any.whl", hash = "sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2", size = 65455, upload-time = "2026-06-02T14:34:06.319Z" },
@@ -1086,7 +1157,10 @@ name = "idna"
 version = "3.20"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
+    "python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.14' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f5/08/8eea9d4b8302028f3abb2c0813953f7aec26d33b7a8960ed760e65ff29fa/idna-3.20.tar.gz", hash = "sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44", size = 216463, upload-time = "2026-09-17T14:11:04.752Z" }
 wheels = [
@@ -1651,7 +1725,7 @@ version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deprecation", marker = "python_full_version >= '3.12'" },
-    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
     { name = "pydantic", marker = "python_full_version >= '3.12'" },
     { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
@@ -1789,6 +1863,27 @@ wheels = [
 ]
 
 [[package]]
+name = "pyasn1"
+version = "0.6.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/7e/3c0da41061a2021cac7cd524fd57092adbe5b515e8bf9005702e366802e2/pyasn1-0.6.5.tar.gz", hash = "sha256:6b11616a6bcf3a40e635f082bb232fa57b5e0dd7f517bd7ddd69ec3794508a47", size = 155152, upload-time = "2026-10-27T06:32:49.125Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/1f/3eefd5c84c35cae44549ce1c7f7e58f7945b34f5a6bce07a135438522073/pyasn1-0.6.5-py3-none-any.whl", hash = "sha256:4017b0fce125096b8573b39c989fdb1a4b19cf761e683398184550fea0e66587", size = 84807, upload-time = "2026-10-27T06:32:48.045Z" },
+]
+
+[[package]]
+name = "pyasn1-modules"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyasn1" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.11"
 source = { registry = "https://pypi.org/simple" }
@@ -1802,10 +1897,10 @@ name = "pydantic"
 version = "2.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "annotated-types", marker = "python_full_version >= '3.12'" },
-    { name = "pydantic-core", marker = "python_full_version >= '3.12'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
-    { name = "typing-inspection", marker = "python_full_version >= '3.12'" },
+    { name = "annotated-types", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "pydantic-core", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "typing-inspection", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7c/0b/8e10b2e693af8ec54346a14caf36221334775975a747c9ceaa3f8371d96d/pydantic-2.14.1.tar.gz", hash = "sha256:94f478203dd03404682a1ada216965651dd74b1d2d5ffd62e00e0837caab5c26", size = 900362, upload-time = "2026-10-11T18:37:55.396Z" }
 wheels = [
@@ -1817,7 +1912,7 @@ name = "pydantic-core"
 version = "2.50.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a6/24/af4ec4be49fbc810f35b0bdcacc3d433b56bbfa469fd3bfd4ae116cd9bf1/pydantic_core-2.50.1.tar.gz", hash = "sha256:e50d7b94baac6c7d09927fa5ca5800a0c7ee5015c7fcff65beb3a1931b5a6e09", size = 513515, upload-time = "2026-10-11T18:35:44.82Z" }
 wheels = [
@@ -2185,10 +2280,11 @@ name = "requests"
 version = "2.34.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "certifi", marker = "python_full_version >= '3.12'" },
-    { name = "charset-normalizer", marker = "python_full_version >= '3.12'" },
-    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "urllib3", marker = "python_full_version >= '3.12'" },
+    { name = "certifi", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "charset-normalizer", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
+    { name = "idna", version = "3.18", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "idna", version = "3.20", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-9-dungeness-gateway') or (extra != 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-google-sdk') or (extra != 'group-9-dungeness-gateway' and extra != 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "urllib3", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed", size = 142856, upload-time = "2026-05-14T19:25:27.735Z" }
 wheels = [
@@ -2388,9 +2484,9 @@ name = "starlette"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway'" },
-    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
-    { name = "typing-extensions", marker = "(python_full_version < '3.12' and extra == 'group-9-dungeness-gateway') or (python_full_version == '3.12.*' and extra == 'group-9-dungeness-gateway') or (python_full_version == '3.12.*' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.13' and extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-9-dungeness-gateway' or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.12' and extra == 'group-9-dungeness-gateway') or (python_full_version == '3.12.*' and extra == 'group-9-dungeness-gateway') or (python_full_version == '3.12.*' and extra == 'group-9-dungeness-harbor') or (python_full_version < '3.12' and extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.13' and extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (python_full_version >= '3.13' and extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ad/eb/4e197bf26b023abafc5e9043ec8710d7de0fcb032d0969045236d72aa0b1/starlette-1.9.0.tar.gz", hash = "sha256:3d931de246ed870e35ce605974440816ef895e592f255d1396cfdf191d4c4318", size = 2732466, upload-time = "2026-10-18T15:50:33.189Z" }
 wheels = [
@@ -2403,7 +2499,7 @@ version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deprecation", marker = "python_full_version >= '3.12'" },
-    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
     { name = "pydantic", marker = "python_full_version >= '3.12'" },
     { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
@@ -2444,9 +2540,9 @@ name = "supabase-auth"
 version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
     { name = "pydantic", marker = "python_full_version >= '3.12'" },
-    { name = "pyjwt", extra = ["crypto"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "pyjwt", extra = ["crypto"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/22/9b/a6093da7497561900a1102958a7d02d694441704ea4bc89d0f87a3229a33/supabase_auth-2.33.0.tar.gz", hash = "sha256:832d3097bad72cf5bf70b55ab776385f8bad2c17a9c37b858e8bb7a6abe7c4a8", size = 39316, upload-time = "2026-10-15T19:14:25.522Z" }
 wheels = [
@@ -2458,7 +2554,7 @@ name = "supabase-functions"
 version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor')" },
+    { name = "httpx", extra = ["http2"], marker = "(python_full_version >= '3.12' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-gateway' and extra == 'group-9-dungeness-harbor') or (extra == 'group-9-dungeness-google-sdk' and extra == 'group-9-dungeness-harbor')" },
     { name = "strenum", marker = "python_full_version >= '3.12'" },
     { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
@@ -2469,8 +2565,25 @@ wheels = [
 
 [[package]]
 name = "tenacity"
+version = "9.1.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
+]
+
+[[package]]
+name = "tenacity"
 version = "9.2.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/82/9e/497c1c8ebe5a5b5d1d4a7511aea22c0bb1a97e3170d98abdef0e1b34265a/tenacity-9.2.1.tar.gz", hash = "sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839", size = 58261, upload-time = "2026-10-07T12:13:01.633Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/26/1ff2b0721ac66a3ec5b1402b333110b352ab0a8724052ac279a7b82d40c4/tenacity-9.2.1-py3-none-any.whl", hash = "sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e", size = 32310, upload-time = "2026-10-07T12:13:00.102Z" },
@@ -2630,7 +2743,7 @@ name = "typing-inspection"
 version = "0.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12' or extra == 'group-9-dungeness-gateway' or extra == 'group-9-dungeness-google-sdk' or extra != 'group-9-dungeness-harbor'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
@@ -2650,6 +2763,11 @@ wheels = [
 name = "uvicorn"
 version = "0.35.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+]
 dependencies = [
     { name = "click", version = "8.4.2", source = { registry = "https://pypi.org/simple" } },
     { name = "h11" },

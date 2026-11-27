@@ -20,11 +20,12 @@ def main() -> int:
     args = parser.parse_args()
     if args.harbor_only:
         from harbor.environments.base import ExecResult  # noqa: F401
+        print("Checking Harbor adapter contract", flush=True)
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(ROOT / "tests")
         return subprocess.run(
-            [sys.executable, "-m", "unittest",
-             "test_command_harness.CommandHarnessTests.test_adapter_uses_real_harbor_exec_result_contract"],
+            [sys.executable, "-m", "unittest", "-k", "test_adapter_",
+             "test_command_harness.CommandHarnessTests"],
             cwd=ROOT, env=environment,
         ).returncode
 

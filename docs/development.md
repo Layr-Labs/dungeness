@@ -14,8 +14,8 @@ not start Docker or call model providers. It checks that the gateway container's
 requirements match the pinned development requirements. Change both declarations
 and regenerate `uv.lock` when deliberately updating gateway dependencies.
 
-The core suite skips one Harbor adapter test when Harbor is absent. Run that
-contract separately on Python 3.12:
+The core suite skips the Harbor adapter tests when Harbor is absent. Run them
+separately on Python 3.12:
 
 ```sh
 uv run --isolated --locked --python 3.12 --group harbor python script/check.py --harbor-only
