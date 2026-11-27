@@ -26,6 +26,26 @@ the pinned Harbor needs a different Uvicorn version than the gateway. They run
 in separate environments in production as well. The Harbor check fails if its
 dependency is unavailable; it does not silently skip. CI runs both commands.
 
+When `UV_OFFLINE=1` is set and the checkout contains `uv.lock`,
+`dungeness run` launches Harbor with the locked `harbor` dependency group.
+With network access and `UV_OFFLINE` unset, warm the cache once from the
+repository root using the Python version and cache directory for the offline run.
+
+```sh
+uv run --isolated --locked --python 3.12 --group harbor harbor --version
+```
+
+An earlier online run through `uvx` can leave different dependency versions
+in the cache.
+
+This warms the cache without changing the checkout's `.venv`. The CLI's
+shebang resolves script dependencies using package index metadata, which may
+be absent from the offline cache. Start offline runs with the project lock:
+
+```sh
+UV_OFFLINE=1 uv run --isolated --locked --python 3.12 python dungeness run …
+```
+
 This is currently a source-checkout runtime. The project manifest does not
 provide a wheel or console entrypoint: installed assets and workspace paths
 must be separated before claiming that packaging contract.

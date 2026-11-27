@@ -55,7 +55,7 @@ from dungeness.records import (
 from dungeness.run_options import resolve_web_access, reject_evaluation_strategy
 from dungeness.execution.harbor import (
     HARBOR_VERSION, LITELLM_VERSION, harbor_result_outcome,
-    validate_command_job, harbor_launch_environment,
+    validate_command_job, harbor_launch_environment, use_offline_lock,
 )
 
 from dungeness.execution import environments
@@ -1922,9 +1922,9 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def build_command(args: argparse.Namespace, run_id: str) -> list[str]:
+    interpreter = [sys.executable] if use_offline_lock(REPO_ROOT, os.environ) else ["uv", "run"]
     command = [
-        "uv",
-        "run",
+        *interpreter,
         str(BUILD_SCRIPT.relative_to(REPO_ROOT)),
         args.task,
         "--task-namespace",
